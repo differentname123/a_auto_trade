@@ -40,7 +40,9 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
 
 
     # k线 显示回测结果
-    show_image(data, results_df)
+    # show_image(data, results_df)
+    show_k(data, results_df)
+
 
 def back_one(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest):
     """
@@ -116,12 +118,28 @@ def back_all_stock(file_path, output_file_path, threshold_day=5, gen_signal_func
 
     return result_df
 
+def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest):
+    data = load_data(file_path)
+
+    # 计算指标
+    get_indicators(data)
+
+    # 产生买入信号
+    gen_signal_func(data)
+
+    # 获取回测结果
+    results_df = backtest_func(data)
+    show_k(data, results_df)
+
 if __name__ == "__main__":
     # # 策略1 macd新低买入
-    strategy('../InfoCollector/stock_data_exclude/daily/000682_东方电子.csv',gen_signal_func=gen_buy_signal_seven, backtest_func=backtest_strategy_highest)
+    strategy('../InfoCollector/daily_data_exclude_new/东方电子_000682.txt',gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)
 
     # 回测所有数据
-    # back_all_stock('../InfoCollector/stock_data_exclude/daily', '../InfoCollector/back', gen_signal_func=gen_buy_signal_seven,backtest_func=backtest_strategy_highest_fix)
+    # back_all_stock('../InfoCollector/daily_data_exclude_new/', '../InfoCollector/back', gen_signal_func=gen_buy_signal_seven,backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol
     # get_buy_signal()
+
+    # 显示相应的图像
+    # show_image('../InfoCollector/daily_data_exclude_new/合力科技_603917.txt')

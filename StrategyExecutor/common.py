@@ -19,6 +19,28 @@ from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
 from plotly.subplots import make_subplots
 
+# -- coding: utf-8 --
+""":authors:
+    zhuxiaohu
+:create_date:
+    2023/10/19 18:14
+:last_date:
+    2023/10/19 18:14
+:description:
+
+"""
+import datetime
+import math
+import os
+import sys
+import plotly.graph_objects as go
+import numpy as np
+import pandas as pd
+import talib
+from matplotlib import pyplot as plt
+from matplotlib.widgets import Slider
+from plotly.subplots import make_subplots
+
 
 def parse_filename(file_path):
     # 提取文件名（不包括扩展名）
@@ -84,7 +106,7 @@ def get_indicators(data):
                                                                                       slowk_period=3, slowd_period=3)
 
     # 计算Williams %R
-    data['Williams_%R'] = talib.WILLR(data['最高'], data['最低'], data['收盘'], timeperiod=14)
+    data['WR10'] = abs(talib.WILLR(data['最高'], data['最低'], data['收盘'], timeperiod=5))
 
     # 计算ATR
     data['ATR'] = talib.ATR(data['最高'], data['最低'], data['收盘'], timeperiod=14)
@@ -109,6 +131,19 @@ def get_indicators(data):
 
     # 计算20日最小macd
     data['BAR_20d_low'] = data['BAR'].rolling(window=20).min()
+
+    # 使用argsort来获取滚动窗口中最小值的索引
+    min_idx = data['BAR'].rolling(window=20).apply(lambda x: np.argsort(x)[0] if len(x) == 20 else np.nan, raw=True)
+
+    # 根据索引来计算全局的位置
+    min_idx_global = min_idx + np.arange(len(data)) - 19
+
+    # 先赋值NaN
+    data['BAR_20d_low_price'] = np.nan
+
+    # 更新滚动窗口中最小BAR对应的收盘价
+    valid_indices = min_idx_global.dropna().astype(int)
+    data.loc[valid_indices.index, 'BAR_20d_low_price'] = data.loc[valid_indices, '收盘'].values
 
     # 删除NaN值
     data.dropna(inplace=True)
@@ -246,6 +281,80 @@ def backtest_strategy_highest_continue(data):
 
     return results_df
 
+def capture_target_data(data):
+    """
+    捕捉目标日期
+    :param data:
+    :return:
+    """
+    # Calculate rolling 10-day high
+    data['10日最高'] = data['最高'].rolling(window=10).max().shift(1)  # Shifted to exclude today's high
+
+    # Calculate drop percentage from the 10-day high and round to 2 decimal places
+    data['跌幅'] = ((data['10日最高'] - data['收盘']) / data['10日最高'] * 100).round(2)
+
+    # Identify days before a rise:
+    # Where the stock drops more than 10% from the 10-day high,
+    # it doesn't rise on that day (close <= open), and then rises the next day
+    conditions = (data['跌幅'] > 10) & (data['收盘'] <= data['开盘']) & (data['收盘'].shift(-1) > data['开盘'].shift(-1))
+    data['标记'] = np.where(conditions, 1, 0)
+
+    # Drop the intermediate columns used for calculations
+    data = data.drop(columns=['10日最高', '跌幅'])
+
+    return data
+
+def backtest_strategy_highest_buy_all(data):
+    """
+    每个买入信号都入手，然后找到相应的交易日
+    为data进行回测，买入条件为当有Buy_Signal时，卖出条件为当最高股价高于买入价时就卖出
+    ，返回买入卖出的时间，价格，收益，持有时间
+    :param data:
+    :return:
+    """
+
+    results = []  # 存储回测结果
+    name = data['名称'].iloc[0]
+    symbol = data['代码'].iloc[0]
+    total_profit = 0
+
+    i = 0
+    while i < len(data):
+        if data['Buy_Signal'].iloc[i] == 1:
+            buy_price = data['收盘'].iloc[i]
+            buy_date = data['日期'].iloc[i]
+            buy_index = i
+
+            # 找到满足卖出条件的日期
+            j = i + 1
+            while j < len(data) and data['最高'].iloc[j] <= buy_price:
+                j += 1
+
+            # 如果找到了满足卖出条件的日期
+            if j < len(data):
+                sell_price = data['最高'].iloc[j]
+            else:
+                # 如果没有找到，强制在最后一天卖出
+                j = len(data) - 1
+                sell_price = data['收盘'].iloc[j]
+
+            sell_date = data['日期'].iloc[j]
+            profit = (sell_price - buy_price) * 100  # 每次买入100股
+            total_profit += profit
+            growth_rate = ((sell_price - buy_price) / buy_price) * 100
+            days_held = j - buy_index
+            results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, growth_rate,
+                            days_held])
+
+        i += 1
+
+    results_df = pd.DataFrame(results,
+                              columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
+                                       'Total_Profit', 'Growth Rate (%)',
+                                       'Days Held'])
+
+    return results_df
+
 
 def backtest_strategy_highest_fix(data):
     """
@@ -313,9 +422,6 @@ def backtest_strategy_highest_fix(data):
 
     return results_df
 
-
-
-
 def backtest_strategy_highest(data, initial_capital=100000):
     """
     为data进行回测，买入条件为当有Buy_Signal时，且上一只股票已售出的情况，卖出条件为当最高股价高于买入价时就卖出，如果最后的时间还没卖出，那么强制卖出
@@ -335,13 +441,6 @@ def backtest_strategy_highest(data, initial_capital=100000):
     name = data['名称'].iloc[0]
     symbol = data['代码'].iloc[0]
     for i in range(1, len(data)):
-        # 将data['日期'].iloc[i]转换为字符串
-        str_time = str(data['日期'].iloc[i])
-        # 判断str_time是否包含'1999-07-28'
-        if '1999-07-28' in str_time:
-            print('1999-07-28')
-        if '1999-07-27' in str_time:
-            print('1999-07-27')
         if data['Buy_Signal'].iloc[i] == 1 and capital >= data['收盘'].iloc[i] and position == 0:
             buy_price = data['收盘'].iloc[i]
             buy_date = data['日期'].iloc[i]
@@ -404,9 +503,8 @@ def gen_buy_signal_one(data, down_rate=0.1):
     # 并且股价较15日最高下降超down_rate，
     # 昨日涨跌幅小于0，并且今日股价下跌
     # 昨日跌幅小于跌停的10%
-    # 昨日未跌停
     # 尝试：
-    # 1.增加对跌幅的限制，有些是红柱，但是跌幅超过5
+    # 1.增加对跌幅的限制，有些是红柱，但是跌幅超过5 2.股价不超过10
     data['Buy_Signal'] = (data['BAR'].rolling(window=20).min() == data['BAR']) & \
                          (data['BAR'].shift(1) < 0) & \
                          (data['收盘'] > data['开盘']) & \
@@ -553,6 +651,129 @@ def gen_buy_signal_mix_one_seven(data):
                          (data['换手率'] > change_rate) & \
                          ((data['成交量'].shift(1) - data['成交量']) / data['成交量'] > deal_number_rate)
 
+def gen_buy_signal_eight(data):
+    """
+    捕捉低位且前一日macd创新低，今日macd增加
+    示例:
+        603318 20230321
+    默认换手率都得高于0.5
+    :param data:
+    :return:
+    """
+    change_rate = 0.5
+    max_down_rate = 0.9
+    max_down_value = data['Max_rate'].iloc[-1]  # 最大跌幅
+    macd_rate= 0.9
+    down_rate = 0.1
+    # 策略一
+    # 昨日macd创20日新低（3% 误差），且昨日股价要小于macd新低的股价
+    # 今天是红柱,
+    # 股价是低位的（小于10日均线 同时小于40日均线）,
+    # 并且股价较15日最高下降超down_rate，
+    # 昨日涨跌幅小于0
+    # 昨日跌幅小于跌停的10%
+    # 昨日未跌停
+    data['Buy_Signal'] = (data['BAR'].rolling(window=20).min() * macd_rate >= data['BAR'].shift(1)) & \
+                   (data['BAR'].shift(1) < 0) & \
+                   (data['收盘'] < data['SMA_10']) & \
+                   (data['收盘'] < data['SMA']) & \
+                   (data['换手率'] > change_rate) & \
+                   ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
+
+def gen_buy_signal_nine(data):
+    """
+    捕捉那种低位，且macd没怎么减少，但是股价一直下跌的情况
+    当实体变小就买入
+    默认换手率都得高于0.5
+    :param data:
+    :return:
+    """
+    change_rate = 0.5
+    max_down_rate = 0.9
+    max_down_value = data['Max_rate'].iloc[-1]  # 最大跌幅
+    macd_rate= 0.9
+    down_rate = 0.1
+    # 策略一
+    # 昨日macd创20日新低（3% 误差），且昨日股价要小于macd新低的股价
+    # 今天是红柱,
+    # 股价是低位的（小于10日均线 同时小于40日均线）,
+    # 并且股价较15日最高下降超down_rate，
+    # 昨日涨跌幅小于0
+    # 昨日跌幅小于跌停的10%
+    # 昨日未跌停
+    buy_signal_1 = (data['BAR'].rolling(window=20).min() * macd_rate >= data['BAR'].shift(1)) & \
+                   (data['BAR'].shift(1) < 0) & \
+                   (data['收盘'] <= data['BAR_20d_low_price']) & \
+                   (data['收盘'] > data['开盘']) & \
+                   (data['收盘'] < data['SMA_10']) & \
+                   (data['收盘'] < data['SMA']) & \
+                   (data['涨跌幅'].shift(1) <= 0) & \
+                   (data['涨跌幅'] <= 0) & \
+                   (data['涨跌幅'].shift(1) >= -max_down_rate * max_down_value) & \
+                   (data['换手率'] > change_rate) & \
+                   ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
+
+    # buy_signal_2 = (data['BAR'].rolling(window=20).min() * macd_rate >= data['BAR']) & \
+    #                (data['收盘'] <= data['BAR_20d_low_price']) & \
+    #                (data['BAR'] < 0) & \
+    #                (data['收盘'] < data['SMA_10']) & \
+    #                (abs(data['收盘'] - data['开盘']) < abs(data['收盘'].shift(1) - data['开盘'].shift(1))) & \
+    #                (data['涨跌幅'].shift(1) <= 0) & \
+    #                (data['涨跌幅'].shift(1) >= -max_down_rate * max_down_value) & \
+    #                (data['换手率'] > change_rate) & \
+    #                ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
+
+    # 结合两个买入信号
+    data['Buy_Signal'] = buy_signal_1
+
+def gen_buy_signal_ten(data):
+    """
+    捕捉今天最高价小于昨天收盘价，wr大于95，今日最低价大于等于昨日最低价
+    示例:
+
+    默认换手率都得高于0.5
+    :param data:
+    :return:
+    """
+    change_rate = 0.5
+    wr_threshold = 95
+    down_rate = 0.1
+    # 今天最高价小于昨天收盘价
+    # wr大于95
+    # 今日最低价大于等于昨日最低价
+    data['Buy_Signal'] =(data['收盘'].shift(1) >= data['最高']) & \
+                   (data['WR10'] >= wr_threshold) & \
+                   (data['换手率'] > change_rate) & \
+                   ((data['最低'] >= data['最低'].shift(1)))
+
+def gen_buy_signal_eleven(data):
+    """
+    捕捉成交量减半的
+    示例:
+
+    默认换手率都得高于0.5
+    :param data:
+    :return:
+    """
+    deal_number_rate = 1
+    # 今天最高价小于昨天收盘价
+    # wr大于95
+    # 今日最低价大于等于昨日最低价
+    data['Buy_Signal'] =(((data['成交量'].shift(1) + data['成交量'].shift(2)) / 2 - data['成交量']) / data['成交量'] > deal_number_rate)
+    # data['Buy_Signal'] = ((data['成交量'].shift(1) - data['成交量']) / data[
+    #     '成交量'] > deal_number_rate)
+
+def gen_buy_signal_week(data):
+    """
+    旨在捕捉下跌的反弹
+    步骤:
+        先找出下跌反弹的日期，然后进行归纳总结特征
+        整理出相应的规则，然后进行回测
+    :param data:
+    :return:
+    """
+    pass
+
 
 def show_image(data, results_df, threshold=10):
     """
@@ -634,3 +855,104 @@ def find_buy_signal(file_path, target_time=None):
                     print('\n')
             except Exception as e:
                 print(fullname)
+
+
+def calculate_change(data):
+    """Calculate the percentage change in closing price."""
+    data['涨跌幅度'] = data['收盘'].pct_change() * 100
+    return data
+
+
+def create_hovertext(data):
+    """Generate the hover text for the K-line chart."""
+    hovertext = data['日期'] + '<br>开盘: ' + data['开盘'].astype(str) + \
+                '<br>收盘: ' + data['收盘'].astype(str) + '<br>最高: ' + data['最高'].astype(str) + \
+                '<br>最低: ' + data['最低'].astype(str) + '<br>涨跌幅度: ' + data['涨跌幅'].astype(str) + "%" + \
+                '<br>成交量: ' + data['成交量'].astype(str)
+    return hovertext
+
+
+def highlight_increase_days(fig, data):
+    """Highlight the days before the rise in the K-line chart."""
+    indices = data[data['Buy_Signal'] == 1].index
+    for idx in indices:
+        fig.add_annotation(
+            x=data.loc[idx, '日期'],
+            y=data.loc[idx, '最低'],
+            text="↑",
+            showarrow=True,
+            arrowhead=4,
+            ax=0,
+            ay=40,
+            bgcolor="red",
+            arrowcolor="red"
+        )
+    return fig
+
+
+def show_k(data, results_df, threshold=10):
+    # Convert the date column to string
+    data['日期'] = data['日期'].astype(str)
+    results_df['Buy Date'] = results_df['Buy Date'].astype(str)
+    results_df['Sell Date'] = results_df['Sell Date'].astype(str)
+
+    # Calculate the change in closing price
+    data = calculate_change(data)
+
+    # Generate the hover text for the K-line chart
+    hovertext = create_hovertext(data)
+
+    # Create the K-line chart
+    fig = go.Figure(data=[go.Candlestick(x=data['日期'],
+                                         open=data['开盘'],
+                                         high=data['最高'],
+                                         low=data['最低'],
+                                         close=data['收盘'],
+                                         hovertext=hovertext,
+                                         hoverinfo="text",
+                                         increasing_line_color='red',
+                                         decreasing_line_color='green'
+                                         )])
+
+    # Highlight the days before the rise
+    fig = highlight_increase_days(fig, data)
+
+    results_df = results_df[results_df['Days Held'] > 0]
+    # Add buy and sell markers
+    buy_dates = results_df['Buy Date'].tolist()
+    buy_prices = results_df['Buy Price'].tolist()
+    sell_dates = results_df['Sell Date'].tolist()
+    sell_prices = results_df['Sell Price'].tolist()
+
+    size_values = np.clip(results_df['Days Held'], 10, 100)  # 将大小限制在10到100之间
+    hover_text_buy = ['Buy Date: {} | Hold: {} days'.format(buy_date, days) for buy_date, days in
+                      zip(buy_dates, results_df['Days Held'])]
+
+    hover_text_sell = ['Sell Date: {} after holding for {} days'.format(sell_date, days) for sell_date, days in
+                       zip(sell_dates, results_df['Days Held'])]
+
+    fig.add_trace(go.Scatter(x=buy_dates, y=buy_prices, mode='markers', name='Buy Signal',
+                             marker=dict(color='green', size=size_values, sizemode='diameter', symbol='triangle-up'),
+                             text=hover_text_buy, hoverinfo='text+y+x'))
+    fig.add_trace(go.Scatter(x=sell_dates, y=sell_prices, mode='markers', name='Sell Signal',
+                             marker=dict(color='red', size=size_values, sizemode='diameter', symbol='triangle-down'),
+                             text=hover_text_sell, hoverinfo='text+y+x'))
+
+    start_idx = max(0, len(data) - 40)
+    end_idx = len(data) - 1
+
+    fig.update_layout(title='K线图',
+                      xaxis_title='日期',
+                      yaxis_title='价格',
+                      xaxis_rangeslider_visible=True,
+                      xaxis_type='category',
+                      yaxis_fixedrange=False,
+                      bargap=0.02,
+                      xaxis_range=[start_idx, end_idx])
+
+    fig.update_layout(xaxis_rangeslider_visible=True)
+    fig['layout']['xaxis']['rangeslider']['yaxis']['rangemode'] = 'auto'
+    fig['layout']['xaxis']['rangeslider']['thickness'] = 0.05
+
+    # Show the plot
+    fig.show()
