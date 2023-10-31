@@ -1,0 +1,21 @@
+timestamp: 20231031224602
+trade_count: 12089655
+total_profit: 247824493.0
+size of result_df: 1829916
+ratio: 0.15136213564406925
+average days_held: 9.74146127412238
+average profit: 20.498888760680103
+Source code for 'gen_signal_func':
+def gen_true(data):
+    """
+    都是买入信号
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = True
+
+
+
+
+
+

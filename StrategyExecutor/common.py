@@ -52,6 +52,7 @@ def parse_filename(file_path):
 
     return stock_name, stock_code
 
+
 def load_data(file_path):
     """
     加载数据
@@ -60,6 +61,9 @@ def load_data(file_path):
     """
     data = pd.read_csv(file_path)
     name, code = parse_filename(file_path)
+    # 如果 '时间' 存在于数据的列中，将其重命名为 '日期'
+    if '时间' in data.columns:
+        data = data.rename(columns={'时间': '日期'})
     data['日期'] = pd.to_datetime(data['日期'])
     data['名称'] = name
     data['代码'] = code
@@ -67,16 +71,108 @@ def load_data(file_path):
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     return data
 
+def T_indicators(data):
+    """
+    操盘做T相关指标
+    :param data:
+    :return:
+    """
 
-def get_indicators(data):
+    # 计算28日内最低价的最低值和28日内最高价的最高值
+    min_low_28d = data['收盘'].rolling(window=28).min()
+    max_high_28d = data['收盘'].rolling(window=28).max()
+
+    # 计算趋势的第一部分
+    trend_part = ((data['收盘'] - min_low_28d) / (max_high_28d - min_low_28d)) * 100
+
+    # 计算2日[1日权重]移动平均的2日[1日权重]移动平均
+    sma_2d_2 = trend_part.rolling(window=2).mean().rolling(window=2).mean()
+
+    # 计算HXJZ和BZTD
+    data['HXJZ'] = ((2 * data['收盘'] + data['最高'] + data['最低']) / 4).rolling(window=5).mean()
+    data['BZTD'] = data['HXJZ'] * 89 / 100
+
+    # 必涨条件
+    data['必涨'] = (data['最低'] > data['BZTD'].shift(1)) & (data['最低'].shift(1) <= data['BZTD'].shift(1))
+
+    # 计算未来哪一天的最高价会高于今天的收盘价
+    data['Days_Until_Higher'] = data.shape[0]  # 初始化为最大值
+    for i in range(len(data)):
+        higher_prices = data.loc[i + 1:, '最高'] > data.loc[i, '收盘']
+        if not higher_prices.empty:
+            higher_days = higher_prices.idxmax()
+            if higher_days:
+                data.loc[i, 'Days_Until_Higher'] = higher_days - i
+
+    # 其他指标计算
+    data['Trend'] = sma_2d_2
+    data['Trend_Rate'] = (data['Trend'].shift(1) - data['Trend']) / data['Trend']
+    data['Q'] = (3 * data['收盘'] + data['最低'] + data['开盘'] + data['最高']) / 6
+    data['操盘线'] = (26 * data['Q'] + data['Q'].shift(np.arange(1, 27)).mul(np.arange(25, -1, -1)).sum(axis=1)) / 351
+
+    return data
+
+def T_indicators_optimized(data):
+    # 计算28日内最低价的最低值和28日内最高价的最高值
+    min_low_28d = data['收盘'].rolling(window=28).min()
+    max_high_28d = data['收盘'].rolling(window=28).max()
+
+    # 计算趋势的第一部分
+    trend_part = ((data['收盘'] - min_low_28d) / (max_high_28d - min_low_28d)) * 100
+
+    # 计算2日[1日权重]移动平均的2日[1日权重]移动平均
+    sma_2d_1 = trend_part.rolling(window=2).mean()
+    sma_2d_2 = sma_2d_1.rolling(window=2).mean()
+
+    # 计算HXJZ
+    data['HXJZ'] = ((2 * data['收盘'] + data['最高'] + data['最低']) / 4).rolling(window=5).mean()
+
+    # 计算BZTD
+    data['BZTD'] = data['HXJZ'] * 89 / 100
+
+    # 检查低点穿越BZTD的条件
+    data['必涨'] = (data['最低'].shift(1) <= data['BZTD'].shift(1)) & (data['最低'] > data['BZTD'])
+
+    # 将结果添加到data数据框中
+    data['Trend'] = sma_2d_2
+    data['Trend_Rate'] = (data['Trend'].shift(1) - data['Trend']) / data['Trend']
+
+    # 计算Q值
+    data['Q'] = (3 * data['收盘'] + data['最低'] + data['开盘'] + data['最高']) / 6
+
+    # 使用滚动窗口和lambda函数来计算操盘线
+    data['操盘线'] = data['Q'].rolling(window=27).apply(lambda x: (26 * x[-1] + sum([(26 - j) * x[j] for j in range(26)])) / 351, raw=True)
+
+    return data
+
+def get_indicators(data, is_debug=False):
     """
     为data计算各种指标
     :param data:
     :return:
     """
+    if is_debug:
+        # 初始化新的指标列
+        data['Days_Until_Higher'] = data.shape[0]  # 使用None作为默认值，表示未找到满足条件的日期
+
+        # 检查每一行，找出未来哪一天的最高价会高于今天的收盘价
+        for i in range(len(data)):
+            for j in range(i + 1, len(data)):
+                if data.loc[j, '最高'] > data.loc[i, '收盘']:
+                    data.loc[i, 'Days_Until_Higher'] = j - i  # 计算天数
+                    break  # 找到后就跳出内层循环
+
+    T_indicators_optimized(data)
+
     # 计算20日支撑位和压力位
     data['Support'] = data['收盘'].rolling(window=20).min()
     data['Resistance'] = data['收盘'].rolling(window=20).max()
+
+    # 计算到目前为止最低的收盘价
+    data['LL'] = data['收盘'].expanding().min()
+
+    # 计算到60天最低的收盘价
+    data['LL_60'] = data['收盘'].rolling(window=60).min()
 
     # 计算SMA和EMA
     data['SMA'] = talib.SMA(data['收盘'], timeperiod=40)
@@ -95,7 +191,8 @@ def get_indicators(data):
     data['VWAP'] = np.cumsum(data['成交量'] * data['收盘']) / np.cumsum(data['成交量'])
 
     # 计算Bollinger Bands
-    data['Bollinger_Upper'], data['Bollinger_Middle'], data['Bollinger_Lower'] = talib.BBANDS(data['收盘'], timeperiod=20)
+    data['Bollinger_Upper'], data['Bollinger_Middle'], data['Bollinger_Lower'] = talib.BBANDS(data['收盘'],
+                                                                                              timeperiod=20)
 
     # 计算Momentum
     data['Momentum'] = data['收盘'] - data['收盘'].shift(14)
@@ -145,8 +242,17 @@ def get_indicators(data):
     valid_indices = min_idx_global.dropna().astype(int)
     data.loc[valid_indices.index, 'BAR_20d_low_price'] = data.loc[valid_indices, '收盘'].values
 
-    # 删除NaN值
-    data.dropna(inplace=True)
+    # 计算boll下轨和收盘价的差值
+    data['Bollinger_Lower_cha'] = data['Bollinger_Lower'] - data['收盘']
+
+    # 计算macd相邻差值
+    data['macd_cha'] = data['BAR'] - data['BAR'].shift(1)
+    data['macd_cha_rate'] = data['涨跌幅'] / data['macd_cha']
+    data['macd_cha_shou_rate'] = (data['收盘'] - data['开盘']) / data['macd_cha']
+
+
+    # # 删除NaN值
+    # data.dropna(inplace=True)
 
 
 def backtest_strategy(data, initial_capital=100000):
@@ -281,6 +387,7 @@ def backtest_strategy_highest_continue(data):
 
     return results_df
 
+
 def capture_target_data(data):
     """
     捕捉目标日期
@@ -296,13 +403,15 @@ def capture_target_data(data):
     # Identify days before a rise:
     # Where the stock drops more than 10% from the 10-day high,
     # it doesn't rise on that day (close <= open), and then rises the next day
-    conditions = (data['跌幅'] > 10) & (data['收盘'] <= data['开盘']) & (data['收盘'].shift(-1) > data['开盘'].shift(-1))
+    conditions = (data['跌幅'] > 10) & (data['收盘'] <= data['开盘']) & (
+                data['收盘'].shift(-1) > data['开盘'].shift(-1))
     data['标记'] = np.where(conditions, 1, 0)
 
     # Drop the intermediate columns used for calculations
     data = data.drop(columns=['10日最高', '跌幅'])
 
     return data
+
 
 def backtest_strategy_highest_buy_all(data):
     """
@@ -337,21 +446,22 @@ def backtest_strategy_highest_buy_all(data):
                 # 如果没有找到，强制在最后一天卖出
                 j = len(data) - 1
                 sell_price = data['收盘'].iloc[j]
-
+            if buy_price == 0:
+                print(buy_price)
             sell_date = data['日期'].iloc[j]
             profit = (sell_price - buy_price) * 100  # 每次买入100股
             total_profit += profit
             growth_rate = ((sell_price - buy_price) / buy_price) * 100
             days_held = j - buy_index
             results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, growth_rate,
-                            days_held])
+                            days_held, i])
 
         i += 1
 
     results_df = pd.DataFrame(results,
                               columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
                                        'Total_Profit', 'Growth Rate (%)',
-                                       'Days Held'])
+                                       'Days Held','Buy_Index'])
 
     return results_df
 
@@ -381,7 +491,6 @@ def backtest_strategy_highest_fix(data):
         #     print('1999-07-28')
         # if '1999-07-27' in str_time:
         #     print('1999-07-27')
-
 
         if data['Buy_Signal'].iloc[i] == 1 and position == 0:
             buy_price = data['收盘'].iloc[i]
@@ -421,6 +530,7 @@ def backtest_strategy_highest_fix(data):
                                        'Days Held'])
 
     return results_df
+
 
 def backtest_strategy_highest(data, initial_capital=100000):
     """
@@ -516,69 +626,58 @@ def gen_buy_signal_one(data, down_rate=0.1):
                          (data['换手率'] > change_rate) & \
                          ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
 
-
-def gen_buy_signal_two(data):
-    """
-    为data生成相应的买入信号
-    默认换手率都得高于0.5
-    :param data:
-    :return:
-    """
-    change_rate = 0.5
-    # 示例情形：1.403729 20180209
-    # 策略二
-    # 今日macd创20日新低
-    # 今天股价有所增加,股价是低位的（小于10日均线）
-    # 并且股价较20日最高下降超20%，
-    # macd 减少值变小
-    # 待尝试:1.涨幅不应该大于3 2.这个涨幅较开盘价格来算会不会好一点 2.前一日不能涨
-    data['Buy_Signal'] = True
-
-
 def gen_buy_signal_three(data):
     """
-    为data生成相应的买入信号
-    默认换手率都得高于0.5
+    实体大于昨日实体 20%
+    今日是下跌
+    昨日也是下跌
     :param data:
     :return:
     """
-    change_rate = 0.5
-    # 策略三
-    # 昨日macd创20日新低，
-    # 今天macd有所增加,
-    # 股价是降低了的（小于10日均线）
-    # 回测记录：(东方电子 116833)
-    data['Buy_Signal'] = True
+    more_than_rate = 1.5
+    data['Buy_Signal'] = (abs(data['开盘'] - data['收盘']) > more_than_rate * abs(data['开盘'].shift(1) - data['收盘'].shift(1))) & \
+                         (data['涨跌幅'] < 0) & \
+                         (data['涨跌幅'].shift(1) < 0)
 
 
 def gen_buy_signal_four(data):
     """
-    为data生成相应的买入信号
-    默认换手率都得高于0.5
+    boll线3天内接近下轨，且今日阳线
     :param data:
     :return:
     """
     change_rate = 0.5
-    # 策略三
-    # 昨日macd创20日新低，
-    # 股价较20日最高价下跌25%
-    # 今日跌幅小于昨日跌幅
-    data['Buy_Signal'] = True
+    boll_windows = 3
+    # 近期boll突破下轨
+    # 今日收阳
+    # 昨日收阴
+    # 昨日下跌
+    # 昨日不跌停
+    data['Buy_Signal'] = (data['Bollinger_Lower_cha'].rolling(window=boll_windows).max() > 0) & \
+                         (data['收盘'] > data['开盘']) & \
+                         (data['涨跌幅'].shift(1) < 0 ) & \
+                         (data['收盘'].shift(1) <= data['开盘'].shift(1))
 
 
 def gen_buy_signal_five(data):
     """
-    为data生成相应的买入信号
+    macd创新低
+    boll突破下轨
     默认换手率都得高于0.5
     :param data:
     :return:
     """
     change_rate = 0.5
-    # 策略三
-    # 昨日macd创20日新低，
-    # 股价较20日最高价下跌25%
-    # 底部逗留连续3天(任意两天差异小于0.2%)
-    data['Buy_Signal'] = True
+    boll_windows = 3
+    macd_windows = 5
+
+    # macd创新低
+    # boll突破下轨
+    data['Buy_Signal'] = (data['Bollinger_Lower_cha'].rolling(window=boll_windows).max() > 0) & \
+                         (data['收盘'] > data['开盘']) & \
+                         (data['换手率'] > change_rate) & \
+                         (data['BAR'].rolling(window=macd_windows).min() == data['BAR'])
+
 
 
 def gen_buy_signal_six(data):
@@ -595,6 +694,7 @@ def gen_buy_signal_six(data):
     # 底部逗留连续3天(任意两天差异小于0.2%)
     data['Buy_Signal'] = True
 
+
 def gen_buy_signal_seven(data):
     """
     为data生成相应的买入信号
@@ -610,6 +710,7 @@ def gen_buy_signal_seven(data):
     data['Buy_Signal'] = (data['换手率'] > change_rate) & \
                          ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] < down_rate) & \
                          ((data['成交量'].shift(1) - data['成交量']) / data['成交量'] > deal_number_rate)
+
 
 def gen_buy_signal_mix_one_seven(data):
     """
@@ -651,6 +752,7 @@ def gen_buy_signal_mix_one_seven(data):
                          (data['换手率'] > change_rate) & \
                          ((data['成交量'].shift(1) - data['成交量']) / data['成交量'] > deal_number_rate)
 
+
 def gen_buy_signal_eight(data):
     """
     捕捉低位且前一日macd创新低，今日macd增加
@@ -663,10 +765,17 @@ def gen_buy_signal_eight(data):
     change_rate = 0.5
     max_down_rate = 0.9
     max_down_value = data['Max_rate'].iloc[-1]  # 最大跌幅
-    macd_rate= 0.9
+    macd_rate = 0.97
     down_rate = 0.1
-    # 策略一
-    # 昨日macd创20日新低（3% 误差），且昨日股价要小于macd新低的股价
+    # 策略八
+    # 昨日macd创20日新低（3% 误差）
+    # 今日macd增加
+    # 股价较10日最高价下跌超10%
+
+    # 待尝试:
+    # macd增加幅度小于20
+    # 考虑融合周数据
+    # 且昨日股价要小于macd新低的股价
     # 今天是红柱,
     # 股价是低位的（小于10日均线 同时小于40日均线）,
     # 并且股价较15日最高下降超down_rate，
@@ -674,11 +783,89 @@ def gen_buy_signal_eight(data):
     # 昨日跌幅小于跌停的10%
     # 昨日未跌停
     data['Buy_Signal'] = (data['BAR'].rolling(window=20).min() * macd_rate >= data['BAR'].shift(1)) & \
-                   (data['BAR'].shift(1) < 0) & \
-                   (data['收盘'] < data['SMA_10']) & \
-                   (data['收盘'] < data['SMA']) & \
-                   (data['换手率'] > change_rate) & \
-                   ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
+                         (data['换手率'] > change_rate) & \
+                         ((data['收盘'].rolling(window=10).max() - data['收盘']) / data['收盘'] > down_rate)
+
+
+def gen_buy_signal_weekly_eight(data):
+    """
+    产生周维度的买入信号
+    macd创20日新低
+
+    默认换手率都得高于0.5
+    :param data:
+    :return:
+    """
+    change_rate = 0.5
+    max_down_rate = 0.9
+    max_down_value = data['Max_rate'].iloc[-1]  # 最大跌幅
+    macd_rate = 0.97
+    down_rate = 0.1
+    shuairuo_rate = 1.2
+    min_shuairuo_macd = 0.01
+    # 策略八
+    # 今日macd创20日新低
+    # macd下降趋势减小 今天的减少量小于昨天的减少量
+
+    # 待尝试:
+    #
+
+    # data['Buy_Signal'] = (data['BAR'] <= 0) & \
+    #                       (data['BAR'].rolling(window=5).min() == data['BAR'])  & \
+    #                      (data['BAR'].rolling(window=5).max() < abs(data['BAR'])) & \
+    #                      ((data['BAR'] - data['BAR'].shift(1)) * shuairuo_rate > (data['BAR'].shift(1) - data['BAR'].shift(2))) & \
+    #                      (data['收盘'] < data['SMA'])
+
+    data['Buy_Signal'] = (data['BAR'] > 0) & \
+                         (data['BAR'].rolling(window=5).min() == data['BAR']) & \
+                         (data['涨跌幅'].shift(1) < 0) & \
+                         (data['收盘'] > data['SMA']) & \
+                         ((data['BAR'] - data['BAR'].shift(1)) * shuairuo_rate > (
+                                     data['BAR'].shift(1) - data['BAR'].shift(2))) & \
+                         (((data['BAR'] - data['BAR'].shift(1)) - (
+                                     data['BAR'].shift(1) - data['BAR'].shift(2))) >= min_shuairuo_macd)
+
+
+def mix_small_period_and_big_period_data(small_period_data, big_period_data):
+    """
+    综合daily_data和weekly_data的数据:
+        找到daily_data中Buy_Signal为true的记录，然后在weekly_data找到daily_data日期所对应的数据(相应daily_data日期往后5天内遇到的第一个weekly_data的日期就是相应的数据)，如果weekly_data的Buy_Signal不为True那么就将该daily_data的Buy_Signal设置为False
+    :param small_period_data: DataFrame with daily data. Expects a '日期' column with date values and a 'Buy_Signal' column with boolean values.
+    :param big_period_data: DataFrame with weekly data. Expects a '日期' column with date values and a 'Buy_Signal' column with boolean values.
+    :return: Adjusted daily_data DataFrame.
+    """
+
+    # Convert the '日期' columns to datetime objects for easier comparison
+    small_period_data['日期'] = pd.to_datetime(small_period_data['日期'])
+    big_period_data['日期'] = pd.to_datetime(big_period_data['日期'])
+
+    # Find indices in daily_data where Buy_Signal is True
+    buy_signal_indices = small_period_data[small_period_data['Buy_Signal']].index.tolist()
+
+    for idx in buy_signal_indices:
+        buy_date = small_period_data.at[idx, '日期']
+        # # # 将data['日期'].iloc[i]转换为字符串
+        # str_time = str(buy_date)
+        # # 判断str_time是否包含'1999-07-28'
+        # if '2023-10-20' in str_time:
+        #     print('2022-04-08')
+
+        # Find the corresponding date in weekly_data within the next 5 days
+        matching_weekly_rows = big_period_data[(big_period_data['日期'] >= buy_date) &
+                                           (big_period_data['日期'] <= buy_date + pd.Timedelta(days=30))]
+
+        if not matching_weekly_rows.empty:
+            # Take the first matching row
+            weekly_buy_signal = matching_weekly_rows.iloc[0]['Buy_Signal']
+
+            if not weekly_buy_signal:
+                # Set Buy_Signal in daily_data to False if it's not True in weekly_data
+                small_period_data.at[idx, 'Buy_Signal'] = False
+        else:
+            small_period_data.at[idx, 'Buy_Signal'] = False
+
+    return small_period_data
+
 
 def gen_buy_signal_nine(data):
     """
@@ -691,7 +878,7 @@ def gen_buy_signal_nine(data):
     change_rate = 0.5
     max_down_rate = 0.9
     max_down_value = data['Max_rate'].iloc[-1]  # 最大跌幅
-    macd_rate= 0.9
+    macd_rate = 0.9
     down_rate = 0.1
     # 策略一
     # 昨日macd创20日新低（3% 误差），且昨日股价要小于macd新低的股价
@@ -726,6 +913,7 @@ def gen_buy_signal_nine(data):
     # 结合两个买入信号
     data['Buy_Signal'] = buy_signal_1
 
+
 def gen_buy_signal_ten(data):
     """
     捕捉今天最高价小于昨天收盘价，wr大于95，今日最低价大于等于昨日最低价
@@ -741,10 +929,11 @@ def gen_buy_signal_ten(data):
     # 今天最高价小于昨天收盘价
     # wr大于95
     # 今日最低价大于等于昨日最低价
-    data['Buy_Signal'] =(data['收盘'].shift(1) >= data['最高']) & \
-                   (data['WR10'] >= wr_threshold) & \
-                   (data['换手率'] > change_rate) & \
-                   ((data['最低'] >= data['最低'].shift(1)))
+    data['Buy_Signal'] = (data['收盘'].shift(1) >= data['最高']) & \
+                         (data['WR10'] >= wr_threshold) & \
+                         (data['换手率'] > change_rate) & \
+                         ((data['最低'] >= data['最低'].shift(1)))
+
 
 def gen_buy_signal_eleven(data):
     """
@@ -759,9 +948,11 @@ def gen_buy_signal_eleven(data):
     # 今天最高价小于昨天收盘价
     # wr大于95
     # 今日最低价大于等于昨日最低价
-    data['Buy_Signal'] =(((data['成交量'].shift(1) + data['成交量'].shift(2)) / 2 - data['成交量']) / data['成交量'] > deal_number_rate)
+    data['Buy_Signal'] = (((data['成交量'].shift(1) + data['成交量'].shift(2)) / 2 - data['成交量']) / data[
+        '成交量'] > deal_number_rate)
     # data['Buy_Signal'] = ((data['成交量'].shift(1) - data['成交量']) / data[
     #     '成交量'] > deal_number_rate)
+
 
 def gen_buy_signal_week(data):
     """
@@ -917,7 +1108,7 @@ def show_k(data, results_df, threshold=10):
     # Highlight the days before the rise
     fig = highlight_increase_days(fig, data)
 
-    results_df = results_df[results_df['Days Held'] > 0]
+    results_df = results_df[results_df['Days Held'] > 5]
     # Add buy and sell markers
     buy_dates = results_df['Buy Date'].tolist()
     buy_prices = results_df['Buy Price'].tolist()

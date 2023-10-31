@@ -1,0 +1,158 @@
+timestamp: 20231031230023
+trade_count: 32296
+total_profit: 830755.0
+size of result_df: 4302
+ratio: 0.13320535050780283
+average days_held: 7.463586821897449
+average profit: 25.723154570225415
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & (data['日期'] > '2013-01-01') & (data['涨跌幅'] < 0)
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(2)) & (9.9 > data['买'].shift(1)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    # 再往前判断前两天是否有穿越，并且连续两天是否都下跌
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(3)) & (9.9 > data['买'].shift(2)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    return data
+
+
+
+
+
+
+timestamp: 20231031225128
+trade_count: 112187
+total_profit: 2655524.0
+size of result_df: 15464
+ratio: 0.13784128285808517
+average days_held: 10.560653195111733
+average profit: 23.670514408977866
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & (data['日期'] > '2013-01-01')
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(2)) & (9.9 > data['买'].shift(1)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    # 再往前判断前两天是否有穿越，并且连续两天是否都下跌
+    data['Buy_Signal'] = (9.9 < data['买'].shift(3)) & (9.9 > data['买'].shift(2)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    return data
+
+
+
+
+
+
+timestamp: 20231031224358
+trade_count: 112219
+total_profit: 2683418.0
+size of result_df: 15106
+ratio: 0.134611785882961
+average days_held: 9.910870708168849
+average profit: 23.91233213626926
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & (data['日期'] > '2013-01-01')
+    data['Buy_Signal'] = (9.9 < data['买'].shift(2)) & (9.9 > data['买'].shift(1)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    return data
+
+
+
+
+
+
+timestamp: 20231031224230
+trade_count: 238650
+total_profit: 6195874.0
+size of result_df: 35379
+ratio: 0.14824638592080452
+average days_held: 8.285283888539702
+average profit: 25.962178923109157
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & (data['日期'] > '2013-01-01')
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(2)) & (9.9 > data['买'].shift(1)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    return data
+
+
+
+
+
+
+timestamp: 20231031220637
+trade_count: 422458
+total_profit: 8617275.0
+size of result_df: 67092
+ratio: 0.15881342050570707
+average days_held: 9.10420680872418
+average profit: 20.397944884461886
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买'])
+    return data
+
+
+
+
+
+
