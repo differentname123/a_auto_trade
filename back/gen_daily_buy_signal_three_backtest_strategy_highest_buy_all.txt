@@ -1,0 +1,57 @@
+timestamp: 20231107193756
+trade_count: 11783
+total_profit: 132593.0
+size of result_df: 1773
+ratio: 0.15047101756768225
+average days_held: 4.3834337605024185
+average profit: 11.252906730034796
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_three(data):
+    """
+    操盘做T + 操盘线小于3 + 涨跌幅小于最大值的80%,换手率大于0.5
+    timestamp: 20231107192613
+    trade_count: 14545
+    total_profit: 157298.0
+    size of result_df: 2246
+    ratio: 0.15441732554142318
+    average days_held: 4.562048814025438
+    average profit: 10.814575455482984
+    :param data:
+    :return:
+    """
+    max_chaopan= 3
+    data['Buy_Signal'] = (data['操盘线'] < max_chaopan) & \
+                            (data['必涨']) & \
+                         (data['涨跌幅'].shift(1) > -data['Max_rate'] * 0.8) & \
+                         (data['涨跌幅'] > -data['Max_rate'] * 0.8)  & ((data['换手率'] > 0.5))
+
+
+
+
+
+
+timestamp: 20231107192613
+trade_count: 14545
+total_profit: 157298.0
+size of result_df: 2246
+ratio: 0.15441732554142318
+average days_held: 4.562048814025438
+average profit: 10.814575455482984
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_three(data):
+    """
+    操盘做T + 操盘线小于3
+    :param data:
+    :return:
+    """
+    max_chaopan= 3
+    data['Buy_Signal'] = (data['操盘线'] < max_chaopan) & \
+                            (data['必涨']) & \
+                         (data['涨跌幅'].shift(1) > -data['Max_rate'] * 0.8) & \
+                         (data['涨跌幅'] > -data['Max_rate'] * 0.8)
+
+
+
+
+
+

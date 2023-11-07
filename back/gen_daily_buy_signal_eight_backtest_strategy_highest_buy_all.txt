@@ -1,0 +1,36 @@
+timestamp: 20231107202755
+trade_count: 71487
+total_profit: 2020658.0
+size of result_df: 12372
+ratio: 0.173066431658903
+average days_held: 16.061927343433073
+average profit: 28.26609033810343
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_eight(data):
+    """
+    阴量换手选股
+    :param data:
+    :return:
+    """
+
+    # Conditions for selection
+    data['XG1'] = data['换手率'] > data['换手率'].shift(1) * 1.3
+    data['XG2'] = data['开盘'] >= data['收盘']
+
+    # V1, V2, V3 as defined
+    data['V1'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1)
+    data['V2'] = data['V1'] < -0.06
+    data['V3'] = data['V1'] > 0.008
+
+    # V4 is a bit ambiguous because of the curly braces. Assuming you want V3 and not V2,
+    # it looks like a typo in the formula and should probably be just 'V3'.
+    data['V4'] =data['V2']
+
+    # Selecting stocks based on conditions V4, XG2, and XG1
+    data['Buy_Signal'] = data['V4'] & data['XG2'] & data['XG1']
+
+
+
+
+
+

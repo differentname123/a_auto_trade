@@ -1,0 +1,261 @@
+timestamp: 20231107194538
+trade_count: 172794
+total_profit: 5679969.0
+size of result_df: 22605
+ratio: 0.13082051460120142
+average days_held: 11.77368427144461
+average profit: 32.8713323379284
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_six(data):
+    """
+    主力追踪,换手率大于0.5
+    timestamp: 20231107194300
+    trade_count: 172794
+    total_profit: 5679969.0
+    size of result_df: 22605
+    ratio: 0.13082051460120142
+    average days_held: 11.77368427144461
+    average profit: 32.8713323379284
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # Calculate moving averages for the trends
+    data['上趋势'] = data['最低'].rolling(window=20).mean() * 1.2
+    data['次上趋势'] = data['最低'].rolling(window=20).mean() * 1.1
+    data['次下趋势'] = data['最高'].rolling(window=20).mean() * 0.9
+    data['下趋势'] = data['最高'].rolling(window=20).mean() * 0.8
+
+    # Calculate daily returns as a percentage
+    data['ZD'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1) * 100
+
+    # Calculate HDZF
+    data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
+                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+
+    # Define trend strength
+    conditions = [
+        (data['收盘'] > data['次上趋势']) & (data['收盘'] <= data['上趋势']),
+        (data['收盘'] > data['次下趋势']) & (data['收盘'] <= data['次上趋势']),
+        (data['收盘'] < data['下趋势']),
+        (data['收盘'] > data['上趋势'])
+    ]
+    choices = [3, 2, 0, 4]
+    data['趋势强度'] = np.select(conditions, choices, default=1)
+
+    # Define the selection criteria
+    data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2) & ((data['换手率'] > 0.5))
+
+
+
+
+
+
+timestamp: 20231107194300
+trade_count: 172794
+total_profit: 5679969.0
+size of result_df: 22605
+ratio: 0.13082051460120142
+average days_held: 11.77368427144461
+average profit: 32.8713323379284
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_six(data):
+    """
+    主力追踪,换手率大于0.5
+    trade_count: 185023
+    total_profit: 6090224.0
+    size of result_df: 24208
+    ratio: 0.13083778773449786
+    average days_held: 11.521810801900305
+    average profit: 32.91603746561238
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # Calculate moving averages for the trends
+    data['上趋势'] = data['最低'].rolling(window=20).mean() * 1.2
+    data['次上趋势'] = data['最低'].rolling(window=20).mean() * 1.1
+    data['次下趋势'] = data['最高'].rolling(window=20).mean() * 0.9
+    data['下趋势'] = data['最高'].rolling(window=20).mean() * 0.8
+
+    # Calculate daily returns as a percentage
+    data['ZD'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1) * 100
+
+    # Calculate HDZF
+    data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
+                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+
+    # Define trend strength
+    conditions = [
+        (data['收盘'] > data['次上趋势']) & (data['收盘'] <= data['上趋势']),
+        (data['收盘'] > data['次下趋势']) & (data['收盘'] <= data['次上趋势']),
+        (data['收盘'] < data['下趋势']),
+        (data['收盘'] > data['上趋势'])
+    ]
+    choices = [3, 2, 0, 4]
+    data['趋势强度'] = np.select(conditions, choices, default=1)
+
+    # Define the selection criteria
+    data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2) & ((data['换手率'] > 0.5))
+
+
+
+
+
+
+timestamp: 20231107182330
+trade_count: 72339
+total_profit: 2437230.0
+size of result_df: 8880
+ratio: 0.12275536017915648
+average days_held: 11.492141168664206
+average profit: 33.6917845145772
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_six(data):
+    """
+    主力追踪
+    trade_count: 185023
+    total_profit: 6090224.0
+    size of result_df: 24208
+    ratio: 0.13083778773449786
+    average days_held: 11.521810801900305
+    average profit: 32.91603746561238
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # Calculate moving averages for the trends
+    data['上趋势'] = data['最低'].rolling(window=20).mean() * 1.2
+    data['次上趋势'] = data['最低'].rolling(window=20).mean() * 1.1
+    data['次下趋势'] = data['最高'].rolling(window=20).mean() * 0.9
+    data['下趋势'] = data['最高'].rolling(window=20).mean() * 0.8
+
+    # Calculate daily returns as a percentage
+    data['ZD'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1) * 100
+
+    # Calculate HDZF
+    data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
+                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+
+    # Define trend strength
+    conditions = [
+        (data['收盘'] > data['次上趋势']) & (data['收盘'] <= data['上趋势']),
+        (data['收盘'] > data['次下趋势']) & (data['收盘'] <= data['次上趋势']),
+        (data['收盘'] < data['下趋势']),
+        (data['收盘'] > data['上趋势'])
+    ]
+    choices = [3, 2, 0, 4]
+    data['趋势强度'] = np.select(conditions, choices, default=1)
+
+    # Define the selection criteria
+    data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2) & (((data['收盘'].shift(1) - data['收盘'].rolling(window=10).min()) / data['收盘'].rolling(window=10).min()) < 0.1)
+
+
+
+
+
+
+timestamp: 20231107180800
+trade_count: 185023
+total_profit: 6090224.0
+size of result_df: 24208
+ratio: 0.13083778773449786
+average days_held: 11.521810801900305
+average profit: 32.91603746561238
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_six(data):
+    """
+    主力追踪
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # Calculate moving averages for the trends
+    data['上趋势'] = data['最低'].rolling(window=20).mean() * 1.2
+    data['次上趋势'] = data['最低'].rolling(window=20).mean() * 1.1
+    data['次下趋势'] = data['最高'].rolling(window=20).mean() * 0.9
+    data['下趋势'] = data['最高'].rolling(window=20).mean() * 0.8
+
+    # Calculate daily returns as a percentage
+    data['ZD'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1) * 100
+
+    # Calculate HDZF
+    data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
+                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+
+    # Define trend strength
+    conditions = [
+        (data['收盘'] > data['次上趋势']) & (data['收盘'] <= data['上趋势']),
+        (data['收盘'] > data['次下趋势']) & (data['收盘'] <= data['次上趋势']),
+        (data['收盘'] < data['下趋势']),
+        (data['收盘'] > data['上趋势'])
+    ]
+    choices = [3, 2, 0, 4]
+    data['趋势强度'] = np.select(conditions, choices, default=1)
+
+    # Define the selection criteria
+    data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2)
+
+
+
+
+
+
+timestamp: 20231107173916
+trade_count: 355000
+total_profit: 8899563.0
+size of result_df: 49109
+ratio: 0.13833521126760565
+average days_held: 12.179895774647887
+average profit: 25.069191549295773
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_six(data):
+    """
+    主力追踪
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # Calculate moving averages for the trends
+    data['上趋势'] = data['最低'].rolling(window=20).mean() * 1.2
+    data['次上趋势'] = data['最低'].rolling(window=20).mean() * 1.1
+    data['次下趋势'] = data['最高'].rolling(window=20).mean() * 0.9
+    data['下趋势'] = data['最高'].rolling(window=20).mean() * 0.8
+
+    # Calculate daily returns as a percentage
+    data['ZD'] = (data['收盘'] - data['收盘'].shift(1)) / data['收盘'].shift(1) * 100
+
+    # Calculate HDZF
+    data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
+                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+
+    # Define trend strength
+    conditions = [
+        (data['收盘'] > data['次上趋势']) & (data['收盘'] <= data['上趋势']),
+        (data['收盘'] > data['次下趋势']) & (data['收盘'] <= data['次上趋势']),
+        (data['收盘'] < data['下趋势']),
+        (data['收盘'] > data['上趋势'])
+    ]
+    choices = [3, 2, 0, 4]
+    data['趋势强度'] = np.select(conditions, choices, default=1)
+
+    # Define the selection criteria
+    data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2)
+
+
+
+
+
+

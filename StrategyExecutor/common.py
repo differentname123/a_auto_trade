@@ -40,6 +40,7 @@ import talib
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
 from plotly.subplots import make_subplots
+from datetime import timedelta
 
 
 def parse_filename(file_path):
@@ -67,6 +68,22 @@ def load_data(file_path):
     data['日期'] = pd.to_datetime(data['日期'])
     data['名称'] = name
     data['代码'] = code
+
+    # 对数据按日期进行升序排序
+    data.sort_values(by='日期', ascending=True, inplace=True)
+
+    # 从数据末尾开始向前遍历，找到最后一个日期间隔超过一个月的点
+    cutoff_index = 0  # 初始化断点索引为0，表示没有找到超过一个月的间隔
+    for i in range(len(data) - 1, 0, -1):  # 从倒数第二行开始向前遍历
+        if data.iloc[i]['日期'] - data.iloc[i - 1]['日期'] > timedelta(days=30):
+            cutoff_index = i  # 更新断点索引
+            break
+
+    # 如果找到了超过一个月的间隔，舍去这个点之前的所有数据
+    if cutoff_index:
+        data = data.iloc[cutoff_index:]
+    # 重置索引，从0开始，并删除旧的索引列
+    data.reset_index(drop=True, inplace=True)
     # 判断name是否包含st，不区分大小写，如果包含，那么Max_rate为5%，否则为10%
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     return data

@@ -1,0 +1,88 @@
+timestamp: 20231107191930
+trade_count: 45255
+total_profit: 659593.0
+size of result_df: 7904
+ratio: 0.1746547342835046
+average days_held: 8.155960667329577
+average profit: 14.575030383383051
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_one(data):
+    """
+    股价创新低，跳过前面的100个数据,换手率大于0.5
+    timestamp: 20231107191327
+    trade_count: 70504
+    total_profit: 843766.0
+    size of result_df: 13142
+    ratio: 0.18640077158742765
+    average days_held: 8.168415976398503
+    average profit: 11.967633042096903
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 概率增加，持有天数也增加
+
+    # 还需继续优化
+    data.loc[100:, 'Buy_Signal'] = (data['收盘'] == data['LL']) & ((data['换手率'] > 0.5))
+
+
+
+
+
+
+timestamp: 20231107191327
+trade_count: 70504
+total_profit: 843766.0
+size of result_df: 13142
+ratio: 0.18640077158742765
+average days_held: 8.168415976398503
+average profit: 11.967633042096903
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_one(data):
+    """
+    股价创新低
+    trade_count: 103891
+    total_profit: 1264315.0
+    size of result_df: 20902
+    ratio: 0.2011916335389976
+    average days_held: 17.707404876264548
+    average profit: 12.169629708059409
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 概率增加，持有天数也增加
+
+    # 还需继续优化
+    data.loc[100:, 'Buy_Signal'] = (data['收盘'] == data['LL'])
+
+
+
+
+
+
+timestamp: 20231107190941
+trade_count: 103891
+total_profit: 1264315.0
+size of result_df: 20902
+ratio: 0.2011916335389976
+average days_held: 17.707404876264548
+average profit: 12.169629708059409
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_one(data):
+    """
+    股价创新低
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 概率增加，持有天数也增加
+
+    # 还需继续优化
+    data['Buy_Signal'] = (data['收盘'] == data['LL'])
+
+
+
+
+
+

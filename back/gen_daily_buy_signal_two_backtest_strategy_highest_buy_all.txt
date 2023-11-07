@@ -1,0 +1,71 @@
+timestamp: 20231107191851
+trade_count: 22786
+total_profit: 396846.0
+size of result_df: 3839
+ratio: 0.16848064601070833
+average days_held: 5.401079610287018
+average profit: 17.416220486263494
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_two(data):
+    """
+    昨日股价创新历史新低，今天收阳或者上涨，跳过前面的100个数据,换手率大于0.5
+    timestamp: 20231107191112
+    trade_count: 37729
+    total_profit: 538228.0
+    size of result_df: 6653
+    ratio: 0.17633650507567122
+    average days_held: 5.297834556972091
+    average profit: 14.26563121206499
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 概率增加，持有天数减少
+
+    # 还需继续优化
+
+
+    # 初始化所有的元素为False
+    data['Buy_Signal'] = False
+
+    # 为第101个元素及之后的元素计算Buy_Signal
+    data.loc[100:, 'Buy_Signal'] = (data['收盘'].shift(1) == data['LL']) & \
+                                   ((data['涨跌幅'] >= 0) | (data['收盘'] >= data['开盘'])) & ((data['换手率'] > 0.5))
+
+
+
+
+
+
+timestamp: 20231107191112
+trade_count: 37729
+total_profit: 538228.0
+size of result_df: 6653
+ratio: 0.17633650507567122
+average days_held: 5.297834556972091
+average profit: 14.26563121206499
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_two(data):
+    """
+    昨日股价创新历史新低，今天收阳或者上涨，跳过前面的100个数据
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 概率增加，持有天数减少
+
+    # 还需继续优化
+
+
+    # 初始化所有的元素为False
+    data['Buy_Signal'] = False
+
+    # 为第101个元素及之后的元素计算Buy_Signal
+    data.loc[100:, 'Buy_Signal'] = (data['收盘'].shift(1) == data['LL']) & \
+                                   ((data['涨跌幅'] >= 0) | (data['收盘'] >= data['开盘']))
+
+
+
+
+
+

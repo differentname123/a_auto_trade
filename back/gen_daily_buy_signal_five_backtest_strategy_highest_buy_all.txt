@@ -1,3 +1,86 @@
+timestamp: 20231107194223
+trade_count: 185002
+total_profit: 5138929.0
+size of result_df: 27317
+ratio: 0.14765786315823612
+average days_held: 8.663911741494687
+average profit: 27.77769429519681
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标,换手率大于0.5
+    timestamp: 20231107182939
+    trade_count: 238422
+    total_profit: 5950255.0
+    size of result_df: 35749
+    ratio: 0.1499400223133771
+    average days_held: 8.106953217404435
+    average profit: 24.956820259875347
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+    n = 9
+    m1 = 3
+    m2 = 3
+    # 计算N日内的最高价、最低价
+    data['low_n'] = data['收盘'].rolling(window=n).min()
+    data['high_n'] = data['收盘'].rolling(window=n).max()
+
+    # 计算未成熟随机值 (RSV)
+    data['rsv'] = (data['收盘'] - data['low_n']) / (data['high_n'] - data['low_n']) * 100
+
+    # 使用递归公式计算K值和D值
+    data['K'] = data['rsv'].ewm(span=m1).mean()
+    data['D'] = data['K'].ewm(span=m2).mean()
+
+    # 计算J值
+    data['J'] = 3 * data['K'] - 2 * data['D']
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & ((data['换手率'] > 0.5))
+    return data
+
+
+
+
+
+
+timestamp: 20231107182939
+trade_count: 238422
+total_profit: 5950255.0
+size of result_df: 35749
+ratio: 0.1499400223133771
+average days_held: 8.106953217404435
+average profit: 24.956820259875347
+Source code for 'gen_signal_func':
+def gen_daily_buy_signal_five(data):
+    """
+    前辈指标
+
+    :param data:
+    :return:
+    """
+    # 效果：
+    # 任然无法避免买入后继续跌，概率增加，持有天数减少
+
+    # 还需继续优化
+    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    data['J'] = J
+    data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
+    data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买'])
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(2)) & (9.9 > data['买'].shift(1)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    # 再往前判断前两天是否有穿越，并且连续两天是否都下跌
+    # data['Buy_Signal'] = (9.9 < data['买'].shift(3)) & (9.9 > data['买'].shift(2)) & (data['涨跌幅'] < 0) & (data['日期'] > '2013-01-01')
+    return data
+
+
+
+
+
+
 timestamp: 20231031230023
 trade_count: 32296
 total_profit: 830755.0
