@@ -11,7 +11,7 @@
 import numpy as np
 import pandas as pd
 
-from StrategyExecutor.MyTT import KDJ
+from StrategyExecutor.MyTT import *
 
 
 def gen_daily_buy_signal_one(data):
@@ -333,6 +333,179 @@ def gen_daily_buy_signal_ten(data):
 
     # Apply the filter to get the final selection
     data['Buy_Signal'] = FILTER(X_7 & X_8 & X_10 & X_11 & X_12, 10)
+
+def gen_daily_buy_signal_eleven(data):
+    """
+    今买明卖选股
+    timestamp: 20231107210904
+    trade_count: 7323
+    total_profit: 273736.0
+    size of result_df: 854
+    ratio: 0.11661887204697528
+    average days_held: 4.94141745186399
+    average profit: 37.38030861668715
+    :param data:
+    :return:
+    """
+    df = pd.DataFrame(data)
+    df['日期'] = pd.to_datetime(df['日期'])
+    df.set_index('日期', inplace=True)
+
+    # 计算XYZ_1：分步骤计算以避免使用shift函数在lambda表达式中
+    high_low = df['最高'] - df['最低']
+    close_high = abs(df['收盘'].shift(1) - df['最高'])
+    close_low = abs(df['收盘'].shift(1) - df['最低'])
+    # 计算XYZ_1
+    df['XYZ_1'] = df.apply(lambda row: max(row['最高'] - row['最低'],
+                                           abs(df['收盘'].shift(1).loc[row.name] - row['最高']),
+                                           abs(df['收盘'].shift(1).loc[row.name] - row['最低'])), axis=1)
+
+    df['XYZ_2'] = (df['最高'] + df['最低']) / 2 + df['XYZ_1'].rolling(window=2).mean()
+    df['XYZ_3'] = (df['最高'] + df['最低']) / 2 - df['XYZ_1'].rolling(window=2).mean()
+    df['XYZ_4'] = df['XYZ_2'].shift(1).where(df['XYZ_2'] <= df['XYZ_2'].shift(1))
+    df['XYZ_5'] = df['XYZ_2'].rolling(window=3).min()
+    # 预先计算XYZ_4和XYZ_5的移动值
+    df['XYZ_4_shifted'] = df['XYZ_4'].shift(1)
+    df['XYZ_5_shifted'] = df['XYZ_5'].shift(1)
+
+    # 计算XYZ_6
+    df['XYZ_6'] = df.apply(
+        lambda row: row['XYZ_4'] if row['XYZ_5'] != row['XYZ_5_shifted'] and row['XYZ_4'] < row['XYZ_4_shifted'] else (
+            row['XYZ_4'] if row['XYZ_4'] == row['XYZ_5'] else row['XYZ_5']), axis=1)
+
+    df['XYZ_7'] = (df['XYZ_2'] == df['XYZ_6']).astype(int).rolling(window=2).sum()
+    # 首先计算交叉点
+    cross_points = (df['收盘'].shift(1) < df['XYZ_6']) & (df['收盘'] > df['XYZ_6']) | (df['收盘'].shift(1) > df['XYZ_6']) & (
+                df['收盘'] < df['XYZ_6'])
+    df['XYZ_7'] = df['XYZ_7'].fillna(0)
+    # 计算XYZ_8
+    df['XYZ_8'] = 0
+    for index, value in df.iterrows():
+        window_size = int(df.loc[index, 'XYZ_7'])
+        if window_size > 0:
+            df.at[index, 'XYZ_8'] = cross_points.loc[:index].tail(window_size).sum()
+
+    # 请在您的环境中尝试运行这段代码。
+    # 初始化XYZ_9列
+    df['XYZ_9'] = np.nan
+
+    # 设置最后一次XYZ_8大于0的日期索引
+    last_index = None
+    for index, row in df.iterrows():
+        if row['XYZ_8'] > 0:
+            last_index = index
+        df.at[index, 'XYZ_9'] = (index - last_index).days if last_index is not None else np.nan
+
+    # 确保XYZ_9中的NaN值被处理，例如替换为0
+    df['XYZ_9'] = df['XYZ_9'].fillna(0)
+
+    # 计算XYZ_10
+    # 首先检查XYZ_9的最大值，并据此确定合理的窗口大小
+    max_XYZ_9 = df['XYZ_9'].max()
+    window_size = int(max_XYZ_9) + 1 if max_XYZ_9 >= 0 else 1  # 确保窗口大小是正整数
+
+    # 使用确定的窗口大小计算XYZ_10
+    df['XYZ_10'] = (df['XYZ_3'].rolling(window=window_size).max() > df['收盘']).astype(int).cumsum()
+
+    df['XYZ_11'] = df['收盘'].rolling(window=18).mean()
+    df['XYZ_12'] = df['收盘'] >= df['XYZ_11'] * 1.004
+    df['XYZ_13'] = df['XYZ_11'] >= df['XYZ_11'].shift(1)
+    df['XYZ_14'] = df['XYZ_12'] & df['XYZ_13']
+    df['XYZ_15'] = df.apply(lambda row: (row['收盘'] - row['最低']) / (row['最高'] - row['最低']) if row['收盘'] < row['开盘'] else 0, axis=1)
+
+    # 应用选股条件
+    data['Buy_Signal'] = (df['XYZ_9'] < df['XYZ_10']) & \
+                (df['收盘'] / df['最低'].rolling(window=3).min().shift(1) < 1) & \
+                (df['收盘'] < df['开盘']) & \
+                (df['收盘'] != df['最低']) & \
+                df['XYZ_14'] & \
+                (df['XYZ_15'] > 0.03) & (df['XYZ_15'] < 0.3)
+    return data
+
+
+def gen_daily_buy_signal_twelve(data):
+    """
+    下跌反弹选股策略
+    今日创40日新低，今日成交量相较昨日3日平均成交额下降一倍
+    trade_count: 27195
+    total_profit: 411826.0
+    size of result_df: 5622
+    ratio: 0.20672917815774958
+    average days_held: 12.319213090641663
+    average profit: 15.14344548630263
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['收盘'] <= data['收盘'].rolling(window=40).min()) & \
+                         (data['成交额'] < data['成交额'].shift(1).rolling(window=5).mean() / 2)
+
+def gen_daily_buy_signal_thirteen(data):
+    """
+    超跌不停选股策略
+    跌幅大于8小于9.8
+    timestamp: 20231107210904
+    trade_count: 7323
+    total_profit: 273736.0
+    size of result_df: 854
+    ratio: 0.11661887204697528
+    average days_held: 4.94141745186399
+    average profit: 37.38030861668715
+    效果:
+        待优化
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (-9.8 <= data['涨跌幅']) &(data['涨跌幅'] <= -8) & (data['收盘'] < data['收盘'].rolling(window=5).mean())
+
+def gen_daily_buy_signal_fourteen(data):
+    """
+    下影线大于实体选股策略
+    timestamp: 20231112234314
+    trade_count: 15308
+    total_profit: 378041.0
+    size of result_df: 2685
+    ratio: 0.1753984844525738
+    average days_held: 11.088189182126992
+    average profit: 24.695649333681736
+    效果:
+        待优化
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = ((data['开盘'] - data['收盘']) * 4 < (data['收盘'] - data['最低'])) \
+                         & ((data['开盘'] - data['收盘']) > 0) \
+                         & (data['换手率'] > 0.5)
+def gen_daily_buy_signal_fiveteen(data):
+    """
+    开盘即最低选股策略
+    timestamp: 20231113010041
+    trade_count: 50020
+    total_profit: 1295070.0
+    size of result_df: 5777
+    ratio: 0.1154938024790084
+    average days_held: 8.255117952818873
+    average profit: 25.891043582566972
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['开盘'] == data['最低']) & (data['收盘'] > data['开盘']) \
+                         & (data['换手率'] > 0.5) & (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['涨跌幅'] < 5) & (data['BAR'] < 0)
+
+def gen_daily_buy_signal_sixteen(data):
+    """
+    收盘最低选股策略
+    timestamp: 20231113003457
+    trade_count: 71207
+    total_profit: 1399947.0
+    size of result_df: 13422
+    ratio: 0.1884927043689525
+    average days_held: 13.088502534863146
+    average profit: 19.66024407712725
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['收盘'] == data['最低']) & (data['换手率'] > 0.5) \
+                         & (data['收盘'] == data['收盘'].rolling(window=20).min())
 
 def mix(data):
     """
