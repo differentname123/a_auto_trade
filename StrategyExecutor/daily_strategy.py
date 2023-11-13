@@ -507,6 +507,36 @@ def gen_daily_buy_signal_sixteen(data):
     data['Buy_Signal'] = (data['收盘'] == data['最低']) & (data['换手率'] > 0.5) \
                          & (data['收盘'] == data['收盘'].rolling(window=20).min())
 
+def gen_daily_buy_signal_seventeen(data):
+    """
+    macd最低选股策略
+    示例情形：
+        韵达股份 002120 20230926
+    timestamp: 20231114013709
+    trade_count: 78581
+    total_profit: 2656420.0
+    size of result_df: 7746
+    ratio: 0.09857344650742546
+    average days_held: 7.831409628281646
+    average profit: 33.8048637711406
+    :param data:
+    :return:
+    """
+    data['Buy_Signal1'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
+                         & ((data['macd_cha'].shift(1) - 0.01 ) > data['macd_cha']) \
+                         & (data['macd_cha'].shift(1) < 0) & (data['涨跌幅'] > -9) & ((data['开盘'].shift(1) - data['收盘'].shift(1)) > 0)
+    data['Buy_Signal'] = (data['Buy_Signal1'].shift(1) == True) & (data['最高'] < data['收盘'].shift(1))
+
+def gen_daily_buy_signal_eighteen(data):
+    """
+    macd陡降选股策略
+    示例情形：
+        韵达股份 002120 20230320
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['macd_cha'] < 0) & (data['macd_cha'].shift(1) > data['macd_cha'])
+
 def mix(data):
     """
     买入信号

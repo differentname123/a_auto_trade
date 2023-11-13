@@ -200,6 +200,7 @@ def get_indicators(data, is_debug=False):
     data['MACD'], data['MACD_Signal'], data['MACD_Hist'] = talib.MACD(data['收盘'], fastperiod=12, slowperiod=26,
                                                                       signalperiod=9)
     data['BAR'] = (data['MACD'] - data['MACD_Signal']) * 2
+    data['abs_BAR'] = abs(data['BAR'])
 
     # 计算RSI
     data['RSI'] = talib.RSI(data['收盘'], timeperiod=14)
