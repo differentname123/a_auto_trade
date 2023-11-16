@@ -537,6 +537,84 @@ def gen_daily_buy_signal_eighteen(data):
     """
     data['Buy_Signal'] = (data['macd_cha'] < 0) & (data['macd_cha'].shift(1) > data['macd_cha'])
 
+def gen_daily_buy_signal_nineteen(data):
+    """
+    大阴线选股策略
+    示例情形：
+        东方电子 000682 20230828
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = ((data['开盘'] - data['收盘']) > 2 * (data['开盘'].shift(1) - data['收盘'].shift(1))) & (data['开盘'] > data['收盘']) & ((data['开盘'] - data['收盘']) > 0.04 * data['收盘'] )
+
+def gen_daily_buy_signal_twenty(data):
+    """
+    最高小于昨日收盘选股策略
+    示例情形：
+
+    timestamp: 20231117000838
+    trade_count: 546559
+    total_profit: 14281917.0
+    size of result_df: 72256
+    ratio: 0.13220164703170198
+    average days_held: 8.932537932775784
+    average profit: 26.130604381228743
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['最高'] < data['收盘'].shift(1)) & (data['涨跌幅'] > -data['Max_rate'] * 0.8)
+
+
+def gen_daily_buy_signal_21(data):
+    """
+    涨跌幅小于0.5收盘选股策略
+    示例情形：
+
+    timestamp: 20231117001921
+    trade_count: 1376805
+    total_profit: 26313725.0
+    size of result_df: 204926
+    ratio: 0.1488417023471007
+    average days_held: 7.7690304727248956
+    average profit: 19.112165484582057
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (data['涨跌幅'] >= -0.5) & (data['涨跌幅'] <= 0.5)
+
+def gen_daily_buy_signal_22(data):
+    """
+    振幅大于当然最大比例收盘选股策略
+    示例情形：
+    timestamp: 20231117002451
+    trade_count: 506685
+    total_profit: 14190804.0
+    size of result_df: 92374
+    ratio: 0.18231050850133712
+    average days_held: 15.275893306492199
+    average profit: 28.007152372775984
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = ((data['最高'] - data['最低']) > data['Max_rate'] * 0.01 * data['收盘'])
+
+def gen_daily_buy_signal_23(data):
+    """
+    高低持平选股策略
+    今日收盘和昨日开盘持平，今日开盘和昨日收盘持平
+    示例情形：
+    timestamp: 20231117002451
+    trade_count: 506685
+    total_profit: 14190804.0
+    size of result_df: 92374
+    ratio: 0.18231050850133712
+    average days_held: 15.275893306492199
+    average profit: 28.007152372775984
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = (abs((data['开盘'] - data['收盘'].shift(1))) < (0.01 + 0.001 * data['收盘'].shift(1))) & (abs((data['开盘'].shift(1) - data['收盘'])) < (0.01 + 0.001 * data['收盘'].shift(1)))
+
 def mix(data):
     """
     买入信号
