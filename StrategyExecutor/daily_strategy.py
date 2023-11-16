@@ -603,13 +603,13 @@ def gen_daily_buy_signal_23(data):
     高低持平选股策略
     今日收盘和昨日开盘持平，今日开盘和昨日收盘持平
     示例情形：
-    timestamp: 20231117002451
-    trade_count: 506685
-    total_profit: 14190804.0
-    size of result_df: 92374
-    ratio: 0.18231050850133712
-    average days_held: 15.275893306492199
-    average profit: 28.007152372775984
+    timestamp: 20231117003236
+    trade_count: 290485
+    total_profit: 2512478.0
+    size of result_df: 54245
+    ratio: 0.18673941855861748
+    average days_held: 7.306370380570425
+    average profit: 8.649252112845758
     :param data:
     :return:
     """
