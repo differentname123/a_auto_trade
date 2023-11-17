@@ -339,7 +339,7 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
 
 if __name__ == "__main__":
     # # daily macd新低买入
-    strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=gen_daily_buy_signal_23,
+    strategy('../daily_data_exclude_new/北摩高科_002985.txt', gen_signal_func=gen_daily_buy_signal_24,
              backtest_func=backtest_strategy_highest_buy_all)
     # strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=calculate_indicators_and_buy_signal,
     #          backtest_func=backtest_strategy_highest_buy_all)
@@ -350,7 +350,7 @@ if __name__ == "__main__":
 
 
     # 回测所有数据
-    back_all_stock('../daily_data_exclude_new/', '../back', gen_signal_func=gen_daily_buy_signal_23, backtest_func=backtest_strategy_highest_buy_all)
+    back_all_stock('../daily_data_exclude_new/', '../back', gen_signal_func=gen_daily_buy_signal_24, backtest_func=backtest_strategy_highest_buy_all)
     # back_mix_all_stock_process('../daily_data_exclude_new/', '../weekly_data_exclude_new/','../monthly_data_exclude_new/', '../back', gen_small_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_big_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_biggest_period_signal_func=gen_true, backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from StrategyExecutor.MyTT import *
+from StrategyExecutor.common import load_data
 
 
 def gen_daily_buy_signal_one(data):
@@ -614,6 +615,63 @@ def gen_daily_buy_signal_23(data):
     :return:
     """
     data['Buy_Signal'] = (abs((data['开盘'] - data['收盘'].shift(1))) < (0.01 + 0.001 * data['收盘'].shift(1))) & (abs((data['开盘'].shift(1) - data['收盘'])) < (0.01 + 0.001 * data['收盘'].shift(1)))
+
+
+def gen_daily_buy_signal_24(data):
+    """
+    游击战术策略
+    最低超过下轨
+    但是实体高价大于昨日实体高价
+    或者实体低价大于昨日实体低价
+    示例情形：
+    timestamp: 20231117003236
+    trade_count: 290485
+    total_profit: 2512478.0
+    size of result_df: 54245
+    ratio: 0.18673941855861748
+    average days_held: 7.306370380570425
+    average profit: 8.649252112845758
+    :param data:
+    :return:
+    """
+    low_zhi = 96
+    def SMA(S, N, M=1):  # Chinese style SMA
+        return pd.Series(S).ewm(alpha=M / N, adjust=False).mean().values
+
+    df = data
+    df['DIR'] = abs(df['收盘'] - df['收盘'].shift(10))
+    df['VIR'] = df['收盘'].diff().abs().rolling(window=10).sum()
+    df['ER'] = df['DIR'] / df['VIR']
+    df['CS'] = SMA(df['ER'] * (2/3 - 2/14) + 2/14, 3, 1)
+    df['CQ'] = df['CS'] ** 3
+    # Correct window size calculation for '裁决'
+
+
+    window_sizes = (10 - df['CS'] * 10).apply(np.floor).fillna(1).astype(int).clip(lower=1)
+    df['ma'] = [MA(df['收盘'], w)[i] if i >= w else np.nan for i, w in enumerate(window_sizes)]
+
+    df['裁决'] = EMA(df['ma'], 2)
+
+    df['CD'] = np.nan_to_num(df['收盘'] / df['裁决']) * 100
+    df['OD'] = np.nan_to_num(df['开盘'] / df['裁决']) * 100
+    df['OH'] = np.nan_to_num(df['最高'] / df['裁决']) * 100
+    df['OL'] = np.nan_to_num(df['最低'] / df['裁决']) * 100
+    data['Buy_Signal'] = (df['OL'] < low_zhi) & ((df['CD'] > df['CD'].shift(1)) | (df['OD'] > df['OD'].shift(1))) & (abs(data['涨跌幅']) < abs(data['涨跌幅'].shift(1)))
+    return data
+# sh_data = pd.read_csv('../daily_data_exclude_new/上证指数.txt', encoding='gbk')
+# data1 = gen_daily_buy_signal_24(sh_data)
+# data1['日期'] = pd.to_datetime(data1['日期'])
+def gen_daily_buy_signal_24_mix(data):
+
+    data2 = gen_daily_buy_signal_24(data)
+
+    # data['Buy_Signal']的赋值逻辑为，当data1和data2相同日期的Buy_Signal都为True时，data['Buy_Signal']为True
+    # Merging data1 and data2 on the 'Date' column
+    merged_data = pd.merge(data2, data1, on='日期', suffixes=('_2', '_1'), how='left')
+
+    # Creating 'Buy_Signal' in 'data' based on the condition that 'Buy_Signal' in both data1 and data2 is True
+    data['Buy_Signal'] = merged_data['Buy_Signal_1'] & merged_data['Buy_Signal_2'] & (merged_data['涨跌幅'] < 0) & ()
+
 
 def mix(data):
     """

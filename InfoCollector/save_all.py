@@ -74,6 +74,6 @@ def fun():
     save_all_data()
 
 if __name__ == '__main__':
-    # price_data = get_price('002542', '19700101', '20231017', period='daily')
-    # print(price_data)
-    fun()
+    price_data = get_price('000001', '19700101', '20231017', period='daily')
+    print(price_data)
+    # fun()
