@@ -513,6 +513,9 @@ def gen_daily_buy_signal_seventeen(data):
     macd最低选股策略
     示例情形：
         韵达股份 002120 20230926
+    macd创10日新低，且macd值小于0，也是绝对值的最大值
+    并且macd差值差距变大
+    并且是阴线
     timestamp: 20231114013709
     trade_count: 78581
     total_profit: 2656420.0
@@ -523,10 +526,9 @@ def gen_daily_buy_signal_seventeen(data):
     :param data:
     :return:
     """
-    data['Buy_Signal1'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
+    data['Buy_Signal'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
                          & ((data['macd_cha'].shift(1) - 0.01 ) > data['macd_cha']) \
                          & (data['macd_cha'].shift(1) < 0) & (data['涨跌幅'] > -9) & ((data['开盘'].shift(1) - data['收盘'].shift(1)) > 0)
-    data['Buy_Signal'] = (data['Buy_Signal1'].shift(1) == True) & (data['最高'] < data['收盘'].shift(1))
 
 def gen_daily_buy_signal_eighteen(data):
     """
@@ -656,22 +658,22 @@ def gen_daily_buy_signal_24(data):
     df['OD'] = np.nan_to_num(df['开盘'] / df['裁决']) * 100
     df['OH'] = np.nan_to_num(df['最高'] / df['裁决']) * 100
     df['OL'] = np.nan_to_num(df['最低'] / df['裁决']) * 100
-    data['Buy_Signal'] = (df['OL'] < low_zhi) & ((df['CD'] > df['CD'].shift(1)) | (df['OD'] > df['OD'].shift(1))) & (abs(data['涨跌幅']) < abs(data['涨跌幅'].shift(1)))
+    data['Buy_Signal'] = (df['OD'] < low_zhi) & ((df['OD'] > df['OD'].shift(1))) \
+                         & (data['收盘'] < data['收盘'].rolling(window=40).mean()) \
+                         & (data['涨跌幅'] < 0) \
+                         & (data['换手率'] > 0.5) & (data['涨跌幅'].shift(1) < 0) & (df['CD'] < low_zhi) & (data['涨跌幅'] > -0.95 * data['Max_rate']) & \
+                         (data['开盘'].shift(1) > data['收盘'].shift(1))
     return data
-# sh_data = pd.read_csv('../daily_data_exclude_new/上证指数.txt', encoding='gbk')
-# data1 = gen_daily_buy_signal_24(sh_data)
-# data1['日期'] = pd.to_datetime(data1['日期'])
-def gen_daily_buy_signal_24_mix(data):
 
-    data2 = gen_daily_buy_signal_24(data)
-
-    # data['Buy_Signal']的赋值逻辑为，当data1和data2相同日期的Buy_Signal都为True时，data['Buy_Signal']为True
-    # Merging data1 and data2 on the 'Date' column
-    merged_data = pd.merge(data2, data1, on='日期', suffixes=('_2', '_1'), how='left')
-
-    # Creating 'Buy_Signal' in 'data' based on the condition that 'Buy_Signal' in both data1 and data2 is True
-    data['Buy_Signal'] = merged_data['Buy_Signal_1'] & merged_data['Buy_Signal_2'] & (merged_data['涨跌幅'] < 0) & ()
-
+def gen_daily_buy_signal_last(data):
+    """
+    在产生信号后，后一天下跌再买入
+    :param data:
+    :return:
+    """
+    data_1 = data.copy()
+    gen_daily_buy_signal_24(data_1)
+    data['Buy_Signal'] = data_1['Buy_Signal'].shift(1) & (data['涨跌幅'] < 0)
 
 def mix(data):
     """
@@ -682,8 +684,8 @@ def mix(data):
     # 复制一份数据
     data_1 = data.copy()
     data_2 = data.copy()
-    gen_daily_buy_signal_six(data_1)
-    gen_daily_buy_signal_five(data_2)
+    gen_daily_buy_signal_last(data_1)
+    gen_daily_buy_signal_24(data_2)
     data['Buy_Signal'] = data_1['Buy_Signal'] & data_2['Buy_Signal']
 
 def gen_true(data):
