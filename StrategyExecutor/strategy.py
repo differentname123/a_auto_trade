@@ -11,6 +11,7 @@
 import time
 import inspect
 
+from StrategyExecutor.basic_daily_strategy import *
 from StrategyExecutor.monthly_strategy import *
 from common import *
 from concurrent.futures import ThreadPoolExecutor
@@ -142,8 +143,36 @@ def back_one_mix(small_period_file_path, big_period_file_path,biggest_period_fil
     return results_df
 
 
-def get_buy_signal():
-    find_buy_signal('../daily_data_exclude_new', target_time='2023-10-18')
+def get_buy_signal(file_path, target_time, gen_signal_func=gen_daily_buy_signal_seventeen):
+    """
+    遍历file_path下的说有数据，并读取，应用策略，找到target_time有买入信号的symbol
+    :param file_path:
+    :param target_time:
+    :return:
+    """
+    if target_time is None:
+        target_time = datetime.datetime.now().strftime('%Y-%m-%d')
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            try:
+                fullname = os.path.join(root, f)
+                # 加载数据
+                data = load_data(fullname)
+                # 计算指标
+                get_indicators(data, True)
+
+                # 产生买入信号
+                stock_data_df = gen_signal_func(data)
+                stock_data_df['日期'] = stock_data_df['日期'].astype(str)
+                filtered_row = stock_data_df[
+                    (stock_data_df['Buy_Signal'] == True) & (stock_data_df['日期'].str.startswith(target_time))]
+                if filtered_row.shape[0] > 0:
+                    print(f)
+                    print(filtered_row)
+                    print('\n')
+            except Exception as e:
+                print(e)
+                print(fullname)
 
 
 def process_single_file(args):
@@ -337,10 +366,8 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
 
 if __name__ == "__main__":
     # # daily macd新低买入
-    strategy('../daily_data_exclude_new/大唐电信_600198.txt', gen_signal_func=mix,
-             backtest_func=backtest_strategy_highest_buy_all)
-    # strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=calculate_indicators_and_buy_signal,
-    #          backtest_func=backtest_strategy_highest_buy_all)
+    strategy('../daily_data_exclude_new/龙洲股份_002682.txt', gen_signal_func=fun,
+             backtest_func=backtest_strategy_low_profit)
 
     # mix 买入
     # strategy_mix('../daily_data_exclude_new/龙洲股份_002682.txt', '../weekly_data_exclude_new/中油工程_600339.txt', '../monthly_data_exclude_new/中油工程_600339.txt', gen_small_period_signal_func=gen_buy_signal_four, gen_big_period_signal_func=gen_buy_signal_four, gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)
@@ -348,11 +375,11 @@ if __name__ == "__main__":
 
 
     # 回测所有数据
-    back_all_stock('../daily_data_exclude_new/', '../back', gen_signal_func=mix, backtest_func=backtest_strategy_highest_buy_all)
+    # back_all_stock('../daily_data_exclude_new/', '../back', gen_signal_func=gen_daily_buy_signal_seventeen, backtest_func=backtest_strategy_low_profit)
     # back_mix_all_stock_process('../daily_data_exclude_new/', '../weekly_data_exclude_new/','../monthly_data_exclude_new/', '../back', gen_small_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_big_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_biggest_period_signal_func=gen_true, backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol
-    # get_buy_signal()
+    # get_buy_signal('../daily_data_exclude_new/', '2023-11-17', gen_signal_func=gen_daily_buy_signal_seventeen)
 
     # 显示相应的图像
     # show_image('../InfoCollector/daily_data_exclude_new/合力科技_603917.txt')

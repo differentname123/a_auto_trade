@@ -483,6 +483,73 @@ def backtest_strategy_highest_buy_all(data):
 
     return results_df
 
+def backtest_strategy_low_profit(data):
+    """
+    每个买入信号都入手，然后找到相应的交易日
+    为data进行回测，买入条件为当有Buy_Signal时，卖出条件为大于买入价的0.02或者以开盘价卖出
+    ，返回买入卖出的时间，价格，收益，持有时间
+    :param data:
+    :return:
+    """
+
+    results = []  # 存储回测结果
+    name = data['名称'].iloc[0]
+    symbol = data['代码'].iloc[0]
+    data['数量'] = 0
+    total_profit = 0
+    fix_profit = 0.02
+
+    i = 0
+    while i < len(data):
+        if data['Buy_Signal'].iloc[i] == 1:
+            buy_price = data['收盘'].iloc[i]
+            buy_date = data['日期'].iloc[i]
+            buy_index = i
+            total_shares = 100  # 假设初始买入100股
+
+            # 找到满足卖出条件的日期
+            j = i + 1
+            while j < len(data):
+                if data['最高'].iloc[j] >= (buy_price + fix_profit):
+                    break  # 找到了满足卖出条件的日期，跳出循环
+
+                # 如果第二天未达到卖出价条件，再买入100股并重新计算买入成本
+                additional_shares = 100
+                total_shares += additional_shares
+                new_buy_price = data['收盘'].iloc[j]  # 第二天的收盘价作为新的买入价
+                buy_price = (buy_price * (total_shares - additional_shares) + new_buy_price * additional_shares) / total_shares
+                data.at[i, '数量'] = additional_shares  # 记录买入数量
+
+                j += 1
+
+            # 如果找到了满足卖出条件的日期
+            if j < len(data):
+                sell_price = (buy_price + fix_profit)
+                if data['开盘'].iloc[j] > sell_price:
+                    sell_price = data['开盘'].iloc[j]
+            else:
+                # 如果没有找到，强制在最后一天卖出
+                j = len(data) - 1
+                sell_price = data['收盘'].iloc[j]
+
+            if buy_price == 0:
+                print(buy_price)
+            sell_date = data['日期'].iloc[j]
+            profit = (sell_price - buy_price) * 100  # 每次买入100股
+            total_profit += profit
+            growth_rate = ((sell_price - buy_price) / buy_price) * 100
+            days_held = j - buy_index
+            results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, growth_rate,
+                            days_held, i])
+
+        i += 1
+
+    results_df = pd.DataFrame(results,
+                              columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
+                                       'Total_Profit', 'Growth Rate (%)',
+                                       'Days Held','Buy_Index'])
+
+    return results_df
 
 def backtest_strategy_highest_fix(data):
     """

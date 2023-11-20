@@ -51,8 +51,8 @@ def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
     code = stock_data['代码']
     if code not in exclude_code:
-        price_data = get_price(code, '19700101', '20231021', period='daily')
-        filename = 'daily_data_exclude_new/{}_{}.txt'.format(name, code)
+        price_data = get_price(code, '19700101', '20291021', period='daily')
+        filename = '../daily_data_exclude_new/{}_{}.txt'.format(name, code)
         price_data.to_csv(filename, index=False)
         # Logging the save operation with the timestamp
         logging.info(f"Saved data for {name} ({code}) to {filename}")
@@ -74,6 +74,6 @@ def fun():
     save_all_data()
 
 if __name__ == '__main__':
-    price_data = get_price('000001', '19700101', '20231017', period='daily')
-    print(price_data)
-    # fun()
+    # price_data = get_price('000001', '19700101', '20231017', period='daily')
+    # print(price_data)
+    fun()

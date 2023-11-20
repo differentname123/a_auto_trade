@@ -529,6 +529,7 @@ def gen_daily_buy_signal_seventeen(data):
     data['Buy_Signal'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
                          & ((data['macd_cha'].shift(1) - 0.01 ) > data['macd_cha']) \
                          & (data['macd_cha'].shift(1) < 0) & (data['涨跌幅'] > -9) & ((data['开盘'].shift(1) - data['收盘'].shift(1)) > 0)
+    return data
 
 def gen_daily_buy_signal_eighteen(data):
     """
