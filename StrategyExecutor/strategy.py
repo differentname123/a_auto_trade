@@ -13,6 +13,7 @@ import inspect
 
 from StrategyExecutor.basic_daily_strategy import *
 from StrategyExecutor.monthly_strategy import *
+from StrategyExecutor.zuhe_daily_strategy import gen_all_signal
 from common import *
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -366,8 +367,11 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
 
 if __name__ == "__main__":
     # # daily macd新低买入
-    strategy('../daily_data_exclude_new/龙洲股份_002682.txt', gen_signal_func=fun,
-             backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new/龙洲股份_002682.txt', gen_signal_func=fun,
+    #          backtest_func=backtest_strategy_low_profit)
+
+    # 各种组合的遍历
+    gen_all_signal('../daily_data_exclude_new/龙洲股份_002682.txt')
 
     # mix 买入
     # strategy_mix('../daily_data_exclude_new/龙洲股份_002682.txt', '../weekly_data_exclude_new/中油工程_600339.txt', '../monthly_data_exclude_new/中油工程_600339.txt', gen_small_period_signal_func=gen_buy_signal_four, gen_big_period_signal_func=gen_buy_signal_four, gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)

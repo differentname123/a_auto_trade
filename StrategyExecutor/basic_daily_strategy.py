@@ -79,7 +79,7 @@ def gen_basic_daily_buy_signal_yesterday(data,key):
     return data
 
 def fun(data):
-    data = gen_multiple_daily_buy_signal_1(data, '收盘', [1, 5, 10], [5, 10, 20], [5, 10, 20])
+    data = gen_multiple_daily_buy_signal_1(data, '收盘', [1, 5], [5, 10], [5, 10])
     data = gen_basic_daily_buy_signal_yesterday(data,'极值')
     return data
 
@@ -91,7 +91,7 @@ def gen_basic_daily_buy_signal_1(data):
     :return:
     """
 
-    data = gen_multiple_daily_buy_signal_1(data, '收盘', [1, 5, 10], [5, 10, 20], [5, 10, 20])
+    data = gen_multiple_daily_buy_signal_1(data, '收盘', [1, 5], [5, 10], [5, 10])
     return data
 
 
@@ -101,7 +101,7 @@ def gen_basic_daily_buy_signal_2(data):
     :param data:
     :return:
     """
-    data = gen_multiple_daily_buy_signal_1(data, '换手率', [1, 5, 10], [5, 10, 20], [5, 10, 20])
+    data = gen_multiple_daily_buy_signal_1(data, '换手率', [0.5, 5], [5, 10], [5, 10])
     return data
 
 def gen_basic_daily_buy_signal_3(data):
@@ -110,5 +110,17 @@ def gen_basic_daily_buy_signal_3(data):
     :param data:
     :return:
     """
-    data['实体_阴线_signal'] = data['收盘'] < data['开盘']
+    data['实体_阴线_signal'] = data['收盘'] <= data['开盘']
+    data['实体_阳线_signal'] = data['收盘'] >= data['开盘']
+    return data
+
+def gen_basic_daily_buy_signal_4(data):
+    """
+    阴线或者阳线
+    :param data:
+    :return:
+    """
+    data['新股_100_signal'] = False
+    # 将data['新股_100_signal']前100天的值赋值为True
+    data.loc[0:100,'新股_100_signal'] = True
     return data
