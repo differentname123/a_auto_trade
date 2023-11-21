@@ -13,7 +13,7 @@ import inspect
 
 from StrategyExecutor.basic_daily_strategy import *
 from StrategyExecutor.monthly_strategy import *
-from StrategyExecutor.zuhe_daily_strategy import gen_all_signal
+from StrategyExecutor.zuhe_daily_strategy import *
 from common import *
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -22,7 +22,6 @@ import multiprocessing
 import pandas as pd
 
 from daily_strategy import *
-
 
 pd.set_option('display.max_columns', None)  # 显示所有列
 pd.set_option('display.expand_frame_repr', False)  # 确保不会因为宽度而换行
@@ -35,7 +34,7 @@ def init():
     return data
 
 
-def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest,threshold_day=1):
+def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest, threshold_day=1):
     # 加载数据
     data = load_data(file_path)
 
@@ -69,7 +68,11 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     # show_image(data, results_df)
     # show_k(data, results_df)
 
-def strategy_mix(small_period_file_path, big_period_file_path ,biggest_period_file_path , gen_small_period_signal_func=gen_buy_signal_eight, gen_big_period_signal_func=gen_buy_signal_weekly_eight, gen_biggest_period_signal_func=gen_buy_signal_weekly_eight, backtest_func=backtest_strategy_highest):
+
+def strategy_mix(small_period_file_path, big_period_file_path, biggest_period_file_path,
+                 gen_small_period_signal_func=gen_buy_signal_eight,
+                 gen_big_period_signal_func=gen_buy_signal_weekly_eight,
+                 gen_biggest_period_signal_func=gen_buy_signal_weekly_eight, backtest_func=backtest_strategy_highest):
     # 加载数据
     small_period_data = load_data(small_period_file_path)
     big_period_data = load_data(big_period_file_path)
@@ -116,7 +119,11 @@ def back_one(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     results_df = backtest_func(data)
     return results_df
 
-def back_one_mix(small_period_file_path, big_period_file_path,biggest_period_file_path,  gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one,gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest):
+
+def back_one_mix(small_period_file_path, big_period_file_path, biggest_period_file_path,
+                 gen_small_period_signal_func=gen_monthly_buy_signal_one,
+                 gen_big_period_signal_func=gen_monthly_buy_signal_one,
+                 gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest):
     """
     获取一个文件的回测结果(使用daily和week数据)
     :param file_path:
@@ -191,7 +198,9 @@ def process_single_file(args):
         print(f"{fullname} Error occurred: {e}")
     return None, 0, 0
 
-def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest):
+
+def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func=gen_buy_signal_one,
+                   backtest_func=backtest_strategy_highest):
     all_dfs = []
     trade_count = 0
     total_profit = 0
@@ -212,7 +221,6 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         total_profit += profit
         if df is not None:
             all_dfs.append(df)
-
 
     result_df = pd.concat(all_dfs, ignore_index=True)
     result_df = result_df.sort_values(by='Days Held', ascending=False)
@@ -261,30 +269,36 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write('\n\n')
         result_df.to_string(f)
 
-
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Function executed in: {elapsed_time:.2f} seconds")
     return result_df
 
-def back_mix_for_one_file(f, small_period_file_path, big_period_file_path, gen_small_period_signal_func, gen_big_period_signal_func, backtest_func, threshold_day):
+
+def back_mix_for_one_file(f, small_period_file_path, big_period_file_path, gen_small_period_signal_func,
+                          gen_big_period_signal_func, backtest_func, threshold_day):
     try:
         small_period_fullname = os.path.join(small_period_file_path, f)
         big_period_fullname = os.path.join(big_period_file_path, f)
-        temp_back_df = back_one_mix(small_period_fullname, big_period_fullname, gen_small_period_signal_func, gen_big_period_signal_func, backtest_func)
+        temp_back_df = back_one_mix(small_period_fullname, big_period_fullname, gen_small_period_signal_func,
+                                    gen_big_period_signal_func, backtest_func)
         # 筛选出'Days Held'大于threshold_day的记录
         filtered_df = temp_back_df[temp_back_df['Days Held'] > threshold_day]
         if not filtered_df.empty:
-            return filtered_df, temp_back_df.shape[0], temp_back_df['Total_Profit'].iloc[-1] if not temp_back_df.empty else 0
+            return filtered_df, temp_back_df.shape[0], temp_back_df['Total_Profit'].iloc[
+                -1] if not temp_back_df.empty else 0
     except Exception as e:
         print(f"Error occurred with file {f}: {e}")
 
     return None, 0, 0
 
+
 def process_file(args):
-    small_period_fullname, big_period_fullname, biggest_period_fullname, gen_small_period_signal_func, gen_big_period_signal_func,gen_biggest_period_signal_func, backtest_func, threshold_day = args
+    small_period_fullname, big_period_fullname, biggest_period_fullname, gen_small_period_signal_func, gen_big_period_signal_func, gen_biggest_period_signal_func, backtest_func, threshold_day = args
     try:
-        temp_back_df = back_one_mix(small_period_fullname, big_period_fullname,biggest_period_fullname, gen_small_period_signal_func, gen_big_period_signal_func,gen_biggest_period_signal_func, backtest_func)
+        temp_back_df = back_one_mix(small_period_fullname, big_period_fullname, biggest_period_fullname,
+                                    gen_small_period_signal_func, gen_big_period_signal_func,
+                                    gen_biggest_period_signal_func, backtest_func)
         if not temp_back_df.empty:
             trade_count = temp_back_df.shape[0]
             total_profit = temp_back_df['Total_Profit'].iloc[-1]
@@ -297,7 +311,12 @@ def process_file(args):
         print(f"{small_period_fullname}Error occurred: {e}")
     return None, 0, 0
 
-def back_mix_all_stock_process(small_period_file_path, big_period_file_path, biggest_period_file_path, output_file_path, threshold_day=1, gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one,gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest):
+
+def back_mix_all_stock_process(small_period_file_path, big_period_file_path, biggest_period_file_path, output_file_path,
+                               threshold_day=1, gen_small_period_signal_func=gen_monthly_buy_signal_one,
+                               gen_big_period_signal_func=gen_monthly_buy_signal_one,
+                               gen_biggest_period_signal_func=gen_monthly_buy_signal_one,
+                               backtest_func=backtest_strategy_highest):
     all_dfs = []
     trade_count = 0
     total_profit = 0
@@ -309,7 +328,9 @@ def back_mix_all_stock_process(small_period_file_path, big_period_file_path, big
             small_period_fullname = os.path.join(root, f)
             big_period_fullname = os.path.join(big_period_file_path, f)
             biggest_period_fullname = os.path.join(biggest_period_file_path, f)
-            file_args.append((small_period_fullname, big_period_fullname, biggest_period_fullname, gen_small_period_signal_func, gen_big_period_signal_func,gen_biggest_period_signal_func, backtest_func, threshold_day))
+            file_args.append((small_period_fullname, big_period_fullname, biggest_period_fullname,
+                              gen_small_period_signal_func, gen_big_period_signal_func, gen_biggest_period_signal_func,
+                              backtest_func, threshold_day))
 
     # Use multiprocessing to process files
     with multiprocessing.Pool() as pool:
@@ -352,6 +373,7 @@ def back_mix_all_stock_process(small_period_file_path, big_period_file_path, big
     print(f"Function executed in: {elapsed_time:.2f} seconds")
     return result_df
 
+
 def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backtest_strategy_highest):
     data = load_data(file_path)
 
@@ -365,18 +387,18 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
     results_df = backtest_func(data)
     show_k(data, results_df)
 
+
 if __name__ == "__main__":
     # # daily macd新低买入
-    # strategy('../daily_data_exclude_new/龙洲股份_002682.txt', gen_signal_func=fun,
+    # strategy('../daily_data_exclude_new/龙洲股份_002682.txt', gen_signal_func=gen_daily_buy_signal_seventeen,
     #          backtest_func=backtest_strategy_low_profit)
 
     # 各种组合的遍历
-    gen_all_signal('../daily_data_exclude_new/龙洲股份_002682.txt')
+    back_zuhe('../daily_data_exclude_new/龙洲股份_002682.txt', backtest_func=backtest_strategy_low_profit)
 
     # mix 买入
     # strategy_mix('../daily_data_exclude_new/龙洲股份_002682.txt', '../weekly_data_exclude_new/中油工程_600339.txt', '../monthly_data_exclude_new/中油工程_600339.txt', gen_small_period_signal_func=gen_buy_signal_four, gen_big_period_signal_func=gen_buy_signal_four, gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)
     # strategy_mix('../weekly_data_exclude_new/黑牡丹_600510.txt', '../monthly_data_exclude_new/黑牡丹_600510.txt', gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest)
-
 
     # 回测所有数据
     # back_all_stock('../daily_data_exclude_new/', '../back', gen_signal_func=gen_daily_buy_signal_seventeen, backtest_func=backtest_strategy_low_profit)
