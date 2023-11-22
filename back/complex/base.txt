@@ -1,0 +1,8 @@
+daily:
+    timestamp: 20231122142009
+    trade_count: 6836835
+    total_profit: 39276950.00518193
+    size of result_df: 1276661
+    ratio: 0.18673274987622196
+    average days_held: 1.1369437758846015
+    average profit: 5.744902430025287

@@ -68,6 +68,8 @@ def load_data(file_path):
     data['日期'] = pd.to_datetime(data['日期'])
     data['名称'] = name
     data['代码'] = code
+    data['数量'] = 0
+    data['Buy_Signal'] = True
 
     # 对数据按日期进行升序排序
     data.sort_values(by='日期', ascending=True, inplace=True)
@@ -87,6 +89,7 @@ def load_data(file_path):
     # 判断name是否包含st，不区分大小写，如果包含，那么Max_rate为5%，否则为10%
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     return data
+
 
 def T_indicators(data):
     """
@@ -129,6 +132,7 @@ def T_indicators(data):
 
     return data
 
+
 def T_indicators_optimized(data):
     # 计算28日内最低价的最低值和28日内最高价的最高值
     min_low_28d = data['收盘'].rolling(window=28).min()
@@ -158,9 +162,11 @@ def T_indicators_optimized(data):
     data['Q'] = (3 * data['收盘'] + data['最低'] + data['开盘'] + data['最高']) / 6
 
     # 使用滚动窗口和lambda函数来计算操盘线
-    data['操盘线'] = data['Q'].rolling(window=27).apply(lambda x: (26 * x[-1] + sum([(26 - j) * x[j] for j in range(26)])) / 351, raw=True)
+    data['操盘线'] = data['Q'].rolling(window=27).apply(
+        lambda x: (26 * x[-1] + sum([(26 - j) * x[j] for j in range(26)])) / 351, raw=True)
 
     return data
+
 
 def get_indicators(data, is_debug=False):
     """
@@ -267,7 +273,6 @@ def get_indicators(data, is_debug=False):
     data['macd_cha'] = data['BAR'] - data['BAR'].shift(1)
     data['macd_cha_rate'] = data['涨跌幅'] / data['macd_cha']
     data['macd_cha_shou_rate'] = (data['收盘'] - data['开盘']) / data['macd_cha']
-
 
     # # 删除NaN值
     # data.dropna(inplace=True)
@@ -422,7 +427,7 @@ def capture_target_data(data):
     # Where the stock drops more than 10% from the 10-day high,
     # it doesn't rise on that day (close <= open), and then rises the next day
     conditions = (data['跌幅'] > 10) & (data['收盘'] <= data['开盘']) & (
-                data['收盘'].shift(-1) > data['开盘'].shift(-1))
+            data['收盘'].shift(-1) > data['开盘'].shift(-1))
     data['标记'] = np.where(conditions, 1, 0)
 
     # Drop the intermediate columns used for calculations
@@ -479,9 +484,10 @@ def backtest_strategy_highest_buy_all(data):
     results_df = pd.DataFrame(results,
                               columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
                                        'Total_Profit', 'Growth Rate (%)',
-                                       'Days Held','Buy_Index'])
+                                       'Days Held', 'Buy_Index'])
 
     return results_df
+
 
 def backtest_strategy_low_profit(data):
     """
@@ -495,7 +501,6 @@ def backtest_strategy_low_profit(data):
     results = []  # 存储回测结果
     name = data['名称'].iloc[0]
     symbol = data['代码'].iloc[0]
-    data['数量'] = 0
     total_profit = 0
     fix_profit = 0.02
 
@@ -517,7 +522,8 @@ def backtest_strategy_low_profit(data):
                 additional_shares = 100
                 total_shares += additional_shares
                 new_buy_price = data['收盘'].iloc[j]  # 第二天的收盘价作为新的买入价
-                buy_price = (buy_price * (total_shares - additional_shares) + new_buy_price * additional_shares) / total_shares
+                buy_price = (buy_price * (
+                        total_shares - additional_shares) + new_buy_price * additional_shares) / total_shares
                 data.at[i, '数量'] = additional_shares  # 记录买入数量
 
                 j += 1
@@ -532,12 +538,10 @@ def backtest_strategy_low_profit(data):
                 j = len(data) - 1
                 sell_price = data['收盘'].iloc[j]
 
-            if buy_price == 0:
-                print(buy_price)
             sell_date = data['日期'].iloc[j]
             profit = (sell_price - buy_price) * 100  # 每次买入100股
             total_profit += profit
-            growth_rate = ((sell_price - buy_price) / buy_price) * 100
+            growth_rate = 0
             days_held = j - buy_index
             results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, growth_rate,
                             days_held, i])
@@ -547,9 +551,10 @@ def backtest_strategy_low_profit(data):
     results_df = pd.DataFrame(results,
                               columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
                                        'Total_Profit', 'Growth Rate (%)',
-                                       'Days Held','Buy_Index'])
+                                       'Days Held', 'Buy_Index'])
 
     return results_df
+
 
 def backtest_strategy_highest_fix(data):
     """
@@ -711,6 +716,7 @@ def gen_buy_signal_one(data, down_rate=0.1):
                          (data['换手率'] > change_rate) & \
                          ((data['收盘'].rolling(window=15).max() - data['收盘']) / data['收盘'] > down_rate)
 
+
 def gen_buy_signal_three(data):
     """
     实体大于昨日实体 20%
@@ -720,7 +726,8 @@ def gen_buy_signal_three(data):
     :return:
     """
     more_than_rate = 1.5
-    data['Buy_Signal'] = (abs(data['开盘'] - data['收盘']) > more_than_rate * abs(data['开盘'].shift(1) - data['收盘'].shift(1))) & \
+    data['Buy_Signal'] = (abs(data['开盘'] - data['收盘']) > more_than_rate * abs(
+        data['开盘'].shift(1) - data['收盘'].shift(1))) & \
                          (data['涨跌幅'] < 0) & \
                          (data['涨跌幅'].shift(1) < 0)
 
@@ -740,7 +747,7 @@ def gen_buy_signal_four(data):
     # 昨日不跌停
     data['Buy_Signal'] = (data['Bollinger_Lower_cha'].rolling(window=boll_windows).max() > 0) & \
                          (data['收盘'] > data['开盘']) & \
-                         (data['涨跌幅'].shift(1) < 0 ) & \
+                         (data['涨跌幅'].shift(1) < 0) & \
                          (data['收盘'].shift(1) <= data['开盘'].shift(1))
 
 
@@ -762,7 +769,6 @@ def gen_buy_signal_five(data):
                          (data['收盘'] > data['开盘']) & \
                          (data['换手率'] > change_rate) & \
                          (data['BAR'].rolling(window=macd_windows).min() == data['BAR'])
-
 
 
 def gen_buy_signal_six(data):
@@ -906,9 +912,9 @@ def gen_buy_signal_weekly_eight(data):
                          (data['涨跌幅'].shift(1) < 0) & \
                          (data['收盘'] > data['SMA']) & \
                          ((data['BAR'] - data['BAR'].shift(1)) * shuairuo_rate > (
-                                     data['BAR'].shift(1) - data['BAR'].shift(2))) & \
+                                 data['BAR'].shift(1) - data['BAR'].shift(2))) & \
                          (((data['BAR'] - data['BAR'].shift(1)) - (
-                                     data['BAR'].shift(1) - data['BAR'].shift(2))) >= min_shuairuo_macd)
+                                 data['BAR'].shift(1) - data['BAR'].shift(2))) >= min_shuairuo_macd)
 
 
 def mix_small_period_and_big_period_data(small_period_data, big_period_data):
@@ -937,7 +943,7 @@ def mix_small_period_and_big_period_data(small_period_data, big_period_data):
 
         # Find the corresponding date in weekly_data within the next 5 days
         matching_weekly_rows = big_period_data[(big_period_data['日期'] >= buy_date) &
-                                           (big_period_data['日期'] <= buy_date + pd.Timedelta(days=30))]
+                                               (big_period_data['日期'] <= buy_date + pd.Timedelta(days=30))]
 
         if not matching_weekly_rows.empty:
             # Take the first matching row

@@ -54,35 +54,23 @@ def gen_multiple_daily_buy_signal_1(data, key, value_list, ma_list, max_min_list
             column_name = f'{key}_小于_{value}_日均线_signal'
             data[column_name] = data[key] <= data[key].rolling(window=value).mean()
 
+    # 创建一个空的 DataFrame 用于存储新列
+    new_columns = pd.DataFrame(index=data.index)
+
     # 产生极值的信号
     if max_min_list:
         for value in max_min_list:
-            column_name = f'{key}_{value}日_大极值signal'
-            data[column_name] = data[key] == data[key].rolling(window=value).max()
-            column_name = f'{key}_{value}日_小极值_signal'
-            data[column_name] = data[key] == data[key].rolling(window=value).min()
+            # 计算大极值信号并作为新列
+            column_name_max = f'{key}_{value}日_大极值signal'
+            new_columns[column_name_max] = data[key] == data[key].rolling(window=value).max()
 
-    return data
+            # 计算小极值信号并作为新列
+            column_name_min = f'{key}_{value}日_小极值_signal'
+            new_columns[column_name_min] = data[key] == data[key].rolling(window=value).min()
 
+    # 使用 pd.concat 将新列添加到原始 DataFrame
+    data = pd.concat([data, new_columns], axis=1)
 
-def gen_basic_daily_buy_signal_yesterday(data, key):
-    """
-    找出昨日包含指定key的字段为true的字段赋值为true
-    :param data:
-    :param key:
-    :return:
-    """
-    # 找出data中包含key的字段
-    columns = [column for column in data.columns if key in column]
-    # 找出昨日包含key的字段为true的字段赋值为true
-    for column in columns:
-        data[column + 'yesterday'] = (data[column].shift(1) == True)
-    return data
-
-
-def fun(data):
-    data = gen_multiple_daily_buy_signal_1(data, '收盘', [1, 5], [5, 10], [5, 10])
-    data = gen_basic_daily_buy_signal_yesterday(data, '极值')
     return data
 
 
@@ -93,7 +81,7 @@ def gen_basic_daily_buy_signal_1(data):
     :return:
     """
 
-    data = gen_multiple_daily_buy_signal_1(data, '收盘', [5, 10], [5, 10], [5, 10])
+    data = gen_multiple_daily_buy_signal_1(data, '收盘', [5, 10, 20], [5, 10, 20], [5, 10, 20])
     return data
 
 
@@ -103,7 +91,7 @@ def gen_basic_daily_buy_signal_2(data):
     :param data:
     :return:
     """
-    data = gen_multiple_daily_buy_signal_1(data, '换手率', [0.5, 5], [5, 10], [5, 10])
+    data = gen_multiple_daily_buy_signal_1(data, '换手率', [0.5, 5, 10], [5, 10, 20], [5, 10, 20])
     return data
 
 
@@ -124,10 +112,65 @@ def gen_basic_daily_buy_signal_4(data):
     :param data:
     :return:
     """
-    data['新股_100_signal'] = False
-    data['老股_100_signal'] = False
+    data['日期_新股_100_signal'] = False
+    data['日期_老股_100_signal'] = False
     # 将data['新股_100_signal']前100天的值赋值为True
-    data.loc[0:100, '新股_100_signal'] = True
+    data.loc[0:100, '日期_新股_100_signal'] = True
     # 将data['老股_100_signal']100天的值赋值为True
-    data.loc[100:, '老股_100_signal'] = True
+    data.loc[100:, '日期_老股_100_signal'] = True
+    return data
+
+
+def gen_basic_daily_buy_signal_5(data):
+    """
+    开盘值相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+
+    data = gen_multiple_daily_buy_signal_1(data, '开盘', [5, 10, 20], [5, 10, 20], [5, 10, 20])
+    return data
+
+
+def gen_basic_daily_buy_signal_6(data):
+    """
+    最高值相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+
+    data = gen_multiple_daily_buy_signal_1(data, '最高', [5, 10, 20], [5, 10, 20], [5, 10, 20])
+    return data
+
+
+def gen_basic_daily_buy_signal_7(data):
+    """
+    最低值相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+
+    data = gen_multiple_daily_buy_signal_1(data, '最低', [5, 10, 20], [5, 10, 20], [5, 10, 20])
+    return data
+
+
+def gen_basic_daily_buy_signal_8(data):
+    """
+    涨跌幅相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+
+    data = gen_multiple_daily_buy_signal_1(data, '涨跌幅', [-5, 0, 5], [5, 10, 20], [5, 10, 20])
+    return data
+
+
+def gen_basic_daily_buy_signal_9(data):
+    """
+    振幅相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+
+    data = gen_multiple_daily_buy_signal_1(data, '振幅', [2, 5, 10], [5, 10, 20], [5, 10, 20])
     return data

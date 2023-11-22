@@ -13,6 +13,7 @@ import pandas as pd
 
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.common import load_data
+from StrategyExecutor.zuhe_daily_strategy import gen_signal, gen_all_basic_signal
 
 
 def gen_daily_buy_signal_one(data):
@@ -34,6 +35,7 @@ def gen_daily_buy_signal_one(data):
     # 还需继续优化
     data.loc[100:, 'Buy_Signal'] = (data['收盘'] == data['LL']) & ((data['换手率'] > 0.5))
 
+
 def gen_daily_buy_signal_two(data):
     """
     昨日股价创新历史新低，今天收阳或者上涨，跳过前面的100个数据,换手率大于0.5
@@ -51,7 +53,6 @@ def gen_daily_buy_signal_two(data):
     # 概率增加，持有天数减少
 
     # 还需继续优化
-
 
     # 初始化所有的元素为False
     data['Buy_Signal'] = False
@@ -74,11 +75,12 @@ def gen_daily_buy_signal_three(data):
     :param data:
     :return:
     """
-    max_chaopan= 3
+    max_chaopan = 3
     data['Buy_Signal'] = (data['操盘线'] < max_chaopan) & \
-                            (data['必涨']) & \
+                         (data['必涨']) & \
                          (data['涨跌幅'].shift(1) > -data['Max_rate'] * 0.8) & \
-                         (data['涨跌幅'] > -data['Max_rate'] * 0.8)  & ((data['换手率'] > 0.5))
+                         (data['涨跌幅'] > -data['Max_rate'] * 0.8) & ((data['换手率'] > 0.5))
+
 
 def gen_daily_buy_signal_four(data):
     """
@@ -101,6 +103,7 @@ def gen_daily_buy_signal_four(data):
     data['Buy_Signal'] = (data['收盘'] == data['收盘'].rolling(window=60).min()) & \
                          (data['收盘'] > data['开盘']) & \
                          (data['涨跌幅'] > -5) & ((data['换手率'] > 0.5))
+
 
 def gen_daily_buy_signal_five(data):
     """
@@ -133,11 +136,12 @@ def gen_daily_buy_signal_five(data):
 
     # 计算J值
     data['J'] = 3 * data['K'] - 2 * data['D']
-    K,D,J = KDJ(data['收盘'],data['最高'],data['最低'])
+    K, D, J = KDJ(data['收盘'], data['最高'], data['最低'])
     data['J'] = J
     data['买'] = data['J'].apply(lambda x: 10 if x < 0 else 0)
     data['Buy_Signal'] = (9.9 < data['买'].shift(1)) & (9.9 > data['买']) & ((data['换手率'] > 0.5))
     return data
+
 
 def gen_daily_buy_signal_six(data):
     """
@@ -166,7 +170,7 @@ def gen_daily_buy_signal_six(data):
 
     # Calculate HDZF
     data['HDZF'] = (data['最高'].rolling(window=20).max() - data['收盘']) / (
-                data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
+            data['最高'].rolling(window=20).max() - data['最低'].rolling(window=20).min())
 
     # Define trend strength
     conditions = [
@@ -180,6 +184,7 @@ def gen_daily_buy_signal_six(data):
 
     # Define the selection criteria
     data['Buy_Signal'] = (data['趋势强度'].shift(1) == 3) & (data['趋势强度'] == 2) & ((data['换手率'] > 0.5))
+
 
 def gen_daily_buy_signal_seven(data):
     """
@@ -203,13 +208,14 @@ def gen_daily_buy_signal_seven(data):
     data['角度'] = np.arctan((data['M'] / data['M'].shift(1) - 1) * 100) * (180 / np.pi)
     data['均角'] = data['角度'].rolling(window=7).mean()
 
-    data.loc[200:, 'Buy_Signal'] =(data['M'] > data['M'].shift(1)) & \
-                  (data['收盘'] < data['收盘'].shift(1) * 0.97) & \
-                  (data['最低'] <= data['M'] * 1.03) & \
-                  (data['收盘'] >= data['M'] * 0.98) & \
-                  (data['收盘'] == data['收盘'].rolling(window=3).min()) & \
-                  (data['收盘'] > data['收盘'].shift(1) * 0.90) & \
-                  (data['最高'] < (data['最高'].shift(1) + 0.07))
+    data.loc[200:, 'Buy_Signal'] = (data['M'] > data['M'].shift(1)) & \
+                                   (data['收盘'] < data['收盘'].shift(1) * 0.97) & \
+                                   (data['最低'] <= data['M'] * 1.03) & \
+                                   (data['收盘'] >= data['M'] * 0.98) & \
+                                   (data['收盘'] == data['收盘'].rolling(window=3).min()) & \
+                                   (data['收盘'] > data['收盘'].shift(1) * 0.90) & \
+                                   (data['最高'] < (data['最高'].shift(1) + 0.07))
+
 
 def gen_daily_buy_signal_eight(data):
     """
@@ -236,10 +242,11 @@ def gen_daily_buy_signal_eight(data):
 
     # V4 is a bit ambiguous because of the curly braces. Assuming you want V3 and not V2,
     # it looks like a typo in the formula and should probably be just 'V3'.
-    data['V4'] =data['V2']
+    data['V4'] = data['V2']
 
     # Selecting stocks based on conditions V4, XG2, and XG1
     data['Buy_Signal'] = data['V4'] & data['XG2'] & data['XG1']
+
 
 def gen_daily_buy_signal_nine(data):
     """
@@ -263,12 +270,13 @@ def gen_daily_buy_signal_nine(data):
 
     # For X_7, 'EXIST' would mean that the condition was true at least once in the last 10 days.
     # We use rolling.apply with a custom lambda function to check this.
-    data['X_7'] = (data['收盘'] >data['开盘']) & \
+    data['X_7'] = (data['收盘'] > data['开盘']) & \
                   (data['X_6'].rolling(window=10).apply(lambda x: x.any(), raw=True)) & \
                   (data['收盘'].ewm(span=5).mean() > data['收盘'].ewm(span=5).mean().shift(1))
 
     # The final condition for selection
     data['Buy_Signal'] = data['X_6'] & ~data['X_7'].astype(bool)
+
 
 def gen_daily_buy_signal_ten(data):
     """
@@ -308,7 +316,7 @@ def gen_daily_buy_signal_ten(data):
     X_6 = X_5.replace(False, 0) * X_3.abs()
     X_7 = X_6 > 0
     X_8 = data['收盘'] / (
-                data[['收盘', '最低', '最高']].mean(axis=1).ewm(span=3).mean().ewm(span=26).mean() * 0.9) < 0.95
+            data[['收盘', '最低', '最高']].mean(axis=1).ewm(span=3).mean().ewm(span=26).mean() * 0.9) < 0.95
     X_9 = ((data['收盘'] - data['收盘'].rolling(window=21).mean()) / data['收盘'].rolling(window=21).mean()).rolling(
         window=3).mean() * 100
     X_10 = X_9 < -15
@@ -334,6 +342,7 @@ def gen_daily_buy_signal_ten(data):
 
     # Apply the filter to get the final selection
     data['Buy_Signal'] = FILTER(X_7 & X_8 & X_10 & X_11 & X_12, 10)
+
 
 def gen_daily_buy_signal_eleven(data):
     """
@@ -377,7 +386,7 @@ def gen_daily_buy_signal_eleven(data):
     df['XYZ_7'] = (df['XYZ_2'] == df['XYZ_6']).astype(int).rolling(window=2).sum()
     # 首先计算交叉点
     cross_points = (df['收盘'].shift(1) < df['XYZ_6']) & (df['收盘'] > df['XYZ_6']) | (df['收盘'].shift(1) > df['XYZ_6']) & (
-                df['收盘'] < df['XYZ_6'])
+            df['收盘'] < df['XYZ_6'])
     df['XYZ_7'] = df['XYZ_7'].fillna(0)
     # 计算XYZ_8
     df['XYZ_8'] = 0
@@ -412,15 +421,16 @@ def gen_daily_buy_signal_eleven(data):
     df['XYZ_12'] = df['收盘'] >= df['XYZ_11'] * 1.004
     df['XYZ_13'] = df['XYZ_11'] >= df['XYZ_11'].shift(1)
     df['XYZ_14'] = df['XYZ_12'] & df['XYZ_13']
-    df['XYZ_15'] = df.apply(lambda row: (row['收盘'] - row['最低']) / (row['最高'] - row['最低']) if row['收盘'] < row['开盘'] else 0, axis=1)
+    df['XYZ_15'] = df.apply(
+        lambda row: (row['收盘'] - row['最低']) / (row['最高'] - row['最低']) if row['收盘'] < row['开盘'] else 0, axis=1)
 
     # 应用选股条件
     data['Buy_Signal'] = (df['XYZ_9'] < df['XYZ_10']) & \
-                (df['收盘'] / df['最低'].rolling(window=3).min().shift(1) < 1) & \
-                (df['收盘'] < df['开盘']) & \
-                (df['收盘'] != df['最低']) & \
-                df['XYZ_14'] & \
-                (df['XYZ_15'] > 0.03) & (df['XYZ_15'] < 0.3)
+                         (df['收盘'] / df['最低'].rolling(window=3).min().shift(1) < 1) & \
+                         (df['收盘'] < df['开盘']) & \
+                         (df['收盘'] != df['最低']) & \
+                         df['XYZ_14'] & \
+                         (df['XYZ_15'] > 0.03) & (df['XYZ_15'] < 0.3)
     return data
 
 
@@ -440,6 +450,7 @@ def gen_daily_buy_signal_twelve(data):
     data['Buy_Signal'] = (data['收盘'] <= data['收盘'].rolling(window=40).min()) & \
                          (data['成交额'] < data['成交额'].shift(1).rolling(window=5).mean() / 2)
 
+
 def gen_daily_buy_signal_thirteen(data):
     """
     超跌不停选股策略
@@ -456,7 +467,9 @@ def gen_daily_buy_signal_thirteen(data):
     :param data:
     :return:
     """
-    data['Buy_Signal'] = (-9.8 <= data['涨跌幅']) &(data['涨跌幅'] <= -8) & (data['收盘'] < data['收盘'].rolling(window=5).mean())
+    data['Buy_Signal'] = (-9.8 <= data['涨跌幅']) & (data['涨跌幅'] <= -8) & (
+            data['收盘'] < data['收盘'].rolling(window=5).mean())
+
 
 def gen_daily_buy_signal_fourteen(data):
     """
@@ -476,6 +489,8 @@ def gen_daily_buy_signal_fourteen(data):
     data['Buy_Signal'] = ((data['开盘'] - data['收盘']) * 4 < (data['收盘'] - data['最低'])) \
                          & ((data['开盘'] - data['收盘']) > 0) \
                          & (data['换手率'] > 0.5)
+
+
 def gen_daily_buy_signal_fiveteen(data):
     """
     开盘即最低选股策略
@@ -490,7 +505,9 @@ def gen_daily_buy_signal_fiveteen(data):
     :return:
     """
     data['Buy_Signal'] = (data['开盘'] == data['最低']) & (data['收盘'] > data['开盘']) \
-                         & (data['换手率'] > 0.5) & (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['涨跌幅'] < 5) & (data['BAR'] < 0)
+                         & (data['换手率'] > 0.5) & (data['BAR'] == data['BAR'].rolling(window=10).min()) & (
+                                 data['涨跌幅'] < 5) & (data['BAR'] < 0)
+
 
 def gen_daily_buy_signal_sixteen(data):
     """
@@ -507,6 +524,7 @@ def gen_daily_buy_signal_sixteen(data):
     """
     data['Buy_Signal'] = (data['收盘'] == data['最低']) & (data['换手率'] > 0.5) \
                          & (data['收盘'] == data['收盘'].rolling(window=20).min())
+
 
 def gen_daily_buy_signal_seventeen(data):
     """
@@ -526,10 +544,13 @@ def gen_daily_buy_signal_seventeen(data):
     :param data:
     :return:
     """
-    data['Buy_Signal'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
-                         & ((data['macd_cha'].shift(1) - 0.01 ) > data['macd_cha']) \
-                         & (data['macd_cha'].shift(1) < 0) & (data['涨跌幅'] > -9) & ((data['开盘'].shift(1) - data['收盘'].shift(1)) > 0)
+    data['Buy_Signal'] = (data['BAR'] == data['BAR'].rolling(window=10).min()) & (
+            data['abs_BAR'] == data['abs_BAR'].rolling(window=10).max()) \
+                         & ((data['macd_cha'].shift(1) - 0.01) > data['macd_cha']) \
+                         & (data['macd_cha'].shift(1) < 0) & (data['涨跌幅'] > -9) & (
+                                 (data['开盘'].shift(1) - data['收盘'].shift(1)) > 0)
     return data
+
 
 def gen_daily_buy_signal_eighteen(data):
     """
@@ -541,6 +562,7 @@ def gen_daily_buy_signal_eighteen(data):
     """
     data['Buy_Signal'] = (data['macd_cha'] < 0) & (data['macd_cha'].shift(1) > data['macd_cha'])
 
+
 def gen_daily_buy_signal_nineteen(data):
     """
     大阴线选股策略
@@ -549,7 +571,9 @@ def gen_daily_buy_signal_nineteen(data):
     :param data:
     :return:
     """
-    data['Buy_Signal'] = ((data['开盘'] - data['收盘']) > 2 * (data['开盘'].shift(1) - data['收盘'].shift(1))) & (data['开盘'] > data['收盘']) & ((data['开盘'] - data['收盘']) > 0.04 * data['收盘'] )
+    data['Buy_Signal'] = ((data['开盘'] - data['收盘']) > 2 * (data['开盘'].shift(1) - data['收盘'].shift(1))) & (
+            data['开盘'] > data['收盘']) & ((data['开盘'] - data['收盘']) > 0.04 * data['收盘'])
+
 
 def gen_daily_buy_signal_twenty(data):
     """
@@ -586,6 +610,7 @@ def gen_daily_buy_signal_21(data):
     """
     data['Buy_Signal'] = (data['涨跌幅'] >= -0.5) & (data['涨跌幅'] <= 0.5)
 
+
 def gen_daily_buy_signal_22(data):
     """
     振幅大于当然最大比例收盘选股策略
@@ -602,6 +627,7 @@ def gen_daily_buy_signal_22(data):
     """
     data['Buy_Signal'] = ((data['最高'] - data['最低']) > data['Max_rate'] * 0.01 * data['收盘'])
 
+
 def gen_daily_buy_signal_23(data):
     """
     高低持平选股策略
@@ -617,7 +643,8 @@ def gen_daily_buy_signal_23(data):
     :param data:
     :return:
     """
-    data['Buy_Signal'] = (abs((data['开盘'] - data['收盘'].shift(1))) < (0.01 + 0.001 * data['收盘'].shift(1))) & (abs((data['开盘'].shift(1) - data['收盘'])) < (0.01 + 0.001 * data['收盘'].shift(1)))
+    data['Buy_Signal'] = (abs((data['开盘'] - data['收盘'].shift(1))) < (0.01 + 0.001 * data['收盘'].shift(1))) & (
+            abs((data['开盘'].shift(1) - data['收盘'])) < (0.01 + 0.001 * data['收盘'].shift(1)))
 
 
 def gen_daily_buy_signal_24(data):
@@ -638,6 +665,7 @@ def gen_daily_buy_signal_24(data):
     :return:
     """
     low_zhi = 96
+
     def SMA(S, N, M=1):  # Chinese style SMA
         return pd.Series(S).ewm(alpha=M / N, adjust=False).mean().values
 
@@ -645,10 +673,9 @@ def gen_daily_buy_signal_24(data):
     df['DIR'] = abs(df['收盘'] - df['收盘'].shift(10))
     df['VIR'] = df['收盘'].diff().abs().rolling(window=10).sum()
     df['ER'] = df['DIR'] / df['VIR']
-    df['CS'] = SMA(df['ER'] * (2/3 - 2/14) + 2/14, 3, 1)
+    df['CS'] = SMA(df['ER'] * (2 / 3 - 2 / 14) + 2 / 14, 3, 1)
     df['CQ'] = df['CS'] ** 3
     # Correct window size calculation for '裁决'
-
 
     window_sizes = (10 - df['CS'] * 10).apply(np.floor).fillna(1).astype(int).clip(lower=1)
     df['ma'] = [MA(df['收盘'], w)[i] if i >= w else np.nan for i, w in enumerate(window_sizes)]
@@ -662,9 +689,11 @@ def gen_daily_buy_signal_24(data):
     data['Buy_Signal'] = (df['OD'] < low_zhi) & ((df['OD'] > df['OD'].shift(1))) \
                          & (data['收盘'] < data['收盘'].rolling(window=40).mean()) \
                          & (data['涨跌幅'] < 0) \
-                         & (data['换手率'] > 0.5) & (data['涨跌幅'].shift(1) < 0) & (df['CD'] < low_zhi) & (data['涨跌幅'] > -0.95 * data['Max_rate']) & \
+                         & (data['换手率'] > 0.5) & (data['涨跌幅'].shift(1) < 0) & (df['CD'] < low_zhi) & (
+                                 data['涨跌幅'] > -0.95 * data['Max_rate']) & \
                          (data['开盘'].shift(1) > data['收盘'].shift(1))
     return data
+
 
 def gen_daily_buy_signal_last(data):
     """
@@ -676,6 +705,7 @@ def gen_daily_buy_signal_last(data):
     gen_daily_buy_signal_24(data_1)
     data['Buy_Signal'] = data_1['Buy_Signal'].shift(1) & (data['涨跌幅'] < 0)
 
+
 def mix(data):
     """
     买入信号
@@ -683,11 +713,14 @@ def mix(data):
     :return:
     """
     # 复制一份数据
+
     data_1 = data.copy()
     data_2 = data.copy()
-    gen_daily_buy_signal_last(data_1)
-    gen_daily_buy_signal_24(data_2)
+    gen_all_basic_signal(data_1)
+    gen_signal(data_1, "实体_阴线_signal:收盘_5日_小极值_signal:收盘_大于_10_固定区间_signal:收盘_大于_10_日均线_signal".split(':'))
+    gen_daily_buy_signal_seventeen(data_2)
     data['Buy_Signal'] = data_1['Buy_Signal'] & data_2['Buy_Signal']
+
 
 def gen_true(data):
     """

@@ -8,12 +8,16 @@
 :description:
 
 """
+import inspect
 import itertools
 import json
+import multiprocessing
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from StrategyExecutor import basic_daily_strategy
 from common import *
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.basic_daily_strategy import *
@@ -109,19 +113,8 @@ def deal_columns(data, columns):
     value_columns_combination = generate_combinations(value_columns_dict)
 
     # 处理日均线列，特殊处理逻辑
-    ma_columns = [column for column in columns if '日均线' in column]
-    # 类似于对value_columns的处理，对ma_columns进行处理
-    ma_columns_dict = {}
-    for column in ma_columns:
-        key = column.split('_')[0]
-        if key not in ma_columns_dict:
-            ma_columns_dict[key] = []
-        ma_columns_dict[key].append(column)
-    # 将ma_columns_dict中的value转换成所有的组合
-    ma_columns_dict_temp = {}
-    for key, value in ma_columns_dict.items():
-        ma_columns_dict_temp[key] = gen_combination(value)
-    ma_columns_combination = generate_combinations(ma_columns_dict_temp)
+    ma_columns_dict = split_columns(columns, '日均线')
+    ma_columns_combination = generate_combinations(ma_columns_dict)
 
     # 处理极值列
     max_min_columns_dict = split_columns(columns, '极值')
@@ -222,7 +215,7 @@ def gen_signal(data, combination):
     :return:
     """
     # 获取combination中的列名，然后作为key进行与操作
-    data['Buy_Signal'] = True
+
     for column in combination:
         data['Buy_Signal'] = data['Buy_Signal'] & data[column]
     return data
@@ -253,7 +246,7 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
     """
     file_name = Path('../back/zuhe') / f"{data['名称'].iloc[0]}.json"
     file_name.parent.mkdir(parents=True, exist_ok=True)
-
+    gen_all_basic_signal(data)
     result_df_dict = read_json(file_name)
     zero_combination = set()  # Using a set for faster lookups
     try:
@@ -261,7 +254,7 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
         for index, combination in enumerate(final_combinations, start=1):
             # Print progress every 100 combinations to reduce print overhead
             if index % 100 == 0:
-                print(f"Processing combination {index} of {total_combinations}...")
+                print(f"Processing {file_name} combination {index} of {total_combinations}...")
 
             combination_key = ':'.join(combination)
             if combination_key in result_df_dict or any(comb in zero_combination for comb in combination):
@@ -280,6 +273,48 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
         print("KeyboardInterrupt, saving results...")
     finally:
         write_json(file_name, result_df_dict)
+
+
+def gen_all_signal_processing(args, threshold_day=1):
+    """
+    Generate all signals based on final_combinations.
+    :param data: DataFrame containing the data.
+    :param final_combinations: Iterable of combinations to generate signals for.
+    :param backtest_func: Function to use for backtesting. Default is backtest_strategy_low_profit.
+    :param threshold_day: Threshold for 'Days Held' to filter the results.
+    :return: None, writes results to a JSON file.
+    """
+    try:
+        try:
+            full_name, final_combinations, gen_signal_func, backtest_func = args
+            data = load_data(full_name)
+            gen_signal_func(data)
+            file_name = Path('../back/zuhe') / f"{data['名称'].iloc[0]}.json"
+            file_name.parent.mkdir(parents=True, exist_ok=True)
+
+            result_df_dict = read_json(file_name)
+            zero_combination = set()  # Using a set for faster lookups
+            for index, combination in enumerate(final_combinations, start=1):
+                combination_key = ':'.join(combination)
+                if combination_key in result_df_dict or any(comb in zero_combination for comb in combination):
+                    continue
+
+                signal_data = gen_signal(data, combination)
+                results_df = backtest_func(signal_data)
+                if results_df.empty:
+                    zero_combination.add(combination_key)
+                    continue
+
+                processed_result = process_results(results_df, threshold_day)
+                if processed_result:
+                    result_df_dict[combination_key] = processed_result
+        except Exception as e:
+            print(e)
+            print(full_name)
+        finally:
+            write_json(file_name, result_df_dict)
+    except Exception as e:
+        print(e)
 
 
 def read_json(file_path):
@@ -308,10 +343,33 @@ def process_results(results_df, threshold_day):
         total_days_held = result_df['Days Held'].sum()
     return {
         'trade_count': result_shape,
-        'total_profit': result['Total_Profit'].iloc[-1],
+        'total_profit': round(result['Total_Profit'].iloc[-1], 4),
         'size_of_result_df': result_df.shape[0],
         'total_days_held': int(total_days_held)
     }
+
+
+def gen_all_basic_signal(data):
+    gen_basic_daily_buy_signal_1(data)
+    gen_basic_daily_buy_signal_2(data)
+    gen_basic_daily_buy_signal_3(data)
+    gen_basic_daily_buy_signal_4(data)
+    return data
+
+
+def gen_basic_daily_buy_signal_yesterday(data, key):
+    """
+    找出昨日包含指定key的字段为true的字段赋值为true
+    :param data:
+    :param key:
+    :return:
+    """
+    # 找出data中包含key的字段
+    columns = [column for column in data.columns if key in column]
+    # 找出昨日包含key的字段为true的字段赋值为true
+    for column in columns:
+        data[column + 'yesterday'] = (data[column].shift(1) == True)
+    return data
 
 
 def back_zuhe_all(file_path, backtest_func=backtest_strategy_low_profit):
@@ -321,18 +379,108 @@ def back_zuhe_all(file_path, backtest_func=backtest_strategy_low_profit):
     :return:
     """
     data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
-    gen_basic_daily_buy_signal_1(data)
-    gen_basic_daily_buy_signal_2(data)
-    gen_basic_daily_buy_signal_3(data)
-    gen_basic_daily_buy_signal_4(data)
+    gen_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     final_combinations = deal_columns(data, signal_columns)
 
+    # 准备多进程处理的任务列表
+    tasks = []
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             fullname = os.path.join(root, f)
-            gen_all_signal(load_data(fullname), final_combinations, backtest_func)
+            tasks.append((fullname, final_combinations, backtest_func))
+
+    # 使用进程池处理任务
+    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
+
+    total_files = len(tasks)
+    for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing, tasks), 1):
+        print(f"Processing file {i} of {total_files}...")
+
+    pool.close()
+    pool.join()
+    statistics_zuhe('../back/zuhe')
+
+
+def gen_full_all_basic_signal(data):
+    """
+    扫描basic_daily_strategy.py文件，生成所有的基础信号,过滤出以gen_basic_daily_buy_signal开头的函数，并应用于data
+    :param data: 
+    :return: 
+    """
+    # 扫描basic_daily_strategy.py文件，生成所有的基础信号
+    for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
+        if name.startswith('gen_basic_daily_buy_signal'):
+            func(data)
     return data
+
+
+def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
+    """
+    回测每个基础指标，方便后续过滤某些指标
+    :param data:
+    :return:
+    """
+    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    gen_signal_func(data)
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    # 将每个信号单独组成一个组合
+    final_combinations = [[column] for column in signal_columns]
+    # 准备多进程处理的任务列表
+    tasks = []
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            tasks.append((fullname, final_combinations, gen_signal_func, backtest_func))
+
+    # 使用进程池处理任务
+    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
+
+    total_files = len(tasks)
+    for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing, tasks), 1):
+        print(f"Processing file {i} of {total_files}...")
+
+    pool.close()
+    pool.join()
+    statistics_zuhe('../back/zuhe')
+
+
+def statistics_zuhe(file_path):
+    """
+    读取file_path下的所有.json文件，将有相同key的数据进行合并
+    :param file_path:
+    :return:
+    """
+    result = {}
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = read_json(fullname)
+            for key, value in data.items():
+                if key in result:
+                    result[key]['trade_count'] += value['trade_count']
+                    result[key]['total_profit'] += value['total_profit']
+                    result[key]['size_of_result_df'] += value['size_of_result_df']
+                    result[key]['total_days_held'] += value['total_days_held']
+                else:
+                    result[key] = value
+    # 再计算result每一个key的平均值
+    for key, value in result.items():
+        value['ratio'] = value['size_of_result_df'] / value['trade_count']
+        value['average_days_held'] = value['total_days_held'] / value['trade_count']
+        value['average_profit'] = value['total_profit'] / value['trade_count']
+        # 将value['ratio']保留4位小数
+        value['ratio'] = round(value['ratio'], 4)
+        value['average_profit'] = round(value['average_profit'], 4)
+        value['average_days_held'] = round(value['average_days_held'], 4)
+        value['total_profit'] = round(value['total_profit'], 4)
+    # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
+    result = sorted(result.items(), key=lambda x: x[1]['trade_count'], reverse=True)
+    result = sorted(result, key=lambda x: x[1]['ratio'])
+    # 将result写入file_path上一级文件
+    file_name = Path(file_path).parent / 'statistics.json'
+    write_json(file_name, result)
+    return result
 
 
 def back_zuhe(file_path, backtest_func=backtest_strategy_low_profit):
@@ -341,11 +489,8 @@ def back_zuhe(file_path, backtest_func=backtest_strategy_low_profit):
     :param data:
     :return:
     """
-    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
-    gen_basic_daily_buy_signal_1(data)
-    gen_basic_daily_buy_signal_2(data)
-    gen_basic_daily_buy_signal_3(data)
-    gen_basic_daily_buy_signal_4(data)
+    data = load_data(file_path)
+    gen_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     final_combinations = deal_columns(data, signal_columns)
     gen_all_signal(data, final_combinations, backtest_func)
