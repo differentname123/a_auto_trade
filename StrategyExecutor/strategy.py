@@ -224,7 +224,7 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
 
     result_df = pd.concat(all_dfs, ignore_index=True)
     result_df = result_df.sort_values(by='Days Held', ascending=False)
-    total_days_held = result_df['Days Held'].sum()
+    total_days_held = result_df['Days Held'].sum() + trade_count - result_df.shape[0]
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     filename = f"{gen_signal_func.__name__}_{backtest_func.__name__}.txt"
@@ -390,22 +390,21 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
 
 if __name__ == "__main__":
     # # daily macd新低买入
-    # strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=gen_daily_buy_signal_25,
-    #          backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=mix,backtest_func=backtest_strategy_low_profit)
 
     # 各种组合的遍历
     # back_zuhe('../daily_data_exclude_new/C润本_603193.txt.txt', backtest_func=backtest_strategy_low_profit)
     # back_zuhe_all('../daily_data_exclude_new', backtest_func=backtest_strategy_low_profit)
-    # back_sigle_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,
-    #                backtest_func=backtest_strategy_low_profit)
-    statistics_zuhe('../back/zuhe')
+    # back_sigle_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
+    back_layer_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
+    # statistics_zuhe('../back/zuhe')
 
     # mix 买入
     # strategy_mix('../daily_data_exclude_new/龙洲股份_002682.txt', '../weekly_data_exclude_new/中油工程_600339.txt', '../monthly_data_exclude_new/中油工程_600339.txt', gen_small_period_signal_func=gen_buy_signal_four, gen_big_period_signal_func=gen_buy_signal_four, gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)
     # strategy_mix('../weekly_data_exclude_new/黑牡丹_600510.txt', '../monthly_data_exclude_new/黑牡丹_600510.txt', gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest)
 
     # 回测所有数据
-    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=gen_daily_buy_signal_25,backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=gen_true, backtest_func=backtest_strategy_low_profit)
     # back_mix_all_stock_process('../daily_data_exclude_new/', '../weekly_data_exclude_new/','../monthly_data_exclude_new/', '../back', gen_small_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_big_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_biggest_period_signal_func=gen_true, backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol

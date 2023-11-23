@@ -13,7 +13,7 @@ import pandas as pd
 
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.common import load_data
-from StrategyExecutor.zuhe_daily_strategy import gen_signal, gen_all_basic_signal
+from StrategyExecutor.zuhe_daily_strategy import gen_signal, gen_all_basic_signal, gen_full_all_basic_signal
 
 
 def gen_daily_buy_signal_one(data):
@@ -698,6 +698,13 @@ def gen_daily_buy_signal_24(data):
 def EXPMA(S, N):
     return pd.Series(S).ewm(alpha=2 / (N + 1), adjust=False).mean().values
 
+def can_not_buy(data):
+    """
+    不能买的股票
+    :param data:
+    :return:
+    """
+    data['Buy_Signal'] = data['涨跌幅'] > 0.95 * data['Max_rate']
 
 def gen_daily_buy_signal_25(data):
     """
@@ -747,7 +754,7 @@ def gen_daily_buy_signal_25(data):
     XGG = PD & (close > PB1 * 0.88)
 
     # 将结果添加到数据框
-    data['Buy_Signal'] = XGG
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate']) & (XGG | (XG & (LB > 2.2) & (close > MA5 * 1.02) & (close < MA5 * 1.15)))
     return data
 
 
@@ -772,10 +779,9 @@ def mix(data):
 
     data_1 = data.copy()
     data_2 = data.copy()
-    gen_all_basic_signal(data_1)
-    gen_signal(data_1, "实体_阴线_signal:收盘_5日_小极值_signal:收盘_大于_10_固定区间_signal:收盘_大于_10_日均线_signal".split(':'))
-    gen_daily_buy_signal_seventeen(data_2)
-    data['Buy_Signal'] = data_1['Buy_Signal'] & data_2['Buy_Signal']
+    data_1 = gen_full_all_basic_signal(data_1)
+    gen_signal(data_1, "收盘_5日_小极值_signal".split(':'))
+    data['Buy_Signal'] = data_1['Buy_Signal']
 
 
 def gen_true(data):
@@ -784,4 +790,4 @@ def gen_true(data):
     :param data:
     :return:
     """
-    data['Buy_Signal'] = True
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])

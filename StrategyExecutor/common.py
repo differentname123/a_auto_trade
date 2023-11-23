@@ -69,7 +69,6 @@ def load_data(file_path):
     data['名称'] = name
     data['代码'] = code
     data['数量'] = 0
-    data['Buy_Signal'] = True
 
     # 对数据按日期进行升序排序
     data.sort_values(by='日期', ascending=True, inplace=True)
@@ -88,6 +87,7 @@ def load_data(file_path):
     data.reset_index(drop=True, inplace=True)
     # 判断name是否包含st，不区分大小写，如果包含，那么Max_rate为5%，否则为10%
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
 

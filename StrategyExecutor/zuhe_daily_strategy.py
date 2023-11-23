@@ -12,6 +12,7 @@ import inspect
 import itertools
 import json
 import multiprocessing
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -215,7 +216,7 @@ def gen_signal(data, combination):
     :return:
     """
     # 获取combination中的列名，然后作为key进行与操作
-
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     for column in combination:
         data['Buy_Signal'] = data['Buy_Signal'] & data[column]
     return data
@@ -275,7 +276,7 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
         write_json(file_name, result_df_dict)
 
 
-def gen_all_signal_processing(args, threshold_day=1):
+def gen_all_signal_processing(args, threshold_day=1, is_skip=False):
     """
     Generate all signals based on final_combinations.
     :param data: DataFrame containing the data.
@@ -286,35 +287,46 @@ def gen_all_signal_processing(args, threshold_day=1):
     """
     try:
         try:
-            full_name, final_combinations, gen_signal_func, backtest_func = args
+            full_name, final_combinations, gen_signal_func, backtest_func, zero_combination = args
             data = load_data(full_name)
-            gen_signal_func(data)
+            data = gen_signal_func(data)
             file_name = Path('../back/zuhe') / f"{data['名称'].iloc[0]}.json"
             file_name.parent.mkdir(parents=True, exist_ok=True)
 
             result_df_dict = read_json(file_name)
-            zero_combination = set()  # Using a set for faster lookups
             for index, combination in enumerate(final_combinations, start=1):
                 combination_key = ':'.join(combination)
-                if combination_key in result_df_dict or any(comb in zero_combination for comb in combination):
+                if is_skip:
+                    if combination_key in result_df_dict:
+                        print(f"combination {combination_key} in result_df_dict")
+                        continue
+                if any(comb in zero_combination for comb in combination):
+                    print(f"combination {combination_key} in zero_combination")
                     continue
 
                 signal_data = gen_signal(data, combination)
-                results_df = backtest_func(signal_data)
-                if results_df.empty:
+                # 如果signal_data的Buy_Signal全为False，则不进行回测
+                if not signal_data['Buy_Signal'].any():
                     zero_combination.add(combination_key)
+                    result_df_dict[combination_key] = {
+                        'trade_count': 0,
+                        'total_profit': 0,
+                        'size_of_result_df': 0,
+                        'total_days_held': 0
+                    }
                     continue
-
+                results_df = backtest_func(signal_data)
                 processed_result = process_results(results_df, threshold_day)
                 if processed_result:
                     result_df_dict[combination_key] = processed_result
         except Exception as e:
-            print(e)
+            traceback.print_exc()
             print(full_name)
         finally:
             write_json(file_name, result_df_dict)
     except Exception as e:
-        print(e)
+        # 输出异常栈
+        traceback.print_exc()
 
 
 def read_json(file_path):
@@ -333,14 +345,15 @@ def write_json(file_path, data):
 def process_results(results_df, threshold_day):
     result = results_df.sort_values(by='Days Held', ascending=True)
     if result.empty:
-        return None
-
+        return {
+            'trade_count': 0,
+            'total_profit': 0,
+            'size_of_result_df': 0,
+            'total_days_held': 0
+        }
+    total_days_held = result['Days Held'].sum()
     result_df = result[result['Days Held'] > threshold_day]
     result_shape = result.shape[0]
-    if result_df.empty:
-        total_days_held = 0
-    else:
-        total_days_held = result_df['Days Held'].sum()
     return {
         'trade_count': result_shape,
         'total_profit': round(result['Total_Profit'].iloc[-1], 4),
@@ -410,10 +423,131 @@ def gen_full_all_basic_signal(data):
     """
     # 扫描basic_daily_strategy.py文件，生成所有的基础信号
     for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
-        if name.startswith('gen_basic_daily_buy_signal'):
-            func(data)
+        if name.startswith('gen_basic_daily_buy_signal_1'):
+            data = func(data)
     return data
 
+def get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set):
+    """
+    获取所有的组合,并进行去重操作
+    :param basic_indicators:
+    :param newest_indicators:
+    :param exist_combinations:
+    :return:
+    """
+    # 定义结果集合
+    result_combination_list = []
+    full_combination_list = []
+
+    # 如果 newest_indicators 为空，仅处理 basic_indicators
+    if newest_indicators == [[]]:
+        for basic_indicator in basic_indicators:
+            basic_indicator_key = ':'.join(basic_indicator)
+            if basic_indicator_key not in exist_combinations_set:
+                result_combination_list.append(basic_indicator)
+            full_combination_list.append(basic_indicator)
+    else:
+        # 将 indicators 转换为集合以提高效率
+        # basic_indicators是一个二维数组，先将每一个元素以':'连接，然后再转换为集合
+        basic_indicators_sets = [set(':'.join(basic_indicator).split(':')) for basic_indicator in basic_indicators]
+        newest_indicators_sets = [set(':'.join(newest_indicator).split(':')) for newest_indicator in newest_indicators]
+
+        # 生成组合
+        for basic_set in basic_indicators_sets:
+            for newest_set in newest_indicators_sets:
+                if not basic_set & newest_set:  # 检查交集
+                    combination = ':'.join(sorted(basic_set | newest_set))  # 合并集合并排序
+                    combination_list = combination.split(':')
+                    full_combination_list.append(combination_list)
+                    if combination not in exist_combinations_set:
+                        # 如果combination被包含在zero_combinations_set元素中，则不添加到result_combination_list中
+                        if not any([set(combination_list) >= set(zero_combination.split(':')) for zero_combination in zero_combinations_set]):
+                            result_combination_list.append(combination_list)
+    # 对result_combination_list和full_combination_list进行去重
+    result_combination_list = list(set([tuple(t) for t in result_combination_list]))
+    full_combination_list = list(set([tuple(t) for t in full_combination_list]))
+    return result_combination_list, full_combination_list
+
+def filter_combination_list(combination_list, statistics, zero_combinations_set, trade_count_threshold=1000):
+    """
+    过滤掉交易次数小于1000的组合
+    :param combination_list:
+    :param statistics:
+    :param trade_count_threshold:
+    :return:
+    """
+    result_combination_list = []
+    for combination in combination_list:
+        combination_key = ':'.join(combination)
+        if combination_key not in statistics or statistics[combination_key]['trade_count'] >= trade_count_threshold:
+            if not any([set(combination) >= set(zero_combination.split(':')) for zero_combination in
+                        zero_combinations_set]):
+                result_combination_list.append(combination)
+    return result_combination_list
+
+def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
+    """
+    分层进行回测
+    1.先获取第一层指标(带signal的)，并且读取已有的统计信息
+    2.排除掉已统计好的指标，计算剩下的指标，并将新计算的结果加入统计文件里面
+    3.读取统计信息，找到满足条件的指标(交易数量大于1000)
+    4.将基础指标和满足要求的指标(最新一层)进行两两组合（需要进行重复性判断:1.以‘:’进行分割后变成集合，如果长度减小那就说明有重复 2.过了第一个条件之后又拼接成字符串，判断是否已经在指标中）
+    5.计算这些新的指标的回测结果，并将结果写入统计文件
+    6.如果新指标没有满足条件的话那么完成统计，否则继续第3步
+    :param data:
+    :return:
+    """
+    level = 0
+    # 读取statistics.json文件，得到已有的key
+    statistics = read_json('../back/statistics.json')
+    # 找到trade_count为0的指标，将key保持在zero_combinations_set中
+    zero_combinations_set = set()
+    for key, value in statistics.items():
+        if value['trade_count'] == 0:
+            zero_combinations_set.add(key)
+    exist_combinations_set = set(statistics.keys())
+    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    data = gen_signal_func(data)
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    # 将每个信号单独组成一个组合
+    basic_indicators = [[column] for column in signal_columns]
+    basic_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
+    newest_indicators = [[]]
+    while True:
+        result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+
+        print(f'level:{level}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
+        level += 1
+        newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+        if result_combination_list == []:
+            if newest_indicators == []:
+                break
+            continue
+        # 筛选出full_combination_list中的指标在statistics中对应的数据
+        # 准备多进程处理的任务列表
+        tasks = []
+        # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
+        for root, ds, fs in os.walk(file_path):
+            for f in fs:
+                fullname = os.path.join(root, f)
+                tasks.append((fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
+
+        # 使用进程池处理任务
+        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
+
+        total_files = len(tasks)
+        for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing, tasks), 1):
+            print(f"Processing file {i} of {total_files}...")
+
+        pool.close()
+        pool.join()
+        statistics_zuhe('../back/zuhe')
+        statistics = read_json('../back/statistics.json')
+        exist_combinations_set = set(statistics.keys())
+        zero_combinations_set = set()
+        for key, value in statistics.items():
+            if value['trade_count'] == 0:
+                zero_combinations_set.add(key)
 
 def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
     """
@@ -422,12 +556,13 @@ def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
     :return:
     """
     data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
-    gen_signal_func(data)
+    data = gen_signal_func(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 将每个信号单独组成一个组合
     final_combinations = [[column] for column in signal_columns]
     # 准备多进程处理的任务列表
     tasks = []
+    # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             fullname = os.path.join(root, f)
@@ -466,17 +601,25 @@ def statistics_zuhe(file_path):
                     result[key] = value
     # 再计算result每一个key的平均值
     for key, value in result.items():
-        value['ratio'] = value['size_of_result_df'] / value['trade_count']
-        value['average_days_held'] = value['total_days_held'] / value['trade_count']
-        value['average_profit'] = value['total_profit'] / value['trade_count']
-        # 将value['ratio']保留4位小数
-        value['ratio'] = round(value['ratio'], 4)
-        value['average_profit'] = round(value['average_profit'], 4)
-        value['average_days_held'] = round(value['average_days_held'], 4)
-        value['total_profit'] = round(value['total_profit'], 4)
+        if value['trade_count'] != 0:
+            value['ratio'] = value['size_of_result_df'] / value['trade_count']
+            value['average_days_held'] = value['total_days_held'] / value['trade_count']
+            value['average_profit'] = value['total_profit'] / value['trade_count']
+            # 将value['ratio']保留4位小数
+            value['ratio'] = round(value['ratio'], 4)
+            value['average_profit'] = round(value['average_profit'], 4)
+            value['average_days_held'] = round(value['average_days_held'], 4)
+            value['total_profit'] = round(value['total_profit'], 4)
+        else:
+            value['ratio'] = 1
+            value['average_profit'] = 0
+            value['average_days_held'] = 0
+            value['total_profit'] = 0
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
     result = sorted(result.items(), key=lambda x: x[1]['trade_count'], reverse=True)
     result = sorted(result, key=lambda x: x[1]['ratio'])
+    # 将result转换成dict
+    result = dict(result)
     # 将result写入file_path上一级文件
     file_name = Path(file_path).parent / 'statistics.json'
     write_json(file_name, result)
