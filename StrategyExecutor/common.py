@@ -488,6 +488,16 @@ def backtest_strategy_highest_buy_all(data):
 
     return results_df
 
+def get_sell_price(buy_price):
+    """
+    根据买入价格，返回卖出价格
+    卖出价格为买入价格的1.0025倍，向上保留两位小数
+    :param buy_price:
+    :return:
+    """
+    sell_price = buy_price * 1.0025
+    sell_price = math.ceil(sell_price * 100) / 100
+    return sell_price
 
 def backtest_strategy_low_profit(data):
     """
@@ -502,8 +512,6 @@ def backtest_strategy_low_profit(data):
     name = data['名称'].iloc[0]
     symbol = data['代码'].iloc[0]
     total_profit = 0
-    fix_profit = 0.02
-
     i = 0
     while i < len(data):
         if data['Buy_Signal'].iloc[i] == 1:
@@ -515,7 +523,7 @@ def backtest_strategy_low_profit(data):
             # 找到满足卖出条件的日期
             j = i + 1
             while j < len(data):
-                if data['最高'].iloc[j] >= (buy_price + fix_profit):
+                if data['最高'].iloc[j] >= get_sell_price(buy_price):
                     break  # 找到了满足卖出条件的日期，跳出循环
 
                 # 如果第二天未达到卖出价条件，再买入100股并重新计算买入成本
@@ -530,7 +538,7 @@ def backtest_strategy_low_profit(data):
 
             # 如果找到了满足卖出条件的日期
             if j < len(data):
-                sell_price = (buy_price + fix_profit)
+                sell_price = get_sell_price(buy_price)
                 if data['开盘'].iloc[j] > sell_price:
                     sell_price = data['开盘'].iloc[j]
             else:
@@ -1238,3 +1246,10 @@ def show_k(data, results_df, threshold=10):
 
     # Show the plot
     fig.show()
+
+if __name__ == '__main__':
+    print(get_sell_price(1))
+    print(get_sell_price(2))
+    print(get_sell_price(3))
+    print(get_sell_price(4))
+    print(get_sell_price(5))

@@ -695,6 +695,62 @@ def gen_daily_buy_signal_24(data):
     return data
 
 
+def EXPMA(S, N):
+    return pd.Series(S).ewm(alpha=2 / (N + 1), adjust=False).mean().values
+
+
+def gen_daily_buy_signal_25(data):
+    """
+    金牛选股策略
+    :param data:
+    :return:
+    """
+
+    def MA(S, N):
+        return pd.Series(S).rolling(N).mean()
+
+    def EXPMA(S, N):
+        return pd.Series(S).ewm(alpha=2 / (N + 1), adjust=False).mean().values
+
+    # 将列名分配给变量
+    close = data['收盘']
+    open_price = data['开盘']
+    volume = data['成交量']
+
+    # 公式中的其他计算
+    M11 = 5
+    M44 = 60
+    P = volume
+    LB = volume / MA(volume, 5).shift(1)
+    LJC = MA(P, M11) > MA(P, M44) * 0.9
+
+    M1, M2, M3, M4, M5, M6 = 4, 6, 9, 13, 18, 24
+    MA5 = MA(close, 60)
+    PB1 = (EXPMA(close, M1) + MA(close, M1 * 2) + MA(close, M1 * 4)) / 3
+    PB2 = (EXPMA(close, M2) + MA(close, M2 * 2) + MA(close, M2 * 4)) / 3
+    PB3 = (EXPMA(close, M3) + MA(close, M3 * 2) + MA(close, M3 * 4)) / 3
+    PB4 = (EXPMA(close, M4) + MA(close, M4 * 2) + MA(close, M4 * 4)) / 3
+    PB5 = (EXPMA(close, M5) + MA(close, M5 * 2) + MA(close, M5 * 4)) / 3
+    PB6 = (EXPMA(close, M6) + MA(close, M6 * 2) + MA(close, M6 * 4)) / 3
+
+    AAA = MIN(MIN(MIN(MIN(MIN(PB1, PB2), PB3), PB4), PB5), PB6)
+    BBB = MAX(MAX(MAX(MAX(MAX(PB1, PB2), PB3), PB4), PB5), PB6)
+    XG = (IF(open_price < AAA, True, False) | IF(open_price.shift(1) < AAA, True, False)) & (close > BBB)
+    P6 = ABS(PB1 - PB2) + ABS(PB1 - PB3) + ABS(PB1 - PB4) + ABS(PB1 - PB5) + ABS(PB1 - PB6) + \
+         ABS(PB2 - PB3) + ABS(PB2 - PB4) + ABS(PB2 - PB5) + ABS(PB2 - PB6) + ABS(PB3 - PB4) + \
+         ABS(PB3 - PB5) + ABS(PB3 - PB6) + ABS(PB4 - PB5) + ABS(PB4 - PB6) + ABS(PB5 - PB6)
+    LXZH = P6 / close < 0.20
+    JL = (close > MA5) & LJC & ((LB > 2.2) | (LB.shift(1) > 2.2)) & (XG | XG.shift(1)) & \
+         (close > MA5 * 1.02) & (close < MA5 * 1.15) & (close > open_price * 1.02) & \
+         (LXZH | LXZH.shift(1)) & ((close - close.shift(1)) / close.shift(1) > 0.03)
+    PD = JL | JL.shift(1)
+    XGG = PD & (close > PB1 * 0.88)
+
+    # 将结果添加到数据框
+    data['Buy_Signal'] = XGG
+    return data
+
+
 def gen_daily_buy_signal_last(data):
     """
     在产生信号后，后一天下跌再买入
