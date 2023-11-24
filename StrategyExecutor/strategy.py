@@ -404,7 +404,7 @@ if __name__ == "__main__":
     # strategy_mix('../weekly_data_exclude_new/黑牡丹_600510.txt', '../monthly_data_exclude_new/黑牡丹_600510.txt', gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest)
 
     # 回测所有数据
-    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=gen_true, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=gen_daily_buy_signal_seventeen, backtest_func=backtest_strategy_low_profit)
     # back_mix_all_stock_process('../daily_data_exclude_new/', '../weekly_data_exclude_new/','../monthly_data_exclude_new/', '../back', gen_small_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_big_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_biggest_period_signal_func=gen_true, backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol

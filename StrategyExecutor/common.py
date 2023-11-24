@@ -55,37 +55,29 @@ def parse_filename(file_path):
 
 
 def load_data(file_path):
-    """
-    加载数据
-    :param file_path:
-    :return:
-    """
     data = pd.read_csv(file_path)
     name, code = parse_filename(file_path)
-    # 如果 '时间' 存在于数据的列中，将其重命名为 '日期'
     if '时间' in data.columns:
         data = data.rename(columns={'时间': '日期'})
     data['日期'] = pd.to_datetime(data['日期'])
     data['名称'] = name
     data['代码'] = code
     data['数量'] = 0
-
-    # 对数据按日期进行升序排序
     data.sort_values(by='日期', ascending=True, inplace=True)
 
-    # 从数据末尾开始向前遍历，找到最后一个日期间隔超过一个月的点
-    cutoff_index = 0  # 初始化断点索引为0，表示没有找到超过一个月的间隔
-    for i in range(len(data) - 1, 0, -1):  # 从倒数第二行开始向前遍历
-        if data.iloc[i]['日期'] - data.iloc[i - 1]['日期'] > timedelta(days=30):
-            cutoff_index = i  # 更新断点索引
-            break
+    # 使用 pandas 查找并移除第一个日期，如果它与其它日期不连续
+    date_diff = data['日期'].diff(-1).abs()
+    filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
-    # 如果找到了超过一个月的间隔，舍去这个点之前的所有数据
-    if cutoff_index:
-        data = data.iloc[cutoff_index:]
-    # 重置索引，从0开始，并删除旧的索引列
+    # 如果有大于30天的断层
+    if not filtered_diff.empty:
+        cutoff_index = filtered_diff.idxmax()
+        if cutoff_index and cutoff_index != 0:
+            data = data.loc[cutoff_index + 1:]  # 跳过第一个数据点
+    # 如果没有大于30天的断层，保留所有数据
+
     data.reset_index(drop=True, inplace=True)
-    # 判断name是否包含st，不区分大小写，如果包含，那么Max_rate为5%，否则为10%
+
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data

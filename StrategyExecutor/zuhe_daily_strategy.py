@@ -12,7 +12,9 @@ import inspect
 import itertools
 import json
 import multiprocessing
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -210,17 +212,21 @@ def deal_colu1mns(data, columns):
 
 def gen_signal(data, combination):
     """
-    生成信号
-    :param data:
-    :param combination:
-    :return:
+    优化版本的生成信号函数
+    :param data: 输入的 DataFrame
+    :param combination: 列名组合的列表
+    :return: 带有 Buy_Signal 列的 DataFrame
     """
-    # 获取combination中的列名，然后作为key进行与操作
-    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
-    for column in combination:
-        data['Buy_Signal'] = data['Buy_Signal'] & data[column]
-    return data
+    # 预先计算涨跌幅条件
+    buy_condition = data['涨跌幅'] < 0.95 * data['Max_rate']
 
+    # 使用 reduce 函数结合所有的条件
+    combined_condition = np.logical_and.reduce([data[col] for col in combination])
+
+    # 应用所有条件生成 Buy_Signal
+    data['Buy_Signal'] = buy_condition & combined_condition
+
+    return data
 
 def is_combination_in_zero_combination(combination, zero_combination):
     """
@@ -275,6 +281,53 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
     finally:
         write_json(file_name, result_df_dict)
 
+def gen_all_signal_processing_op(args, threshold_day=1, is_skip=False):
+    # 计时开始
+    start_time = time.time()
+    try:
+        full_name, final_combinations, gen_signal_func, backtest_func, zero_combination = args
+        data = load_data(full_name)
+        data = gen_signal_func(data)
+        # 只保留final_combinations前100个
+        final_combinations = final_combinations[:10000]
+        file_name = Path('../back/zuhe') / "PT中浩A1.json"
+        file_name.parent.mkdir(parents=True, exist_ok=True)
+        result_df_dict = read_json(file_name)
+
+        # 使用集合操作简化处理
+        exist_combinations_set = set(result_df_dict)
+        new_combinations = set(':'.join(combination) for combination in final_combinations) - exist_combinations_set
+        zero_combinations_set = {':'.join(zero_combination.split(':')) for zero_combination in zero_combination}
+
+        def process_combination(combination):
+            combination_key = ':'.join(combination)
+            if is_skip and combination_key in result_df_dict:
+                return
+            if any(set(combination) >= zero_comb for zero_comb in zero_combinations_set):
+                return
+
+            signal_data = gen_signal(data, combination)
+            if not signal_data['Buy_Signal'].any():
+                zero_combination.add(combination_key)
+                result_df_dict[combination_key] = {'trade_count': 0, 'total_profit': 0, 'size_of_result_df': 0, 'total_days_held': 0}
+                return
+            results_df = backtest_func(signal_data)
+            processed_result = process_results(results_df, threshold_day)
+            if processed_result:
+                result_df_dict[combination_key] = processed_result
+
+        # 使用线程池并行处理
+        with ThreadPoolExecutor() as executor:
+            executor.map(process_combination, [combination.split(':') for combination in new_combinations])
+
+    except Exception as e:
+        traceback.print_exc()
+        print(full_name)
+    finally:
+        # 计时结束
+        end_time = time.time()
+        print(f"耗时：{end_time - start_time}秒")
+        write_json(file_name, result_df_dict)
 
 def gen_all_signal_processing(args, threshold_day=1, is_skip=False):
     """
@@ -285,23 +338,39 @@ def gen_all_signal_processing(args, threshold_day=1, is_skip=False):
     :param threshold_day: Threshold for 'Days Held' to filter the results.
     :return: None, writes results to a JSON file.
     """
+    # 计时开始
+    start_time = time.time()
     try:
         try:
             full_name, final_combinations, gen_signal_func, backtest_func, zero_combination = args
+
             data = load_data(full_name)
             data = gen_signal_func(data)
             file_name = Path('../back/zuhe') / f"{data['名称'].iloc[0]}.json"
             file_name.parent.mkdir(parents=True, exist_ok=True)
 
             result_df_dict = read_json(file_name)
+            exist_combinations_set = set(result_df_dict.keys())
+            # 将final_combinations转换为集合,需要将元素按照':'拼接，然后过滤掉exist_combinations_set中已经存在的组合
+            final_combinations_set = {':'.join(combination) for combination in final_combinations}
+            final_combinations_set = final_combinations_set - exist_combinations_set
+            final_combinations = [combination.split(':') for combination in final_combinations_set]
+            for key, value in result_df_dict.items():
+                if value['trade_count'] == 0:
+                    zero_combination.add(key)
+            print(f"{file_name} zero_combination len: {len(zero_combination)}")
+            zero_combinations_set = {frozenset(zero_combination.split(':')) for zero_combination in
+                                         zero_combination}
+            # 这里也需要加载对final_combinations的过滤
             for index, combination in enumerate(final_combinations, start=1):
                 combination_key = ':'.join(combination)
+                combination_set = frozenset(combination)
                 if is_skip:
                     if combination_key in result_df_dict:
                         print(f"combination {combination_key} in result_df_dict")
                         continue
-                if any(comb in zero_combination for comb in combination):
-                    print(f"combination {combination_key} in zero_combination")
+                if any(combination_set >= zero_comb for zero_comb in zero_combinations_set):
+                    # print(f"combination {combination_key} in zero_combination")
                     continue
 
                 signal_data = gen_signal(data, combination)
@@ -323,6 +392,9 @@ def gen_all_signal_processing(args, threshold_day=1, is_skip=False):
             traceback.print_exc()
             print(full_name)
         finally:
+            # 计时结束
+            end_time = time.time()
+            print(f"耗时：{end_time - start_time}秒")
             write_json(file_name, result_df_dict)
     except Exception as e:
         # 输出异常栈
@@ -333,7 +405,8 @@ def read_json(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        print(f"Error reading {file_path} exception: {e}")
         return {}
 
 
@@ -423,9 +496,32 @@ def gen_full_all_basic_signal(data):
     """
     # 扫描basic_daily_strategy.py文件，生成所有的基础信号
     for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
-        if name.startswith('gen_basic_daily_buy_signal_1'):
+        if name.startswith('gen_basic_daily_buy_signal_'):
             data = func(data)
     return data
+
+def get_combination_list_optimized(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set):
+    result_combination_list = []
+    full_combination_list = []
+    seen_combinations = set()  # 用于跟踪已经添加的组合
+
+    # Convert indicators to sets in advance
+    basic_indicators_sets = [frozenset(basic_indicator) for basic_indicator in basic_indicators]
+    newest_indicators_sets = [frozenset(newest_indicator) for newest_indicator in newest_indicators] if newest_indicators != [[]] else [frozenset()]
+
+    for basic_set in basic_indicators_sets:
+        for newest_set in newest_indicators_sets:
+            if not basic_set & newest_set:  # Check for intersection
+                combination = basic_set | newest_set
+                if combination not in seen_combinations:
+                    seen_combinations.add(combination)
+                    combination_list = list(combination)
+                    if ':'.join(combination_list) not in exist_combinations_set:
+                        result_combination_list.append(combination_list)
+                    full_combination_list.append(combination_list)
+
+    return result_combination_list, full_combination_list
+
 
 def get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set):
     """
@@ -476,12 +572,13 @@ def filter_combination_list(combination_list, statistics, zero_combinations_set,
     :param trade_count_threshold:
     :return:
     """
+    zero_combinations_set = {frozenset(zero_combination.split(':')) for zero_combination in zero_combinations_set}
     result_combination_list = []
     for combination in combination_list:
         combination_key = ':'.join(combination)
+        combination_set = set(combination)
         if combination_key not in statistics or statistics[combination_key]['trade_count'] >= trade_count_threshold:
-            if not any([set(combination) >= set(zero_combination.split(':')) for zero_combination in
-                        zero_combinations_set]):
+            if not any(combination_set >= zero_comb for zero_comb in zero_combinations_set):
                 result_combination_list.append(combination)
     return result_combination_list
 
@@ -514,15 +611,29 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
     basic_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
     newest_indicators = [[]]
     while True:
-        result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
-
-        print(f'level:{level}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
+        # 如果对应的层级的组合文件已经存在，那么直接读取
+        if os.path.exists(f'../back/combination_list_{level}.json'):
+            temp_dict = read_json(f'../back/combination_list_{level}.json')
+            result_combination_list = temp_dict['result_combination_list']
+            full_combination_list = temp_dict['full_combination_list']
+            newest_indicators = temp_dict['newest_indicators']
+        else:
+            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+            newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+            temp_dict = {}
+            temp_dict['result_combination_list'] = result_combination_list
+            temp_dict['full_combination_list'] = full_combination_list
+            temp_dict['newest_indicators'] = newest_indicators
+            write_json(f'../back/combination_list_{level}.json', temp_dict)
+        print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
         level += 1
-        newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+
         if result_combination_list == []:
             if newest_indicators == []:
                 break
             continue
+        # 将result_combination_list, full_combination_list写入文件，文件名包含level
+
         # 筛选出full_combination_list中的指标在statistics中对应的数据
         # 准备多进程处理的任务列表
         tasks = []
@@ -531,7 +642,8 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
             for f in fs:
                 fullname = os.path.join(root, f)
                 tasks.append((fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
-
+        # 将tasks逆序排列，这样可以让最后一个文件先处理，这样可以先看到结果
+        # tasks.reverse()
         # 使用进程池处理任务
         pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
 
@@ -548,6 +660,7 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
         for key, value in statistics.items():
             if value['trade_count'] == 0:
                 zero_combinations_set.add(key)
+        newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
 
 def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
     """
