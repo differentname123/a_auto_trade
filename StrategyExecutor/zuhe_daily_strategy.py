@@ -394,7 +394,7 @@ def gen_all_signal_processing(args, threshold_day=1, is_skip=False):
         finally:
             # 计时结束
             end_time = time.time()
-            print(f"耗时：{end_time - start_time}秒")
+            print(f"{full_name} 耗时：{end_time - start_time}秒")
             write_json(file_name, result_df_dict)
     except Exception as e:
         # 输出异常栈
@@ -632,35 +632,39 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
             if newest_indicators == []:
                 break
             continue
-        # 将result_combination_list, full_combination_list写入文件，文件名包含level
+        total_count = len(result_combination_list)
+        current_count = 0
+        # 将result_combination_list按照100000个一组进行分组
+        result_combination_lists = [result_combination_list[i:i + 50000] for i in range(0, len(result_combination_list), 50000)]
+        for result_combination_list in result_combination_lists:
+            current_count += len(result_combination_list)
+            # 输出当前的进度
+            print(f'level:{level}, current_count:{current_count}, total_count:{total_count}, progress:{current_count / total_count * 100:.2f}%')
+            tasks = []
+            # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
+            for root, ds, fs in os.walk(file_path):
+                for f in fs:
+                    fullname = os.path.join(root, f)
+                    tasks.append((fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
+            # 将tasks逆序排列，这样可以让最后一个文件先处理，这样可以先看到结果
+            tasks.reverse()
+            # 使用进程池处理任务
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
 
-        # 筛选出full_combination_list中的指标在statistics中对应的数据
-        # 准备多进程处理的任务列表
-        tasks = []
-        # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
-        for root, ds, fs in os.walk(file_path):
-            for f in fs:
-                fullname = os.path.join(root, f)
-                tasks.append((fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
-        # 将tasks逆序排列，这样可以让最后一个文件先处理，这样可以先看到结果
-        # tasks.reverse()
-        # 使用进程池处理任务
-        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1)
+            total_files = len(tasks)
+            for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing, tasks), 1):
+                print(f"Processing file {i} of {total_files}...")
 
-        total_files = len(tasks)
-        for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing, tasks), 1):
-            print(f"Processing file {i} of {total_files}...")
-
-        pool.close()
-        pool.join()
-        statistics_zuhe('../back/zuhe')
-        statistics = read_json('../back/statistics.json')
-        exist_combinations_set = set(statistics.keys())
-        zero_combinations_set = set()
-        for key, value in statistics.items():
-            if value['trade_count'] == 0:
-                zero_combinations_set.add(key)
-        newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+            pool.close()
+            pool.join()
+            statistics_zuhe('../back/zuhe')
+            statistics = read_json('../back/statistics.json')
+            exist_combinations_set = set(statistics.keys())
+            zero_combinations_set = set()
+            for key, value in statistics.items():
+                if value['trade_count'] == 0:
+                    zero_combinations_set.add(key)
+            newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
 
 def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
     """
