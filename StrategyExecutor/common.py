@@ -64,8 +64,10 @@ def load_data(file_path):
     data['代码'] = code
     data['数量'] = 0
     data.sort_values(by='日期', ascending=True, inplace=True)
+    # 过滤掉收盘价小于等于0的数据
+    data = data[data['收盘'] > 0]
 
-    # 使用 pandas 查找并移除第一个日期，如果它与其它日期不连续
+    # 查找并移除第一个日期，如果与其他日期不连续超过30天
     date_diff = data['日期'].diff(-1).abs()
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
@@ -74,10 +76,9 @@ def load_data(file_path):
         cutoff_index = filtered_diff.idxmax()
         if cutoff_index and cutoff_index != 0:
             data = data.loc[cutoff_index + 1:]  # 跳过第一个数据点
-    # 如果没有大于30天的断层，保留所有数据
 
+    # 重置索引
     data.reset_index(drop=True, inplace=True)
-
     data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data

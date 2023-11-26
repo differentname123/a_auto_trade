@@ -49,6 +49,8 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
 
     # 控制台打印回测结果，按照时间升序,不要省略
     print(results_df)
+    if results_df.shape[0] != 0:
+        Total_Profit = results_df['Total_Profit'].iloc[-1]
 
     # 控制台打印回测结果，按照持有天数逆序
     result = results_df.sort_values(by='Days Held', ascending=True)
@@ -58,7 +60,7 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     result_df = result[result['Days Held'] > threshold_day]
     total_days_held = result_df['Days Held'].sum()
     print(f"trade_count: {result.shape[0]}")
-    print(f"total_profit: {result['Total_Profit'].iloc[-1]}")
+    print(f"total_profit: {Total_Profit}")
     print(f"size of result_df: {result_df.shape[0]}")
     print(f"ratio: {result_df.shape[0] / result.shape[0] if result.shape[0] > 0 else 0}")
     print(f"average days_held: {total_days_held / result.shape[0]}")
@@ -222,9 +224,17 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         if df is not None:
             all_dfs.append(df)
 
-    result_df = pd.concat(all_dfs, ignore_index=True)
-    result_df = result_df.sort_values(by='Days Held', ascending=False)
-    total_days_held = result_df['Days Held'].sum() + trade_count - result_df.shape[0]
+    # 如果all_dfs为空，说明没有任何一只股票满足条件
+    total_days_held = 0
+    result_df_size = 0
+    result_df = None
+    try:
+        result_df = pd.concat(all_dfs, ignore_index=True)
+        result_df = result_df.sort_values(by='Days Held', ascending=False)
+        total_days_held = result_df['Days Held'].sum() + trade_count - result_df.shape[0]
+        result_df_size = result_df.shape[0]
+    except Exception as e:
+        print(e)
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     filename = f"{gen_signal_func.__name__}_{backtest_func.__name__}.txt"
@@ -238,10 +248,10 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"timestamp: {timestamp}\n")
         f.write(f"trade_count: {trade_count}\n")
         f.write(f"total_profit: {total_profit}\n")
-        f.write(f"size of result_df: {result_df.shape[0]}\n")
-        f.write(f"ratio: {result_df.shape[0] / trade_count if trade_count > 0 else 0}\n")
-        f.write(f"average days_held: {total_days_held / trade_count}\n")
-        f.write(f"average profit: {total_profit / trade_count}\n")
+        f.write(f"size of result_df: {result_df_size}\n")
+        f.write(f"ratio: {result_df_size / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"average days_held: {total_days_held / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"average profit: {total_profit / trade_count if trade_count > 0 else 0}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))
@@ -258,16 +268,17 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"timestamp: {timestamp}\n")
         f.write(f"trade_count: {trade_count}\n")
         f.write(f"total_profit: {total_profit}\n")
-        f.write(f"size of result_df: {result_df.shape[0]}\n")
-        f.write(f"ratio: {result_df.shape[0] / trade_count if trade_count > 0 else 0}\n")
-        f.write(f"average days_held: {total_days_held / trade_count}\n")
-        f.write(f"average profit: {total_profit / trade_count}\n")
+        f.write(f"size of result_df: {result_df_size}\n")
+        f.write(f"ratio: {result_df_size / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"average days_held: {total_days_held / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"average profit: {total_profit / trade_count if trade_count > 0 else 0 }\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))
         f.write("\n\n")
         f.write('\n\n')
-        result_df.to_string(f)
+        if result_df is not None:
+            result_df.to_string(f)
 
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -390,21 +401,30 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
 
 if __name__ == "__main__":
     # # daily macd新低买入
-    # strategy('../daily_data_exclude_new/东方电子_000682.txt', gen_signal_func=mix,backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new/力佳科技_835237.txt', gen_signal_func=mix,backtest_func=backtest_strategy_low_profit)
 
     # 各种组合的遍历
     # back_zuhe('../daily_data_exclude_new/C润本_603193.txt.txt', backtest_func=backtest_strategy_low_profit)
     # back_zuhe_all('../daily_data_exclude_new', backtest_func=backtest_strategy_low_profit)
     # back_sigle_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
-    back_layer_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
-    # statistics_zuhe('../back/zuhe')
+    back_layer_all_op('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit)
+
+    # statistics_zuhe('../back/zuhe','振幅_2_到_5_固定区间_signal:收盘_10日_大极值signal:涨跌幅_大于_5_固定区间_signal')
+
+    # statistics = read_json('../back/statistics.json')
+    # # 遍历statistics,将key以':'分割得到list,将list长度小于3的key和value加入到新的dict中
+    # statistics_new = {}
+    # for key, value in statistics.items():
+    #     if len(key.split(':')) < 3:
+    #         statistics_new[key] = value
+    # write_json('../back/statistics_new.json', statistics_new)
 
     # mix 买入
     # strategy_mix('../daily_data_exclude_new/龙洲股份_002682.txt', '../weekly_data_exclude_new/中油工程_600339.txt', '../monthly_data_exclude_new/中油工程_600339.txt', gen_small_period_signal_func=gen_buy_signal_four, gen_big_period_signal_func=gen_buy_signal_four, gen_biggest_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest_buy_all)
     # strategy_mix('../weekly_data_exclude_new/黑牡丹_600510.txt', '../monthly_data_exclude_new/黑牡丹_600510.txt', gen_small_period_signal_func=gen_monthly_buy_signal_one, gen_big_period_signal_func=gen_monthly_buy_signal_one, backtest_func=backtest_strategy_highest)
 
     # 回测所有数据
-    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=gen_daily_buy_signal_seventeen, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
     # back_mix_all_stock_process('../daily_data_exclude_new/', '../weekly_data_exclude_new/','../monthly_data_exclude_new/', '../back', gen_small_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_big_period_signal_func=gen_monthly_buy_signal_mix_one_two, gen_biggest_period_signal_func=gen_true, backtest_func=backtest_strategy_highest_buy_all)
 
     # 获取指定日期买入信号的symbol

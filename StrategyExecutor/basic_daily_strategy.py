@@ -74,6 +74,24 @@ def gen_multiple_daily_buy_signal_ma(data, key, ma_list):
 
     return data
 
+def gen_multiple_daily_buy_signal_compare(data, key_list):
+    """
+    产生公共结构的key相较于昨日的买入信号
+    列如:
+        涨跌幅大于或者小于固定的值1 3 5等，或者是大于或者小于5 10 20平均数的值
+    :param ma_list:
+    :param data:
+    :return:
+    """
+    for key in key_list:
+        # 再遍历后面的key_list
+        for key2 in key_list:
+            if key != key2:
+                # 产生key相较于key2的信号
+                column_name = f'{key}_大于昨日_{key2}_signal'
+                data[column_name] = data[key] >= data[key2].shift(1)
+    return data
+
 def gen_multiple_daily_buy_signal_max_min(data, key, max_min_list):
     """
     产生公共结构的买入信号
@@ -217,5 +235,14 @@ def gen_basic_daily_buy_signal_10(data):
     data['BAR'] = (MACD - MACD_Signal) * 2
     data = gen_multiple_daily_buy_signal_ma(data, 'BAR', [5, 10, 20])
     data = gen_multiple_daily_buy_signal_max_min(data, 'BAR', [5, 10, 20])
+    return data
+
+def gen_basic_daily_buy_signal_11(data):
+    """
+    产生股价['收盘', '开盘', '最高', '最低']相较于昨日的比较
+    :param data:
+    :return:
+    """
+    data = gen_multiple_daily_buy_signal_compare(data, ['收盘', '开盘', '最高', '最低'])
     return data
 
