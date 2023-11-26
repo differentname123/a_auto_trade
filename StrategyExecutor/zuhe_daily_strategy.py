@@ -299,7 +299,7 @@ def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
         data = load_data(full_name)
         data = gen_signal_func(data)
         file_name = Path('../back/zuhe') / f"{data['名称'].iloc[0]}.json"
-        # file_name = Path('../back/zuhe') / f"新钢股份.json"
+        # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
@@ -613,7 +613,7 @@ def filter_combination_list(combination_list, statistics, zero_combinations_set,
     return result_combination_list
 
 
-def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='all'):
+def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='target_key'):
     """
     分层进行回测的优化版函数
     """
@@ -652,8 +652,7 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
         print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
         # 优化5: 使用并行处理
         if result_combination_list:
-            process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func)
-            statistics_zuhe('../back/zuhe', target_key=target_key)
+            process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func,target_key)
             # 更新statistics和zero_combinations_set
             statistics = read_json(statistics_file_path)
             exist_combinations_set = set(statistics.keys())
@@ -666,7 +665,7 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
         level += 1
 
 
-def process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func):
+def process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
     使用多进程处理组合
     """
@@ -677,6 +676,11 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
     for sublist in result_combination_lists:
         # 开始计时
         start_time = time.time()
+        # 读取sublist
+        sublist_json = read_json('../back/sublist.json')
+        # 如果sublist是空的，赋值为[]
+        if not sublist_json:
+            sublist_json = []
         # 打印进度
         print(f"Processing {len(sublist)} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
@@ -686,6 +690,11 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
                 print(f"Processing file {i} of {total_files}...")
         # 结束计时
         end_time = time.time()
+        # 将sublist增加到sublist_json,并写入文件
+        sublist_json.extend(sublist)
+        write_json('../back/sublist.json', sublist_json)
+
+        statistics_zuhe('../back/zuhe', target_key=target_key)
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 
@@ -837,12 +846,18 @@ def statistics_zuhe(file_path,target_key='all'):
                     else:
                         result[key] = value
     else:
+        sublist_list = read_json('../back/sublist.json')
+        sublist_set = set()
+        for sublist in sublist_list:
+            temp_key = ':'.join(sublist)
+            sublist_set.add(temp_key)
+
         for root, ds, fs in os.walk(file_path):
             for f in fs:
                 fullname = os.path.join(root, f)
                 data = read_json(fullname)
                 for key, value in data.items():
-                    if key == target_key:
+                    if key in sublist_set:
                         if key in result:
                             result[key]['trade_count'] += value['trade_count']
                             result[key]['total_profit'] += value['total_profit']

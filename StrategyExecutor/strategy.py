@@ -408,8 +408,7 @@ if __name__ == "__main__":
     # back_zuhe_all('../daily_data_exclude_new', backtest_func=backtest_strategy_low_profit)
     # back_sigle_all('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
     back_layer_all_op('../daily_data_exclude_new', gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit)
-
-    # statistics_zuhe('../back/zuhe','振幅_2_到_5_固定区间_signal:收盘_10日_大极值signal:涨跌幅_大于_5_固定区间_signal')
+    # statistics_zuhe('../back/zuhe', target_key="target_key")
 
     # statistics = read_json('../back/statistics.json')
     # # 遍历statistics,将key以':'分割得到list,将list长度小于3的key和value加入到新的dict中

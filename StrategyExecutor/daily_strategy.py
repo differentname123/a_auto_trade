@@ -780,7 +780,7 @@ def mix(data):
     data_1 = data.copy()
     data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1, 'BAR_20日_小极值_signal:收盘_大于_20_固定区间_signal'.split(':'))
+    gen_signal(data_1, '最高_5日_大极值signal:最高_小于_5_日均线_signal'.split(':'))
     data['Buy_Signal'] = data_1['Buy_Signal']
 
 
