@@ -51,14 +51,14 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     print(results_df)
     if results_df.shape[0] != 0:
         Total_Profit = results_df['Total_Profit'].iloc[-1]
-
+    total_days_held = results_df['Days Held'].sum()
     # 控制台打印回测结果，按照持有天数逆序
     result = results_df.sort_values(by='Days Held', ascending=True)
     print(result)
     if result.shape[0] == 0:
         return
     result_df = result[result['Days Held'] > threshold_day]
-    total_days_held = result_df['Days Held'].sum()
+
     print(f"trade_count: {result.shape[0]}")
     print(f"total_profit: {Total_Profit}")
     print(f"size of result_df: {result_df.shape[0]}")
@@ -192,7 +192,8 @@ def process_single_file(args):
         if not temp_back_df.empty:
             trade_count = temp_back_df.shape[0]
             total_profit = temp_back_df['Total_Profit'].iloc[-1]
-            filtered_df = temp_back_df[temp_back_df['Days Held'] > threshold_day]
+            # filtered_df = temp_back_df[temp_back_df['Days Held'] > threshold_day]
+            filtered_df = temp_back_df
             if not filtered_df.empty:
                 return filtered_df, trade_count, total_profit
             return None, trade_count, total_profit
@@ -202,7 +203,7 @@ def process_single_file(args):
 
 
 def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func=gen_buy_signal_one,
-                   backtest_func=backtest_strategy_highest):
+                   backtest_func=backtest_strategy_highest, is_keep_all=False):
     all_dfs = []
     trade_count = 0
     total_profit = 0
@@ -229,7 +230,8 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
     result_df_size = 0
     result_df = None
     try:
-        result_df = pd.concat(all_dfs, ignore_index=True)
+        all_df = pd.concat(all_dfs, ignore_index=True)
+        result_df = all_df[all_df['Days Held'] > threshold_day]
         result_df = result_df.sort_values(by='Days Held', ascending=False)
         total_days_held = result_df['Days Held'].sum() + trade_count - result_df.shape[0]
         result_df_size = result_df.shape[0]
@@ -277,6 +279,8 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(inspect.getsource(gen_signal_func))
         f.write("\n\n")
         f.write('\n\n')
+        if is_keep_all:
+            all_df.to_string(f)
         if result_df is not None:
             result_df.to_string(f)
 

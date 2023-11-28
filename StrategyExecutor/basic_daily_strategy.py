@@ -15,6 +15,17 @@ import talib
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.common import load_data
 
+def gen_multiple_daily_buy_signal_yes(data):
+    """
+    为所有signal生成昨日信号
+    :param data:
+    :return:
+    """
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    new_columns = {column + '_yes': data[column].shift(1) for column in signal_columns}
+    new_data = pd.DataFrame(new_columns)
+    return pd.concat([data, new_data], axis=1)
+
 
 def gen_multiple_daily_buy_signal_fix(data, key, value_list):
     """
@@ -146,6 +157,10 @@ def gen_basic_daily_buy_signal_3(data):
     """
     data['实体_阴线_signal'] = data['收盘'] <= data['开盘']
     data['实体_阳线_signal'] = data['收盘'] >= data['开盘']
+    data['实体rate'] = abs(data['收盘'] - data['开盘']) / (0.01 * data['收盘'] * data['Max_rate'])
+    data = gen_multiple_daily_buy_signal_fix(data, '实体rate', [0.1, 0.5, 1])
+    data = gen_multiple_daily_buy_signal_ma(data, '实体rate', [5, 10, 20])
+    data = gen_multiple_daily_buy_signal_max_min(data, '实体rate', [5, 10, 20])
     return data
 
 

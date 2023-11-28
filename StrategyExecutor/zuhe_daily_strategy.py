@@ -528,6 +528,7 @@ def gen_full_all_basic_signal(data):
     for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
         if name.startswith('gen_basic_daily_buy_signal_'):
             data = func(data)
+    data = gen_multiple_daily_buy_signal_yes(data)
     return data
 
 def get_combination_list_optimized(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set):
@@ -596,7 +597,7 @@ def get_combination_list(basic_indicators, newest_indicators, exist_combinations
 
 def filter_combination_list(combination_list, statistics, zero_combinations_set, trade_count_threshold=10000):
     """
-    过滤掉交易次数小于10000的组合
+    过滤掉交易次数小于10000的组合,不过滤已存在
     :param combination_list:
     :param statistics:
     :param trade_count_threshold:
@@ -635,18 +636,22 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
     # 优化4: 减少重复的filter_combination_list调用
     basic_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
     newest_indicators = [[]]
+    # temp_list = []
+    # for column in signal_columns:
+    #     if [column] not in basic_indicators:
+    #         temp_list.append([column])
 
     while True:
         # 将路径构造移出循环，避免重复
-        combination_list_path = f'../back/combination_list_{level}.json'
-        result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators,
-                                                                              exist_combinations_set,
-                                                                              zero_combinations_set)
-        newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
-        temp_dict = {'result_combination_list': result_combination_list,
-                     'full_combination_list': full_combination_list,
-                     'newest_indicators': newest_indicators}
-        write_json(combination_list_path, temp_dict)
+        result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+        newest_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
+
+        # combination_list_path = f'../back/combination_list_{level}.json'
+        # newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+        # temp_dict = {'result_combination_list': result_combination_list,
+        #              'full_combination_list': full_combination_list,
+        #              'newest_indicators': newest_indicators}
+        # write_json(combination_list_path, temp_dict)
 
         # ... 省略部分代码 ...
         print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
@@ -670,19 +675,21 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
     使用多进程处理组合
     """
     # 按照一定数量分割list
-    split_size = 1000
+    split_size = 10000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
+    total_len = 0
     for sublist in result_combination_lists:
         # 开始计时
         start_time = time.time()
         # 读取sublist
         sublist_json = read_json('../back/sublist.json')
+        total_len += len(sublist)
         # 如果sublist是空的，赋值为[]
         if not sublist_json:
             sublist_json = []
         # 打印进度
-        print(f"Processing {len(sublist)} files... of {len(result_combination_list)}")
+        print(f"Processing {total_len} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
         with multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1) as pool:
             total_files = len(tasks)

@@ -709,6 +709,13 @@ def can_not_buy(data):
 def gen_daily_buy_signal_25(data):
     """
     金牛选股策略
+    timestamp: 20231129010053
+    trade_count: 47753
+    total_profit: 272905.48374484706
+    size of result_df: 10796
+    ratio: 0.22608003685632316
+    average days_held: 2.341863338428999
+    average profit: 5.714939035135951
     :param data:
     :return:
     """
@@ -757,6 +764,102 @@ def gen_daily_buy_signal_25(data):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate']) & (XGG | (XG & (LB > 2.2) & (close > MA5 * 1.02) & (close < MA5 * 1.15)))
     return data
 
+def gen_daily_buy_signal_26(data):
+    """
+    超级短线选股策略
+    timestamp: 20231129003443
+    trade_count: 25167
+    total_profit: 191008.16035888557
+    size of result_df: 1817
+    ratio: 0.07219771923550682
+    average days_held: 1.2649103985377677
+    average profit: 7.589627701310667
+    :param data:
+    :return:
+    """
+    X_2 = data['最高'].rolling(window=20).max().shift(1)
+    X_3 = data['最低'].rolling(window=10).min().shift(1)
+    X_4 = data['最低'] > X_3
+    X_5 = data['最高'] < X_2
+    X_6 = data.index.to_series().apply(lambda x: x > 30)
+    X_7 = np.maximum(np.maximum(data['最高'] - data['最低'], abs(data['收盘'].shift(1) - data['最高'])), abs(data['收盘'].shift(1) - data['最低']))
+    X_8 = X_7.rolling(window=14).mean()
+    X_9 = ((data['最高'] + data['最低']) / 2).rolling(window=1).mean()
+    X_10 = X_7.rolling(window=2).mean()
+    X_11 = X_9 + X_10
+    X_12 = X_9 - X_10
+    X_13 = data['收盘'] < X_12.rolling(window=3).max()
+    X_14 = (data['收盘'] < data['收盘'].shift(1)) & (data['收盘'] < data['开盘']) & (data['收盘'] != data['最低']) & (data['收盘'] > data['收盘'].rolling(window=18).mean())
+    X_15 = data['收盘'].rolling(window=20).mean() > data['收盘'].rolling(window=20).mean().shift(1)
+    X_16 = data['收盘'] < data['最低'].rolling(window=3).min().shift(1)
+    X_17 = (X_8 > X_8.shift(1)) & (X_7 > X_7.shift(1))
+    X_18 = (data['收盘'] - data['最低']) / (data['最高'] - data['最低'])
+    X_19 = X_18 < 0.3
+    X_20 = (data['最高'] - data['开盘']) / (data['最高'] - data['最低'])
+    X_21 = X_20 < 0.4
+
+    data['Buy_Signal'] &= X_14 & X_15 & X_16 & X_17 & X_19 & X_13 & X_4 & X_5 & X_6
+
+    return data
+
+def gen_daily_buy_signal_27(data):
+    """
+    小楷尾盘淘金选股策略
+    trade_count: 4145
+    total_profit: 27710.67343010754
+    size of result_df: 516
+    ratio: 0.12448733413751507
+    average days_held: 1.4651387213510254
+    average profit: 6.685325314863098
+    :param data:
+    :return:
+    """
+    VAR1 = (data['开盘'].shift(3) > data['收盘'].shift(3)) & (data['开盘'].shift(2) > data['收盘'].shift(2)) & (data['开盘'].shift(1) < data['收盘'].shift(1))
+    VAR2 = data['开盘'] > data['收盘']
+    VAR3 = data['收盘'].shift(1) / data['收盘'] >= 1.03
+    VAR4 = data['收盘'] / data['最低'] < 1.03
+    VAR5 = (data['成交量'] < data['成交量'].shift(3) * 1.2) & (data['成交量'] > data['成交量'].shift(3) * 0.9)
+    VAR6 = data['最高'] < data['最高'].shift(1)
+    VAR7 = data['收盘'].ewm(span=5, adjust=False).mean() > data['收盘'].rolling(window=14).mean() * 1.017
+    VAR8 = (data['开盘'].shift(3) < data['收盘'].shift(3)) & (data['开盘'].shift(2) < data['收盘'].shift(2)) & (data['开盘'].shift(1) > data['收盘'].shift(1))
+    VAR9 = data['收盘'].shift(2) < data['收盘'].shift(1) * 1.01
+    VAR10 = data['成交量'] < data['成交量'].rolling(window=16).min() * 9.5
+    VAR11 = (data['收盘'] - data['最低']) < (data['开盘'] - data['收盘']) * 0.6
+    VAR12 = data['收盘'].shift(1) / data['收盘'].shift(2) < 1.0995
+    VAR13 = data['最高'].shift(1) / data['收盘'] < 1.07
+    VAR14 = data['最高'] - data['开盘'] > (data['收盘'] - data['最低'])
+    VAR15 = data['最高'].shift(3) / data[['开盘', '收盘']].min(axis=1).shift(3) > 1.011
+    X_15 = np.where(data['收盘'] < data['开盘'], (data['收盘'] - data['最低']) / (data['最高'] - data['最低']), 0)
+    涨幅 = data['收盘'] / data['收盘'].shift(1)
+
+    XG1 = VAR8 & VAR2 & (涨幅 < 1.098) & VAR3 & VAR4 & VAR6 & VAR11 & VAR12 & VAR10 & VAR13 & VAR14 & VAR15 & VAR9 & (X_15 > 0.03) & (X_15 < 0.3)
+    XG2 = VAR1 & VAR2 & VAR3 & VAR4 & VAR5 & VAR6 & VAR7
+
+    data['Buy_Signal'] = (XG1 | XG2)
+
+    return data
+
+
+def gen_daily_buy_signal_28(data):
+    """
+    九五至尊选股策略
+    timestamp: 20231129022402
+    trade_count: 9813
+    total_profit: 160647.18787170682
+    size of result_df: 1818
+    ratio: 0.18526444512381535
+    average days_held: 2.119229593396515
+    average profit: 16.37085375233943
+    :param data:
+    :return:
+    """
+    X_3 = 0.01 * data['成交额'].ewm(span=13, adjust=False).mean() / data['成交量'].ewm(span=13, adjust=False).mean()
+    JWZZ = (data['收盘'] - X_3) / X_3 * 1000
+
+    # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
+    data['Buy_Signal'] &= (JWZZ.shift(1) < 95) & (JWZZ >= 95)
+
+
 
 def gen_daily_buy_signal_last(data):
     """
@@ -780,7 +883,7 @@ def mix(data):
     data_1 = data.copy()
     data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1, '最高_5日_大极值signal:最高_小于_5_日均线_signal'.split(':'))
+    gen_signal(data_1, '收盘_5日_小极值_signal_yes:涨跌幅_大于_5_固定区间_signal_yes'.split(':'))
     data['Buy_Signal'] = data_1['Buy_Signal']
 
 
