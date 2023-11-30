@@ -55,7 +55,7 @@ def save_stock_data(stock_data, exclude_code):
     code = stock_data['代码']
     if code not in exclude_code:
         price_data = get_price(code, '19700101', '20291021', period='daily')
-        filename = '../daily_data_exclude_new/{}_{}.txt'.format(name, code)
+        filename = '../daily_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
         # price_data不为空才保存
         if not price_data.empty:
             price_data.to_csv(filename, index=False)
@@ -65,12 +65,22 @@ def save_stock_data(stock_data, exclude_code):
 
 def save_all_data():
     stock_data_df = ak.stock_zh_a_spot_em()
+    # 获取stock_data_df中的股票代码
+    all_code = stock_data_df['代码'].tolist()
     exclude_code = []
+    need_code = []
     exclude_code.extend(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code.extend(ak.stock_cy_a_spot_em()['代码'].tolist())
+    # 获取以00或者30开头的股票代码
+    need_code.extend([code for code in stock_data_df['代码'].tolist() if code.startswith('000') or code.startswith('002')  or code.startswith('003')
+                      or code.startswith('001') or code.startswith('600') or code.startswith('601') or code.startswith('603') or code.startswith('605')])
 
+    new_exclude_code = [code for code in all_code if code not in need_code]
+    new_exclude_code.extend(exclude_code)
+    # 将new_exclude_code去重
+    new_exclude_code = list(set(new_exclude_code))
     with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
-        futures = [executor.submit(save_stock_data, stock_data, exclude_code) for _, stock_data in
+        futures = [executor.submit(save_stock_data, stock_data, new_exclude_code) for _, stock_data in
                    stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
             try:

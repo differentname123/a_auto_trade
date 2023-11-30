@@ -540,18 +540,18 @@ def backtest_strategy_low_profit(data):
                 sell_price = data['收盘'].iloc[j]
 
             sell_date = data['日期'].iloc[j]
-            profit = (sell_price - buy_price) * 100  # 每次买入100股
+            profit = (sell_price - buy_price) * 100  # 每次卖出100股
             total_profit += profit
-            growth_rate = 0
+            total_cost = buy_price * 100
             days_held = j - buy_index
-            results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, growth_rate,
+            results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, total_cost,
                             days_held, i])
 
         i += 1
 
     results_df = pd.DataFrame(results,
                               columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
-                                       'Total_Profit', 'Growth Rate (%)',
+                                       'Total_Profit', 'total_cost',
                                        'Days Held', 'Buy_Index'])
 
     return results_df

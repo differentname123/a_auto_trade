@@ -152,6 +152,13 @@ def gen_basic_daily_buy_signal_2(data):
 def gen_basic_daily_buy_signal_3(data):
     """
     阴线或者阳线
+    data['实体_阴线_signal'] = data['收盘'] <= data['开盘']
+    data['实体_阳线_signal'] = data['收盘'] >= data['开盘']
+    data['实体'] = data['收盘'] - data['开盘']
+    data = gen_multiple_daily_buy_signal_fix(data, '实体', [0.5, 3, 7])
+    data = gen_multiple_daily_buy_signal_ma(data, '实体', [5, 10, 20])
+    data = gen_multiple_daily_buy_signal_max_min(data, '实体', [5, 10, 20])
+    return data
     :param data:
     :return:
     """
@@ -161,6 +168,12 @@ def gen_basic_daily_buy_signal_3(data):
     data = gen_multiple_daily_buy_signal_fix(data, '实体rate', [0.1, 0.5, 1])
     data = gen_multiple_daily_buy_signal_ma(data, '实体rate', [5, 10, 20])
     data = gen_multiple_daily_buy_signal_max_min(data, '实体rate', [5, 10, 20])
+    # data['实体_阴线_signal'] = data['收盘'] <= data['开盘']
+    # data['实体_阳线_signal'] = data['收盘'] >= data['开盘']
+    # data['实体'] = data['收盘'] - data['开盘']
+    # data = gen_multiple_daily_buy_signal_fix(data, '实体', [0.5, 3, 7])
+    # data = gen_multiple_daily_buy_signal_ma(data, '实体', [5, 10, 20])
+    # data = gen_multiple_daily_buy_signal_max_min(data, '实体', [5, 10, 20])
     return data
 
 

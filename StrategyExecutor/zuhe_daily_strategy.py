@@ -450,16 +450,19 @@ def process_results(results_df, threshold_day):
         return {
             'trade_count': 0,
             'total_profit': 0,
+            'total_cost': 0,
             'size_of_result_df': 0,
             'total_days_held': 0
         }
     total_days_held = result['Days Held'].sum()
+    total_cost = result['total_cost'].sum()
     Total_Profit = results_df['Total_Profit'].iloc[-1]
     result_df = result[result['Days Held'] > threshold_day]
     result_shape = result.shape[0]
     return {
         'trade_count': result_shape,
         'total_profit': round(Total_Profit, 4),
+        'total_cost': round(total_cost, 4),
         'size_of_result_df': result_df.shape[0],
         'total_days_held': int(total_days_held)
     }
@@ -494,7 +497,7 @@ def back_zuhe_all(file_path, backtest_func=backtest_strategy_low_profit):
     :param data:
     :return:
     """
-    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     gen_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     final_combinations = deal_columns(data, signal_columns)
@@ -628,7 +631,7 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
     exist_combinations_set = set(statistics.keys())
 
     # 优化3: 减少文件操作，如果可能的话，改进load_data和gen_signal_func以减少重复计算
-    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     data = gen_signal_func(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     basic_indicators = [[column] for column in signal_columns]
@@ -699,6 +702,8 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
         end_time = time.time()
         # 将sublist增加到sublist_json,并写入文件
         sublist_json.extend(sublist)
+        # 对·sublist_json去重
+        sublist_json = list(set(sublist_json))
         write_json('../back/sublist.json', sublist_json)
 
         statistics_zuhe('../back/zuhe', target_key=target_key)
@@ -739,7 +744,7 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
         if value['trade_count'] == 0:
             zero_combinations_set.add(key)
     exist_combinations_set = set(statistics.keys())
-    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     data = gen_signal_func(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 将每个信号单独组成一个组合
@@ -776,7 +781,7 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
             # 输出当前的进度
             print(f'level:{level}, current_count:{current_count}, total_count:{total_count}, progress:{current_count / total_count * 100:.2f}%')
             tasks = []
-            # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
+            # gen_all_signal_processing(('../daily_data_exclude_new_can_buy/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
             for root, ds, fs in os.walk(file_path):
                 for f in fs:
                     fullname = os.path.join(root, f)
@@ -808,14 +813,14 @@ def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
     :param data:
     :return:
     """
-    data = load_data('../daily_data_exclude_new/龙洲股份_002682.txt')
+    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     data = gen_signal_func(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 将每个信号单独组成一个组合
     final_combinations = [[column] for column in signal_columns]
     # 准备多进程处理的任务列表
     tasks = []
-    # gen_all_signal_processing(('../daily_data_exclude_new/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
+    # gen_all_signal_processing(('../daily_data_exclude_new_can_buy/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             fullname = os.path.join(root, f)
@@ -848,6 +853,7 @@ def statistics_zuhe(file_path,target_key='all'):
                     if key in result:
                         result[key]['trade_count'] += value['trade_count']
                         result[key]['total_profit'] += value['total_profit']
+                        # result[key]['total_cost'] += value['total_cost']
                         result[key]['size_of_result_df'] += value['size_of_result_df']
                         result[key]['total_days_held'] += value['total_days_held']
                     else:
@@ -868,6 +874,7 @@ def statistics_zuhe(file_path,target_key='all'):
                         if key in result:
                             result[key]['trade_count'] += value['trade_count']
                             result[key]['total_profit'] += value['total_profit']
+                            # result[key]['total_cost'] += value['total_cost']
                             result[key]['size_of_result_df'] += value['size_of_result_df']
                             result[key]['total_days_held'] += value['total_days_held']
                         else:
@@ -878,6 +885,7 @@ def statistics_zuhe(file_path,target_key='all'):
             value['ratio'] = value['size_of_result_df'] / value['trade_count']
             value['average_days_held'] = value['total_days_held'] / value['trade_count']
             value['average_profit'] = value['total_profit'] / value['trade_count']
+            # value['average_1w_profit'] = round(value['total_profit'] / value['total_cost'], 4)
             # 将value['ratio']保留4位小数
             value['ratio'] = round(value['ratio'], 4)
             value['average_profit'] = round(value['average_profit'], 4)
@@ -886,6 +894,7 @@ def statistics_zuhe(file_path,target_key='all'):
         else:
             value['ratio'] = 1
             value['average_profit'] = 0
+            value['average_1w_profit'] = 0
             value['average_days_held'] = 0
             value['total_profit'] = 0
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
