@@ -645,16 +645,21 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
     #         temp_list.append([column])
 
     while True:
-        # 将路径构造移出循环，避免重复
-        result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
-        newest_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
+        # 将newest_indicators按照100个一组进行分组
+        if level == 2 and os.path.exists(f'../back/combination_list_{level}.json'):
+            temp_dict = read_json(f'../back/combination_list_{level}.json')
+            result_combination_list = temp_dict['result_combination_list']
+            full_combination_list = temp_dict['full_combination_list']
+            newest_indicators = temp_dict['newest_indicators']
+        else:
+            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+            newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
 
-        # combination_list_path = f'../back/combination_list_{level}.json'
-        # newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
-        # temp_dict = {'result_combination_list': result_combination_list,
-        #              'full_combination_list': full_combination_list,
-        #              'newest_indicators': newest_indicators}
-        # write_json(combination_list_path, temp_dict)
+            combination_list_path = f'../back/combination_list_{level}.json'
+            temp_dict = {'result_combination_list': result_combination_list,
+                         'full_combination_list': full_combination_list,
+                         'newest_indicators': newest_indicators}
+            write_json(combination_list_path, temp_dict)
 
         # ... 省略部分代码 ...
         print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
@@ -702,8 +707,6 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
         end_time = time.time()
         # 将sublist增加到sublist_json,并写入文件
         sublist_json.extend(sublist)
-        # 对·sublist_json去重
-        sublist_json = list(set(sublist_json))
         write_json('../back/sublist.json', sublist_json)
 
         statistics_zuhe('../back/zuhe', target_key=target_key)

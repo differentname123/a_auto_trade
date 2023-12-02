@@ -1,8 +1,10 @@
 daily:
-    timestamp: 20231123195312
-    trade_count: 6668886
-    total_profit: 40316788.172060974
-    size of result_df: 1176120
-    ratio: 0.17635928999236156
-    average days_held: 1.7895907952242698
-    average profit: 6.045505676969283
+    timestamp: 20231201145545
+    trade_count: 7317652
+    total_profit: 43070575.62629531
+    total_cost: 8345571775.373718
+    size of result_df: 1287999
+    ratio: 0.17601260622942988
+    average days_held: 1.786511848336051
+    average profit: 5.8858463925717315
+    average 1w profit: 51.608897251820224
