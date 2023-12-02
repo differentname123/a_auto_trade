@@ -10,15 +10,25 @@
 """
 import json
 import os
+import traceback
+from datetime import datetime
 
 import akshare as ak
 import logging
 import concurrent.futures
 import threading
 
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+def read_json(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        traceback.print_exc()
+        return {}
 
 def get_price(symbol, start_time, end_time, period="daily"):
     """
@@ -55,6 +65,55 @@ def get_price(symbol, start_time, end_time, period="daily"):
 # Setting up the logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
+def find_st_periods(posts):
+    periods = []
+    start = None
+    end = None
+
+    for i in range(len(posts) - 1):
+        current_post = posts[i]
+        next_post = posts[i + 1]
+
+        # 检查当前和下一个帖子是否都包含'ST'
+        if 'ST' in current_post['post_title'] and 'ST' in next_post['post_title']:
+            current_time = datetime.strptime(current_post['post_publish_time'], '%Y-%m-%d %H:%M:%S')
+            next_time = datetime.strptime(next_post['post_publish_time'], '%Y-%m-%d %H:%M:%S')
+
+            if start is None:
+                start = current_time  # 设置开始时间为下一个帖子的时间
+
+            end = next_time  # 更新结束时间为当前帖子的时间
+        else:
+            # 如果当前或下一个帖子不包含'ST', 结束当前ST状态的时间段
+            if start is not None and end is not None:
+                # start保留到日
+                start = datetime(start.year, start.month, start.day)
+                # end保留到日
+                end = datetime(end.year, end.month, end.day)
+                periods.append((start, end))
+                start = None
+                end = None
+
+    # 添加最后一个时间段
+    if start is not None and end is not None:
+        # start保留到日
+        start = datetime(start.year, start.month, start.day)
+        # end保留到日
+        end = datetime(end.year, end.month, end.day)
+        periods.append((start, end))
+
+    return periods
+
+def fix_st(price_data, notice_file):
+    notice_list = read_json(notice_file)
+    periods = find_st_periods(notice_list)
+    df = price_data
+    df['Max_rate'] = 10
+    df['日期'] = pd.to_datetime(df['日期'])
+    for end, start in periods:
+        mask = (df['日期'] >= start) & (df['日期'] <= end)
+        df.loc[mask, 'Max_rate'] = 5
+    return df
 
 def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
@@ -64,6 +123,7 @@ def save_stock_data(stock_data, exclude_code):
         filename = '../daily_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
         # price_data不为空才保存
         if not price_data.empty:
+            price_data = fix_st(price_data, '../announcements/{}.json'.format(code))
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")
@@ -120,7 +180,7 @@ def fetch_announcements(stock_code):
             })
         page += 1
     # 将extracted_data写入文件
-    write_json(f'../announcements/{code_name}_{stock_code}.json', extracted_data)
+    write_json(f'../announcements/{stock_code}.json', extracted_data)
     print(f"Saved data for {code_name} ({stock_code}) to ../announcements/{code_name}_{stock_code}.json")
 
 def get_all_notice():
@@ -132,8 +192,25 @@ def get_all_notice():
     # 获取以00或者30开头的股票代码
     need_code.extend([code for code in stock_data_df['代码'].tolist() if code.startswith('000') or code.startswith('002')  or code.startswith('003')
                       or code.startswith('001') or code.startswith('600') or code.startswith('601') or code.startswith('603') or code.startswith('605')])
+    # # 读取../announcements/下的所有文件名
+    # exclude_code = []
+    # for file in os.listdir('../announcements'):
+    #     if file.endswith('.json'):
+    #         exclude_code.append(file.split('.')[0])
+    # need_code = list(set(need_code) - set(exclude_code))
     for code in need_code:
         fetch_announcements(code)
+
+def fix_announcements():
+    """
+    通过公告调整st 的max_rate
+    :return:
+    """
+    # 将../announcements/下的所有文件名重命名为 股票代码.json
+    for file in os.listdir('../announcements'):
+        if file.endswith('.json'):
+            os.rename('../announcements/' + file, '../announcements/' + file.split('_')[1])
+
 
 def save_all_data():
 
@@ -173,5 +250,7 @@ if __name__ == '__main__':
     # data1 = ak.stock_zh_a_st_em()
     # data2 = ak.stock_notice_report(symbol='全部', date="20231106")
     # data3 = ak.stock_zh_a_gdhs_detail_em(symbol="600242")
-    # fun()
-    get_all_notice()
+    fun()
+    # get_all_notice()
+    # fix_announcements()
+    # fetch_announcements('002740')
