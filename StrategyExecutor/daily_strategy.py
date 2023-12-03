@@ -767,13 +767,15 @@ def gen_daily_buy_signal_25(data):
 def gen_daily_buy_signal_26(data):
     """
     超级短线选股策略
-    timestamp: 20231129003443
-    trade_count: 25167
-    total_profit: 191008.16035888557
-    size of result_df: 1817
-    ratio: 0.07219771923550682
-    average days_held: 1.2649103985377677
-    average profit: 7.589627701310667
+    timestamp: 20231203205742
+    trade_count: 24977
+    total_profit: 189286.75811711114
+    total_cost: 33135064.24188291
+    size of result_df: 1799
+    ratio: 0.07202626416302998
+    average days_held: 1.2541538215157946
+    average profit: 7.5784424917768805
+    average 1w profit: 57.12581594390018
     :param data:
     :return:
     """
@@ -883,7 +885,11 @@ def mix(data):
     data_1 = data.copy()
     data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1,'换手率_5日_小极值_signal:涨跌幅_大于_5_固定区间_signal'.split(':'))
+    gen_signal(data_1,'换手率_10日_小极值_signal:最高_5_到_10_固定区间_signal:涨跌幅_大于_5_固定区间_signal'.split(':'))
+
+
+
+
     data['Buy_Signal'] = data_1['Buy_Signal']
 
 

@@ -70,6 +70,9 @@ def find_st_periods(posts):
     start = None
     end = None
 
+    # 去除posts中notice_type包含 '深交所' 或 '上交所' 的帖子,或者是None
+    posts = [post for post in posts if post['notice_type'] is not None and '深交所' not in post['notice_type'] and '上交所' not in post['notice_type']]
+
     for i in range(len(posts) - 1):
         current_post = posts[i]
         next_post = posts[i + 1]
@@ -106,14 +109,53 @@ def find_st_periods(posts):
 
 def fix_st(price_data, notice_file):
     notice_list = read_json(notice_file)
-    periods = find_st_periods(notice_list)
+    periods = find_st_periods_strict(notice_list)
     df = price_data
     df['Max_rate'] = 10
     df['日期'] = pd.to_datetime(df['日期'])
-    for end, start in periods:
+    for start, end in periods:
         mask = (df['日期'] >= start) & (df['日期'] <= end)
         df.loc[mask, 'Max_rate'] = 5
+    # 如果开盘，收盘，最高，最低价格都一样，那么设置为0
+    df.loc[(df['开盘'] == df['收盘']) & (df['开盘'] == df['最高']) & (df['开盘'] == df['最低']), 'Max_rate'] = 0
     return df
+
+def find_st_periods_strict(announcements):
+    """
+    Find periods when the stock was in ST status.
+
+    :param announcements: List of announcements with 'post_title' and 'post_publish_time'.
+    :return: List of tuples with the start and end dates of ST periods.
+    """
+    st_periods = []
+    st_start = None
+
+    for announcement in sorted(announcements, key=lambda x: x['post_publish_time']):
+        title = announcement['post_title']
+        date = datetime.strptime(announcement['post_publish_time'], '%Y-%m-%d %H:%M:%S')
+
+        # Mark the start of an ST period
+        if ('ST' in title or ('实施' in title and '风险警示' in title)) and not st_start:
+            st_start = date
+
+        # Mark the end of an ST period
+        elif ('撤销' in title and st_start and '警示' in title) and '申请' not in title and '继续' not in title and '实施' not in title:
+            st_end = date
+            st_start = datetime(st_start.year, st_start.month, st_start.day)
+            # end保留到日
+            st_end = datetime(st_end.year, st_end.month, st_end.day)
+            st_periods.append((st_start, st_end))
+            st_start = None  # Reset for the next ST period
+    # 添加最后一个时间段,end为当前时间
+    if st_start:
+        st_end = datetime.now()
+        st_start = datetime(st_start.year, st_start.month, st_start.day)
+        # end保留到日
+        st_end = datetime(st_end.year, st_end.month, st_end.day)
+        st_periods.append((st_start, st_end))
+
+    return st_periods
+
 
 def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
@@ -224,7 +266,6 @@ def save_all_data():
     # 获取以00或者30开头的股票代码
     need_code.extend([code for code in stock_data_df['代码'].tolist() if code.startswith('000') or code.startswith('002')  or code.startswith('003')
                       or code.startswith('001') or code.startswith('600') or code.startswith('601') or code.startswith('603') or code.startswith('605')])
-
     new_exclude_code = [code for code in all_code if code not in need_code]
     new_exclude_code.extend(exclude_code)
     # 将new_exclude_code去重

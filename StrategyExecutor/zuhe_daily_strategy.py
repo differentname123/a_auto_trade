@@ -616,6 +616,72 @@ def filter_combination_list(combination_list, statistics, zero_combinations_set,
                 result_combination_list.append(combination)
     return result_combination_list
 
+def back_layer_all_op_sp(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+    """
+    分层进行回测的优化版函数
+    """
+    statistics_file_path = '../back/' + f'statistics_{target_key.replace(":", "_")}.json'
+    level = 0
+    # 优化1: 一次性读取statistics
+    statistics = read_json(statistics_file_path)
+
+    # 优化2: 改进对statistics的处理
+    zero_combinations_set = {key for key, value in statistics.items() if value['trade_count'] == 0}
+    exist_combinations_set = set(statistics.keys())
+
+    # 优化3: 减少文件操作，如果可能的话，改进load_data和gen_signal_func以减少重复计算
+    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
+    data = gen_signal_func(data)
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    basic_indicators = [[column] for column in signal_columns]
+
+    # 优化4: 减少重复的filter_combination_list调用
+    basic_indicators = filter_combination_list(basic_indicators, statistics, zero_combinations_set)
+    newest_indicators = [[]]
+    # temp_list = []
+    # for column in signal_columns:
+    #     if [column] not in basic_indicators:
+    #         temp_list.append([column])
+
+    while True:
+        # 将newest_indicators按照100个一组进行分组
+        if level == 2 and os.path.exists(f'../back/combination_list_{level}.json'):
+            temp_dict = read_json(f'../back/combination_list_{level}.json')
+            result_combination_list = temp_dict['result_combination_list']
+            full_combination_list = temp_dict['full_combination_list']
+            newest_indicators = temp_dict['newest_indicators']
+        else:
+            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+            newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+
+            combination_list_path = f'../back/combination_list_{level}.json'
+            temp_dict = {'result_combination_list': result_combination_list,
+                         'full_combination_list': full_combination_list,
+                         'newest_indicators': newest_indicators}
+            write_json(combination_list_path, temp_dict)
+
+        # ... 省略部分代码 ...
+        print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
+        temp_list = []
+        # 读取../back/good_ratio_key.txt每一行的内容，先去除换行符，再用split()函数分割字符串，返回一个列表
+        with open('../back/good_ratio_key.txt', 'r') as lines:
+            for line in lines:
+                good_ratio_key = line.strip().split(":")
+                temp_list.append(good_ratio_key)
+        result_combination_list = temp_list
+        # 优化5: 使用并行处理
+        if result_combination_list:
+            process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func,target_key)
+            # 更新statistics和zero_combinations_set
+            statistics = read_json(statistics_file_path)
+            exist_combinations_set = set(statistics.keys())
+            zero_combinations_set = {key for key, value in statistics.items() if value['trade_count'] == 0}
+            newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
+        return
+        # 检查是否继续循环
+        if not newest_indicators:
+            break
+        level += 1
 
 def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='target_key'):
     """
@@ -677,7 +743,6 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
             break
         level += 1
 
-
 def process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
     使用多进程处理组合
@@ -707,11 +772,28 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
         end_time = time.time()
         # 将sublist增加到sublist_json,并写入文件
         sublist_json.extend(sublist)
+        sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/sublist.json', sublist_json)
 
         statistics_zuhe('../back/zuhe', target_key=target_key)
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
+def deduplicate_2d_list(lst):
+    """
+    This function removes duplicate sublists from a given 2D list. It uses a set to track unique elements,
+    which requires the sublists to be converted to a tuple (since lists are not hashable).
+    """
+    unique_sublists = set()
+    deduplicated_list = []
+
+    for sublist in lst:
+        # Convert the sublist to a tuple to make it hashable
+        tuple_sublist = tuple(sublist)
+        if tuple_sublist not in unique_sublists:
+            unique_sublists.add(tuple_sublist)
+            deduplicated_list.append(sublist)
+
+    return deduplicated_list
 
 def prepare_tasks(combination_list, file_path, gen_signal_func, backtest_func):
     """

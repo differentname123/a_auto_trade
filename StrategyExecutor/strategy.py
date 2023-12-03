@@ -420,6 +420,7 @@ if __name__ == "__main__":
     # back_zuhe_all('../daily_data_exclude_new_can_buy', backtest_func=backtest_strategy_low_profit)
     # back_sigle_all('../daily_data_exclude_new_can_buy', gen_signal_func=gen_full_all_basic_signal,backtest_func=backtest_strategy_low_profit)
     back_layer_all_op('../daily_data_exclude_new_can_buy', gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit)
+    # back_layer_all_op_sp('../daily_data_exclude_new_can_buy', gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit)
     # statistics_zuhe('../back/zuhe', target_key="target_key")
 
     # statistics = read_json('../back/statistics.json')
