@@ -274,3 +274,11 @@ def gen_basic_daily_buy_signal_11(data):
     data = gen_multiple_daily_buy_signal_compare(data, ['收盘', '开盘', '最高', '最低'])
     return data
 
+def gen_basic_daily_buy_signal_gen(data):
+    """
+    收盘值相关买入信号，一个是固定值，另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+    data = gen_multiple_daily_buy_signal_ma(data, '收盘', [5, 10, 20])
+    return data
