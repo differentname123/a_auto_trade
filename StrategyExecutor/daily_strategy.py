@@ -861,8 +861,16 @@ def gen_daily_buy_signal_28(data):
     # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
     data['Buy_Signal'] &= (JWZZ.shift(1) < 95) & (JWZZ >= 95)
 
+def gen_daily_buy_signal_29(data):
+    """
+    昨日涨停今日最低跌停选股策略
+    :param data:
+    :return:
+    """
 
-
+    # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
+    data['Buy_Signal'] = (data['涨跌幅'].shift(1) > 9.5) & (data['最低'] < (100 - 9.5) * data['收盘'].shift(1) / 100) & (data['日期'] > '2023-01-01')
+    return data
 def gen_daily_buy_signal_last(data):
     """
     在产生信号后，后一天下跌再买入
@@ -885,7 +893,7 @@ def mix(data):
     data_1 = data.copy()
     data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1,'收盘_5日_小极值_signal_yes:涨跌幅_20日_小极值_signal:涨跌幅_大于_5_固定区间_signal_yes'.split(':'))
+    gen_signal(data_1,'换手率_5日_小极值_signal:换手率_20日_小极值_signal:涨跌幅_大于_5_固定区间_signal:最低_5_到_10_固定区间_signal_yes'.split(':'))
 
 
 

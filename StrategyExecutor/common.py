@@ -42,6 +42,18 @@ from matplotlib.widgets import Slider
 from plotly.subplots import make_subplots
 from datetime import timedelta
 
+import time
+import functools
+
+def timeit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} 耗时 {end_time - start_time} 秒")
+        return result
+    return wrapper
 
 def parse_filename(file_path):
     # 提取文件名（不包括扩展名）

@@ -14,7 +14,7 @@ import json
 import multiprocessing
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 import os
 import json
@@ -778,6 +778,7 @@ def process_combinations_gen(result_combination_list, file_path, gen_signal_func
         write_json('../back/gen/sublist.json', sublist_json)
 
         statistics_zuhe_gen('../back/gen/zuhe', target_key=target_key)
+        statistics_zuhe_gen('../back/gen/zuhe', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
@@ -959,6 +960,48 @@ def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
     pool.join()
     statistics_zuhe('../back/zuhe')
 
+def process_file_gen(fullname, result, sublist_set=None):
+    data = read_json(fullname)
+    for key, value in data.items():
+        if sublist_set is None or key in sublist_set:
+            if key in result:
+                for field in ['trade_count', 'total_profit', 'total_cost', 'size_of_result_df', 'total_days_held']:
+                    result[key][field] += value[field]
+            else:
+                result[key] = value
+
+def calculate_averages(result):
+    for key, value in result.items():
+        if value['trade_count'] != 0:
+            value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4) if 'total_cost' in value else 0
+            value['ratio'] = round(value['size_of_result_df'] / value['trade_count'], 4)
+            value['average_days_held'] = round(value['total_days_held'] / value['trade_count'], 4)
+            value['average_profit'] = round(value['total_profit'] / value['trade_count'], 4)
+        else:
+            value.update({'ratio': 1, 'average_profit': 0, 'average_1w_profit': 0, 'average_days_held': 0})
+@timeit
+def statistics_zuhe_gen_mul(file_path, target_key='all'):
+    result = {}
+    sublist_set = None
+    if target_key != 'all':
+        sublist_list = read_json('../back/gen/sublist.json')
+        sublist_set = {':'.join(sublist) for sublist in sublist_list}
+
+    file_paths = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
+
+    for temp_file_path in file_paths:
+        process_file_gen(temp_file_path, result, sublist_set)
+
+    calculate_averages(result)
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, result)
+    return result
+
+@timeit
 def statistics_zuhe_gen(file_path,target_key='all'):
     """
     读取file_path下的所有.json文件，将有相同key的数据进行合并
@@ -975,7 +1018,7 @@ def statistics_zuhe_gen(file_path,target_key='all'):
                     if key in result:
                         result[key]['trade_count'] += value['trade_count']
                         result[key]['total_profit'] += value['total_profit']
-                        # result[key]['total_cost'] += value['total_cost']
+                        result[key]['total_cost'] += value['total_cost']
                         result[key]['size_of_result_df'] += value['size_of_result_df']
                         result[key]['total_days_held'] += value['total_days_held']
                     else:
