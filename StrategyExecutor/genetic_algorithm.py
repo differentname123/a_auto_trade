@@ -15,7 +15,8 @@ import time
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back_layer_all_op_gen, \
-    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json
+    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good
+
 
 def generate_offspring(args):
     parent1, parent2, crossover_func, judge_gene_func, mutate_func = args
@@ -318,7 +319,12 @@ def filter_good_zuhe():
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.125}
     result_combinations = good_ratio_keys.keys()
-    print(result_combinations)
+    final_combinations = []
+    for combination in result_combinations:
+        final_combinations.append(combination.split(':'))
+    back_layer_all_good('../daily_data_exclude_new_can_buy', final_combinations,
+                          gen_signal_func=gen_full_all_basic_signal,
+                          backtest_func=backtest_strategy_low_profit)
 
 if __name__ == '__main__':
     # filter_good_zuhe()
