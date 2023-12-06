@@ -21,10 +21,12 @@ def generate_offspring(args):
     parent1, parent2, crossover_func, judge_gene_func, mutate_func = args
     child1, child2 = crossover_func(parent1, parent2)
     offspring = []
-    if judge_gene_func(child1):
-        offspring.append(mutate_func(child1))
-    if judge_gene_func(child2):
-        offspring.append(mutate_func(child2))
+    mutate_child1 = mutate_func(child1)
+    mutate_child2 = mutate_func(child2)
+    if judge_gene_func(mutate_child1):
+        offspring.append(mutate_child1)
+    if judge_gene_func(mutate_child2):
+        offspring.append(mutate_child2)
     return offspring
 
 def _generate_gene(min_ones, max_ones, gene_length, judge_gene):
@@ -68,6 +70,10 @@ class GeneticAlgorithm:
         :param combination:
         :return:
         """
+        # 如果gene中1的个数小于3，则不合法
+        ones_count = gene.count('1')
+        if ones_count < self.min_ones:
+            return False
         combination_list = self.cover_to_combination(gene)
         combination = ':'.join(combination_list)
         if combination in self.existed_combinations:
@@ -101,17 +107,18 @@ class GeneticAlgorithm:
         population = set()
         self.load_all_statistics()
 
-        # 使用多进程
-        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-        results = pool.starmap(_generate_gene,
-                               [(self.min_ones, self.max_ones, self.gene_length, self.judge_gene) for _ in
-                                range(self.population_size * 2)])  # 增加迭代次数以确保足够的种群大小
-        pool.close()
-        pool.join()
-
-        for gene_str in results:
-            if gene_str and len(population) < self.population_size:
-                population.add(gene_str)
+        while len(population) < self.population_size:
+            # 使用多进程
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            results = pool.starmap(_generate_gene,
+                                   [(self.min_ones, self.max_ones, self.gene_length, self.judge_gene) for _ in
+                                    range(self.population_size * 2)])  # 增加迭代次数以确保足够的种群大小
+            pool.close()
+            pool.join()
+            for gene_str in results:
+                if gene_str:
+                    population.add(gene_str)
+            print('初始化种群大小：', len(population))
         # 结束计时
         end_time = time.time()
         print('mul初始化种群耗时：', end_time - start_time)
@@ -161,7 +168,7 @@ class GeneticAlgorithm:
         trade_count_score = individual["trade_count"] / total_trade_count
         if individual["trade_count"] < trade_count_threshold:
             trade_count_score = individual["trade_count"] - trade_count_threshold * 10 / individual["trade_count"]
-        total_fitness = trade_count_score + individual["average_1w_profit"]
+        total_fitness = trade_count_score
         return total_fitness
 
     def _select(self):
@@ -196,12 +203,13 @@ class GeneticAlgorithm:
         获取当前种群的所有适应度
         :return:
         """
-        self.combinations = [self.cover_to_combination(individual) for individual in self.population]
-        # 读取'../back/gen/sublist.json'
+        # # 读取'../back/gen/sublist.json'
         # self.combinations = read_json('../back/gen/sublist_back.json')
-        # 将combinations转换为population
+        # # 将combinations转换为population
         # self.population = [''.join(['1' if self.signal_columns[i] in combination else '0' for i in
         #                             range(len(self.signal_columns))]) for combination in self.combinations]
+
+        self.combinations = [self.cover_to_combination(individual) for individual in self.population]
         back_layer_all_op_gen('../daily_data_exclude_new_can_buy', self.combinations, gen_signal_func=gen_full_all_basic_signal,
                               backtest_func=backtest_strategy_low_profit)
         self.gen_combination_to_fitness()
@@ -273,18 +281,20 @@ class GeneticAlgorithm:
         new_population = set()
         self.get_fitness()
 
-        # 准备传递给 generate_offspring 的参数
-        args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
-                     _ in range(self.population_size)]
+        while len(new_population) < self.population_size:
+            # 准备传递给 generate_offspring 的参数
+            args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
+                         _ in range(self.population_size * 2)]
 
-        # 使用多进程
-        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-        results = pool.map(generate_offspring, args_list)
-        pool.close()
-        pool.join()
+            # 使用多进程
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            results = pool.map(generate_offspring, args_list)
+            pool.close()
+            pool.join()
 
-        for offspring in results:
-            new_population.update(offspring)
+            for offspring in results:
+                new_population.update(offspring)
+            print('new_population:', len(new_population))
 
         self.population = list(new_population)
         self.population = [individual for individual in self.population if '1' in individual]
@@ -298,14 +308,26 @@ class GeneticAlgorithm:
         temp_map = sorted(self.relation_map.items(), key=lambda x: x[1][0], reverse=True)
         return temp_map[0]
 
+def filter_good_zuhe():
+    """
+    过滤出好的指标，并且全部再跑一次
+    :return:
+    """
+    statistics = read_json('../back/gen/statistics_all.json')
+    # 所有的指标都应该满足10次以上的交易
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.125}
+    result_combinations = good_ratio_keys.keys()
+    print(result_combinations)
 
 if __name__ == '__main__':
+    # filter_good_zuhe()
     # statistics_zuhe_gen('../back/gen/zuhe', target_key='all')
     data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 2000  # 种群大小
+    population_size = 1000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 
@@ -316,7 +338,7 @@ if __name__ == '__main__':
         best_info = ga.get_best_individual()
         try:
             if best_info[1][1]['trade_count'] < 100:
-                ga._initialize_population()
+                ga._initialize_population_mul()
         except:
             pass
         # 增量写入文件
@@ -324,8 +346,8 @@ if __name__ == '__main__':
             f.write(str(best_info) + '\n')
 
 
-    # # 输出最佳个体及其适应度
-    # best_individual = ga.get_best_individual()
-    # best_fitness = ga._fitness(best_individual)
-    # print("Best Individual:", best_individual, "Fitness:", best_fitness)
-    # statistics_zuhe_gen('../back/gen/zuhe', target_key="target_key")
+    # # # 输出最佳个体及其适应度
+    # # best_individual = ga.get_best_individual()
+    # # best_fitness = ga._fitness(best_individual)
+    # # print("Best Individual:", best_individual, "Fitness:", best_fitness)
+    # # statistics_zuhe_gen('../back/gen/zuhe', target_key="target_key")

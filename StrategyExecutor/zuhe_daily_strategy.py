@@ -23,6 +23,7 @@ from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 from StrategyExecutor import basic_daily_strategy
 from common import *
@@ -232,6 +233,7 @@ def gen_signal(data, combination):
 
     return data
 
+
 def is_combination_in_zero_combination(combination, zero_combination):
     """
     检查 combination 是否为 zero_combination 中任意列表的子集
@@ -285,6 +287,56 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
     finally:
         write_json(file_name, result_df_dict)
 
+
+def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
+    """
+    Generate all signals based on final_combinations.
+    Optimized to reduce file operations and improve efficiency in loops.
+    """
+    start_time = time.time()
+    try:
+        zero_combination = set()  # Using a set for faster lookups
+        full_name, final_combinations, gen_signal_func, backtest_func = args
+
+        data = load_data(full_name)
+        data = gen_signal_func(data)
+        file_name = Path('../final_zuhe/zuhe') / f"{data['名称'].iloc[0]}.json"
+        # file_name = Path('../back/zuhe') / f"C夏厦.json"
+        file_name.parent.mkdir(parents=True, exist_ok=True)
+
+        # 一次性读取JSON
+        result_df_dict = read_json(file_name)
+
+        if is_skip:
+            # 优化：过滤和处理逻辑提取为单独的函数
+            final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
+
+        # 处理每个组合
+        for combination in final_combinations:
+            combination_key = ':'.join(combination)
+            signal_data = gen_signal(data, combination)
+
+            # 如果Buy_Signal全为False，则不进行回测
+            if not signal_data['Buy_Signal'].any():
+                result_df_dict[combination_key] = create_empty_result()
+                continue
+
+            results_df = backtest_func(signal_data)
+            processed_result = process_results_with_year(results_df, threshold_day)
+
+            if processed_result:
+                result_df_dict[combination_key] = processed_result
+
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        # 写入文件
+        write_json(file_name, result_df_dict)
+        end_time = time.time()
+        print(
+            f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+
+
 def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
     """
     Generate all signals based on final_combinations.
@@ -330,7 +382,8 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
         # 写入文件
         write_json(file_name, result_df_dict)
         end_time = time.time()
-        print(f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+        print(
+            f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
 def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
@@ -378,8 +431,11 @@ def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
         # 写入文件
         write_json(file_name, result_df_dict)
         end_time = time.time()
-        print(f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+        print(
+            f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
+
+# @timeit
 def filter_combinations(result_df_dict, final_combinations):
     """
     过滤已存在和无效的组合
@@ -390,13 +446,22 @@ def filter_combinations(result_df_dict, final_combinations):
     # 获取result_df_dict中trade_count为0的组合
     zero_combination = {combination for combination, result in result_df_dict.items() if result['trade_count'] == 0}
     zero_combinations_set = {frozenset(z.split(':')) for z in zero_combination}
-    return [comb.split(':') for comb in final_combinations_set if not any(frozenset(comb.split(':')) >= zc for zc in zero_combinations_set)], zero_combinations_set
+    return [comb.split(':') for comb in final_combinations_set if
+            not any(frozenset(comb.split(':')) >= zc for zc in zero_combinations_set)], zero_combinations_set
+
 
 def create_empty_result():
     """
     创建空结果字典
     """
-    return {'trade_count': 0, 'total_profit': 0, 'size_of_result_df': 0, 'total_days_held': 0, 'total_cost': 0}
+    return {'trade_count': 0,
+            'total_profit': 0,
+            'size_of_result_df': 0,
+            'total_days_held': 0,
+            'total_cost': 0,
+            'one_befor_year_count': 0,
+            'two_befor_year_count': 0,
+            'three_befor_year_count': 0}
 
 
 def gen_all_signal_processing(args, threshold_day=1, is_skip=True):
@@ -430,7 +495,7 @@ def gen_all_signal_processing(args, threshold_day=1, is_skip=True):
                     if value['trade_count'] == 0:
                         zero_combination.add(key)
             zero_combinations_set = {frozenset(zero_combination.split(':')) for zero_combination in
-                                         zero_combination}
+                                     zero_combination}
             # 这里也需要加载对final_combinations的过滤
             for index, combination in enumerate(final_combinations, start=1):
                 combination_key = ':'.join(combination)
@@ -466,7 +531,8 @@ def gen_all_signal_processing(args, threshold_day=1, is_skip=True):
             end_time = time.time()
             # 先删除文件，再写入文件，避免写入文件失败导致文件内容为空
             write_json(file_name, result_df_dict)
-            print(f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)}")
+            print(
+                f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)}")
     except Exception as e:
         # 输出异常栈
         traceback.print_exc()
@@ -489,6 +555,54 @@ def write_json(file_path, data):
             json.dump(data, f, ensure_ascii=False)
     except Exception as e:
         print(f"Error writing {file_path} exception: {e}")
+
+
+def process_results_with_year(results_df, threshold_day):
+    """
+    增加最近三年内的信号个数
+    :param results_df:
+    :param threshold_day:
+    :return:
+    """
+    result = results_df.sort_values(by='Days Held', ascending=True)
+    if result.empty:
+        return {
+            'trade_count': 0,
+            'total_profit': 0,
+            'total_cost': 0,
+            'size_of_result_df': 0,
+            'one_befor_year_count': 0,
+            'two_befor_year_count': 0,
+            'three_befor_year_count': 0,
+            'total_days_held': 0
+        }
+    # 统计'Buy Date'大于三年前的数据
+    three_year = datetime.datetime.now() - relativedelta(years=2)
+    # 将three_year只保留到年份，不要月和日
+    three_befor_year = three_year.year
+    two_year = datetime.datetime.now() - relativedelta(years=1)
+    # 将three_year只保留到年份，不要月和日
+    two_befor_year = two_year.year
+    one_befor_year = datetime.datetime.now().year
+    # 统计result中'Buy Date'大于three_year的个数
+    three_befor_year_count = result[result['Buy Date'].dt.year >= three_befor_year].shape[0]
+    two_befor_year_count = result[result['Buy Date'].dt.year >= two_befor_year].shape[0]
+    one_befor_year_count = result[result['Buy Date'].dt.year >= one_befor_year].shape[0]
+    total_days_held = result['Days Held'].sum()
+    total_cost = result['total_cost'].sum()
+    Total_Profit = results_df['Total_Profit'].iloc[-1]
+    result_df = result[result['Days Held'] > threshold_day]
+    result_shape = result.shape[0]
+    return {
+        'trade_count': result_shape,
+        'total_profit': round(Total_Profit, 4),
+        'total_cost': round(total_cost, 4),
+        'size_of_result_df': result_df.shape[0],
+        'one_befor_year_count': one_befor_year_count,
+        'two_befor_year_count': two_befor_year_count,
+        'three_befor_year_count': three_befor_year_count,
+        'total_days_held': int(total_days_held)
+    }
 
 
 def process_results(results_df, threshold_day):
@@ -581,6 +695,7 @@ def gen_full_all_basic_signal(data):
     data = gen_multiple_daily_buy_signal_yes(data)
     return data
 
+
 def gen_full_all_basic_signal_gen(data):
     """
     扫描basic_daily_strategy.py文件，生成所有的基础信号,过滤出以gen_basic_daily_buy_signal开头的函数，并应用于data
@@ -594,6 +709,7 @@ def gen_full_all_basic_signal_gen(data):
     data = gen_multiple_daily_buy_signal_yes(data)
     return data
 
+
 def get_combination_list_optimized(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set):
     result_combination_list = []
     full_combination_list = []
@@ -601,7 +717,8 @@ def get_combination_list_optimized(basic_indicators, newest_indicators, exist_co
 
     # Convert indicators to sets in advance
     basic_indicators_sets = [frozenset(basic_indicator) for basic_indicator in basic_indicators]
-    newest_indicators_sets = [frozenset(newest_indicator) for newest_indicator in newest_indicators] if newest_indicators != [[]] else [frozenset()]
+    newest_indicators_sets = [frozenset(newest_indicator) for newest_indicator in
+                              newest_indicators] if newest_indicators != [[]] else [frozenset()]
 
     for basic_set in basic_indicators_sets:
         for newest_set in newest_indicators_sets:
@@ -651,12 +768,14 @@ def get_combination_list(basic_indicators, newest_indicators, exist_combinations
                     full_combination_list.append(combination_list)
                     if combination not in exist_combinations_set:
                         # 如果combination被包含在zero_combinations_set元素中，则不添加到result_combination_list中
-                        if not any([set(combination_list) >= set(zero_combination.split(':')) for zero_combination in zero_combinations_set]):
+                        if not any([set(combination_list) >= set(zero_combination.split(':')) for zero_combination in
+                                    zero_combinations_set]):
                             result_combination_list.append(combination_list)
     # 对result_combination_list和full_combination_list进行去重
     result_combination_list = list(set([tuple(t) for t in result_combination_list]))
     full_combination_list = list(set([tuple(t) for t in full_combination_list]))
     return result_combination_list, full_combination_list
+
 
 def filter_combination_list(combination_list, statistics, zero_combinations_set, trade_count_threshold=10000):
     """
@@ -676,7 +795,9 @@ def filter_combination_list(combination_list, statistics, zero_combinations_set,
                 result_combination_list.append(combination)
     return result_combination_list
 
-def back_layer_all_op_gen(file_path, result_combination_list, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+
+def back_layer_all_op_gen(file_path, result_combination_list, gen_signal_func=gen_full_all_basic_signal,
+                          backtest_func=backtest_strategy_low_profit, target_key='target_key'):
     """
     分层进行回测的优化版函数
     """
@@ -685,7 +806,18 @@ def back_layer_all_op_gen(file_path, result_combination_list, gen_signal_func=ge
         process_combinations_gen(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
 
 
-def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+def back_layer_all_good(file_path, result_combination_list, gen_signal_func=gen_full_all_basic_signal,
+                        backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+    """
+    分层进行回测指定的指标，用于最终的策略
+    """
+    # 优化5: 使用并行处理
+    if result_combination_list:
+        process_combinations_good(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
+
+
+def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit,
+                      target_key='target_key'):
     """
     分层进行回测的优化版函数
     """
@@ -720,7 +852,9 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
             full_combination_list = temp_dict['full_combination_list']
             newest_indicators = temp_dict['newest_indicators']
         else:
-            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators,
+                                                                                  exist_combinations_set,
+                                                                                  zero_combinations_set)
             newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
 
             combination_list_path = f'../back/combination_list_{level}.json'
@@ -730,10 +864,11 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
             write_json(combination_list_path, temp_dict)
 
         # ... 省略部分代码 ...
-        print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
+        print(
+            f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
         # 优化5: 使用并行处理
         if result_combination_list:
-            process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func,target_key)
+            process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
             # 更新statistics和zero_combinations_set
             statistics = read_json(statistics_file_path)
             exist_combinations_set = set(statistics.keys())
@@ -744,6 +879,43 @@ def back_layer_all_op(file_path, gen_signal_func=gen_full_all_basic_signal, back
         if not newest_indicators:
             break
         level += 1
+
+
+def process_combinations_good(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
+    """
+    回测最终好指标的函数
+    """
+    # 按照一定数量分割list
+    split_size = 10000
+    result_combination_lists = [result_combination_list[i:i + split_size] for i in
+                                range(0, len(result_combination_list), split_size)]
+    total_len = 0
+    # 删除'../back/gen/sublist.json'
+    if os.path.exists('../final_zuhe/sublist.json'):
+        os.remove('../final_zuhe/sublist.json')
+    sublist_json = []
+    for sublist in result_combination_lists:
+        # 开始计时
+        start_time = time.time()
+        # 读取sublist
+        total_len += len(sublist)
+        # 打印进度
+        print(f"Processing {total_len} files... of {len(result_combination_list)}")
+        tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1) as pool:
+            total_files = len(tasks)
+            for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_good, tasks), 1):
+                print(f"Processing file {i} of {total_files}...")
+        # 结束计时
+        end_time = time.time()
+        # 将sublist增加到sublist_json,并写入文件
+        sublist_json.extend(sublist)
+        sublist_json = deduplicate_2d_list(sublist_json)
+        write_json('../final_zuhe/sublist.json', sublist_json)
+
+        statistics_zuhe_good('../final_zuhe/zuhe', target_key=target_key)
+        print(f"Time taken: {end_time - start_time:.2f} seconds")
+
 
 def process_combinations_gen(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
@@ -781,6 +953,7 @@ def process_combinations_gen(result_combination_list, file_path, gen_signal_func
         statistics_zuhe_gen('../back/gen/zuhe', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
+
 def process_combinations(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
     使用多进程处理组合
@@ -816,6 +989,7 @@ def process_combinations(result_combination_list, file_path, gen_signal_func, ba
         statistics_zuhe('../back/zuhe', target_key=target_key)
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
+
 def deduplicate_2d_list(lst):
     """
     This function removes duplicate sublists from a given 2D list. It uses a set to track unique elements,
@@ -833,6 +1007,7 @@ def deduplicate_2d_list(lst):
 
     return deduplicated_list
 
+
 def prepare_tasks(combination_list, file_path, gen_signal_func, backtest_func):
     """
     准备多进程任务
@@ -845,7 +1020,9 @@ def prepare_tasks(combination_list, file_path, gen_signal_func, backtest_func):
     tasks.reverse()  # 逆序排列任务
     return tasks
 
-def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit,target_key='all'):
+
+def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit,
+                   target_key='all'):
     """
     分层进行回测
     1.先获取第一层指标(带signal的)，并且读取已有的统计信息
@@ -882,14 +1059,17 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
             full_combination_list = temp_dict['full_combination_list']
             newest_indicators = temp_dict['newest_indicators']
         else:
-            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators, exist_combinations_set, zero_combinations_set)
+            result_combination_list, full_combination_list = get_combination_list(basic_indicators, newest_indicators,
+                                                                                  exist_combinations_set,
+                                                                                  zero_combinations_set)
             newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
             temp_dict = {}
             temp_dict['result_combination_list'] = result_combination_list
             temp_dict['full_combination_list'] = full_combination_list
             temp_dict['newest_indicators'] = newest_indicators
             write_json(f'../back/combination_list_{level}.json', temp_dict)
-        print(f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
+        print(
+            f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
         # result_combination_list = ['BAR_20日_小极值_signal:收盘_大于_20_固定区间_signal'.split(':')]
         if result_combination_list == []:
             if newest_indicators == []:
@@ -898,17 +1078,20 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
         total_count = len(result_combination_list)
         current_count = 0
         # 将result_combination_list按照100000个一组进行分组
-        result_combination_lists = [result_combination_list[i:i + 50000] for i in range(0, len(result_combination_list), 50000)]
+        result_combination_lists = [result_combination_list[i:i + 50000] for i in
+                                    range(0, len(result_combination_list), 50000)]
         for result_combination_list in result_combination_lists:
             current_count += len(result_combination_list)
             # 输出当前的进度
-            print(f'level:{level}, current_count:{current_count}, total_count:{total_count}, progress:{current_count / total_count * 100:.2f}%')
+            print(
+                f'level:{level}, current_count:{current_count}, total_count:{total_count}, progress:{current_count / total_count * 100:.2f}%')
             tasks = []
             # gen_all_signal_processing(('../daily_data_exclude_new_can_buy/ST国嘉_600646.txt', final_combinations, gen_signal_func, backtest_func))
             for root, ds, fs in os.walk(file_path):
                 for f in fs:
                     fullname = os.path.join(root, f)
-                    tasks.append((fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
+                    tasks.append(
+                        (fullname, result_combination_list, gen_signal_func, backtest_func, zero_combinations_set))
             # 将tasks逆序排列，这样可以让最后一个文件先处理，这样可以先看到结果
             tasks.reverse()
             # 使用进程池处理任务
@@ -929,6 +1112,7 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
                     zero_combinations_set.add(key)
             newest_indicators = filter_combination_list(full_combination_list, statistics, zero_combinations_set)
             level += 1
+
 
 def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit):
     """
@@ -960,49 +1144,105 @@ def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
     pool.join()
     statistics_zuhe('../back/zuhe')
 
-def process_file_gen(fullname, result, sublist_set=None):
-    data = read_json(fullname)
-    for key, value in data.items():
-        if sublist_set is None or key in sublist_set:
-            if key in result:
-                for field in ['trade_count', 'total_profit', 'total_cost', 'size_of_result_df', 'total_days_held']:
-                    result[key][field] += value[field]
-            else:
-                result[key] = value
 
-def calculate_averages(result):
+@timeit
+def statistics_zuhe_good(file_path, target_key='all'):
+    """
+    读取file_path下的所有.json文件，将有相同key的数据进行合并
+    :param file_path:
+    :return:
+    """
+    result = {}
+    if target_key == 'all':
+        for root, ds, fs in os.walk(file_path):
+            for f in fs:
+                fullname = os.path.join(root, f)
+                data = read_json(fullname)
+                for key, value in data.items():
+                    if key in result:
+                        result[key]['trade_count'] += value['trade_count']
+                        result[key]['total_profit'] += value['total_profit']
+                        result[key]['total_cost'] += value['total_cost']
+                        result[key]['size_of_result_df'] += value['size_of_result_df']
+                        result[key]['one_befor_year_count'] += value['one_befor_year_count']
+                        result[key]['two_befor_year_count'] += value['two_befor_year_count']
+                        result[key]['three_befor_year_count'] += value['three_befor_year_count']
+
+                        result[key]['total_days_held'] += value['total_days_held']
+                    else:
+                        result[key] = value
+    else:
+        sublist_list = read_json('../final_zuhe/sublist.json')
+        sublist_set = set()
+        for sublist in sublist_list:
+            temp_key = ':'.join(sublist)
+            sublist_set.add(temp_key)
+
+        for root, ds, fs in os.walk(file_path):
+            for f in fs:
+                fullname = os.path.join(root, f)
+                data = read_json(fullname)
+                for key, value in data.items():
+                    if key in sublist_set:
+                        if key in result:
+                            result[key]['trade_count'] += value['trade_count']
+                            result[key]['total_profit'] += value['total_profit']
+                            result[key]['total_cost'] += value['total_cost']
+                            result[key]['size_of_result_df'] += value['size_of_result_df']
+                            result[key]['one_befor_year_count'] += value['one_befor_year_count']
+                            result[key]['two_befor_year_count'] += value['two_befor_year_count']
+                            result[key]['three_befor_year_count'] += value['three_befor_year_count']
+                            result[key]['total_days_held'] += value['total_days_held']
+                        else:
+                            result[key] = value
+    # 再计算result每一个key的平均值
     for key, value in result.items():
         if value['trade_count'] != 0:
-            value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4) if 'total_cost' in value else 0
-            value['ratio'] = round(value['size_of_result_df'] / value['trade_count'], 4)
-            value['average_days_held'] = round(value['total_days_held'] / value['trade_count'], 4)
-            value['average_profit'] = round(value['total_profit'] / value['trade_count'], 4)
+            if 'total_cost' not in value:
+                value['average_1w_profit'] = 0
+                value['three_befor_year_count'] = 0
+                value['two_befor_year_count'] = 0
+                value['one_befor_year_count'] = 0
+            else:
+                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
+            value['ratio'] = value['size_of_result_df'] / value['trade_count']
+            value['average_days_held'] = value['total_days_held'] / value['trade_count']
+            value['average_profit'] = value['total_profit'] / value['trade_count']
+
+            # 将value['ratio']保留4位小数
+            value['ratio'] = round(value['ratio'], 4)
+            value['average_profit'] = round(value['average_profit'], 4)
+            value['average_days_held'] = round(value['average_days_held'], 4)
+            value['total_profit'] = round(value['total_profit'], 4)
+            value['one_befor_year_rate'] = round(value['one_befor_year_count'] / value['trade_count'], 4)
+            value['two_befor_year_rate'] = round(value['two_befor_year_count'] / value['trade_count'], 4)
+            value['three_befor_year_rate'] = round(value['three_befor_year_count'] / value['trade_count'], 4)
         else:
-            value.update({'ratio': 1, 'average_profit': 0, 'average_1w_profit': 0, 'average_days_held': 0})
-@timeit
-def statistics_zuhe_gen_mul(file_path, target_key='all'):
-    result = {}
-    sublist_set = None
-    if target_key != 'all':
-        sublist_list = read_json('../back/gen/sublist.json')
-        sublist_set = {':'.join(sublist) for sublist in sublist_list}
-
-    file_paths = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
-
-    for temp_file_path in file_paths:
-        process_file_gen(temp_file_path, result, sublist_set)
-
-    calculate_averages(result)
+            value['ratio'] = 1
+            value['average_profit'] = 0
+            value['average_1w_profit'] = 0
+            value['average_days_held'] = 0
+            value['total_profit'] = 0
+            value['one_befor_year_count'] = 0
+            value['two_befor_year_count'] = 0
+            value['three_befor_year_count'] = 0
+            value['one_befor_year_rate'] = 0
+            value['two_befor_year_rate'] = 0
+            value['three_befor_year_rate'] = 0
+    # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
-
+    # 将result写入file_path上一级文件
     file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+
+    # 先删除原来的statistics.json文件
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
     return result
 
+
 @timeit
-def statistics_zuhe_gen(file_path,target_key='all'):
+def statistics_zuhe_gen(file_path, target_key='all'):
     """
     读取file_path下的所有.json文件，将有相同key的数据进行合并
     :param file_path:
@@ -1078,7 +1318,7 @@ def statistics_zuhe_gen(file_path,target_key='all'):
     return result
 
 
-def statistics_zuhe(file_path,target_key='all'):
+def statistics_zuhe(file_path, target_key='all'):
     """
     读取file_path下的所有.json文件，将有相同key的数据进行合并
     :param file_path:

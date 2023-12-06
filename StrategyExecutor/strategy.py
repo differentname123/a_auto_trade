@@ -233,12 +233,26 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
     total_days_held = 0
     result_df_size = 0
     result_df = None
+    three_befor_year_count = 0
+    two_befor_year_count = 0
+    one_befor_year_count = 0
+    # 统计'Buy Date'大于三年前的数据
+    three_year = datetime.datetime.now() - relativedelta(years=2)
+    # 将three_year只保留到年份，不要月和日
+    three_befor_year = three_year.year
+    two_year = datetime.datetime.now() - relativedelta(years=1)
+    # 将three_year只保留到年份，不要月和日
+    two_befor_year = two_year.year
+    one_befor_year = datetime.datetime.now().year
     try:
         all_df = pd.concat(all_dfs, ignore_index=True)
         result_df = all_df[all_df['Days Held'] > threshold_day]
         result_df = result_df.sort_values(by='Days Held', ascending=False)
         total_days_held = result_df['Days Held'].sum() + trade_count - result_df.shape[0]
         result_df_size = result_df.shape[0]
+        three_befor_year_count = all_df[all_df['Buy Date'].dt.year >= three_befor_year].shape[0]
+        two_befor_year_count = all_df[all_df['Buy Date'].dt.year >= two_befor_year].shape[0]
+        one_befor_year_count = all_df[all_df['Buy Date'].dt.year >= one_befor_year].shape[0]
     except Exception as e:
         print(e)
 
@@ -260,6 +274,12 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"average days_held: {total_days_held / trade_count if trade_count > 0 else 0}\n")
         f.write(f"average profit: {total_profit / trade_count if trade_count > 0 else 0}\n")
         f.write(f"average 1w profit: {total_profit * 10000 / total_cost if total_cost > 0 else 0}\n")
+        f.write(f"one_befor_year_count: {one_befor_year_count}\n")
+        f.write(f"two_befor_year_count: {two_befor_year_count}\n")
+        f.write(f"three_befor_year_count: {three_befor_year_count}\n")
+        f.write(f"three_befor_year_rate: {three_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"two_befor_year_rate: {two_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))
@@ -282,6 +302,12 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"average days_held: {total_days_held / trade_count if trade_count > 0 else 0}\n")
         f.write(f"average profit: {total_profit / trade_count if trade_count > 0 else 0}\n")
         f.write(f"average 1w profit: {total_profit * 10000 / total_cost if total_cost > 0 else 0}\n")
+        f.write(f"one_befor_year_count: {one_befor_year_count}\n")
+        f.write(f"two_befor_year_count: {two_befor_year_count}\n")
+        f.write(f"three_befor_year_count: {three_befor_year_count}\n")
+        f.write(f"three_befor_year_rate: {three_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"two_befor_year_rate: {two_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))
