@@ -299,14 +299,23 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         full_name, final_combinations, gen_signal_func, backtest_func = args
 
         data = load_data(full_name)
+
         data = gen_signal_func(data)
         file_name = Path('../final_zuhe/zuhe') / f"{data['名称'].iloc[0]}.json"
+        aother_file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
         result_df_dict = read_json(file_name)
-
+        aother_result_df_dict = read_json(aother_file_name)
+        # 将aother_result_df_dict合并到result_df_dict
+        result_df_dict.update(aother_result_df_dict)
+        # 如果data长度小于100，不生成信号
+        if data.shape[0] < 100:
+            # 打印相应的日志
+            print(f"Processing {full_name} length {data.shape[0]} less than 100, skip...")
+            return
         if is_skip:
             # 优化：过滤和处理逻辑提取为单独的函数
             final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
@@ -332,6 +341,7 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
     finally:
         # 写入文件
         write_json(file_name, result_df_dict)
+        write_json(aother_file_name, result_df_dict)
         end_time = time.time()
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
@@ -371,7 +381,7 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
                 continue
 
             results_df = backtest_func(signal_data)
-            processed_result = process_results(results_df, threshold_day)
+            processed_result = process_results_with_year(results_df, threshold_day)
 
             if processed_result:
                 result_df_dict[combination_key] = processed_result
@@ -461,6 +471,7 @@ def create_empty_result():
             'total_cost': 0,
             'one_befor_year_count': 0,
             'two_befor_year_count': 0,
+            'three_befor_year_count_thread': 0,
             'three_befor_year_count': 0}
 
 
@@ -574,6 +585,7 @@ def process_results_with_year(results_df, threshold_day):
             'one_befor_year_count': 0,
             'two_befor_year_count': 0,
             'three_befor_year_count': 0,
+            'three_befor_year_count_thread':0,
             'total_days_held': 0
         }
     # 统计'Buy Date'大于三年前的数据
@@ -593,6 +605,8 @@ def process_results_with_year(results_df, threshold_day):
     Total_Profit = results_df['Total_Profit'].iloc[-1]
     result_df = result[result['Days Held'] > threshold_day]
     result_shape = result.shape[0]
+    three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
+
     return {
         'trade_count': result_shape,
         'total_profit': round(Total_Profit, 4),
@@ -601,6 +615,7 @@ def process_results_with_year(results_df, threshold_day):
         'one_befor_year_count': one_befor_year_count,
         'two_befor_year_count': two_befor_year_count,
         'three_befor_year_count': three_befor_year_count,
+        'three_befor_year_count_thread':three_befor_year_count_thread,
         'total_days_held': int(total_days_held)
     }
 
@@ -949,8 +964,7 @@ def process_combinations_gen(result_combination_list, file_path, gen_signal_func
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/gen/sublist.json', sublist_json)
 
-        statistics_zuhe_gen('../back/gen/zuhe', target_key=target_key)
-        statistics_zuhe_gen('../back/gen/zuhe', target_key='all')
+        statistics_zuhe_gen_both('../back/gen/zuhe', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 
@@ -1167,7 +1181,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
                         result[key]['one_befor_year_count'] += value['one_befor_year_count']
                         result[key]['two_befor_year_count'] += value['two_befor_year_count']
                         result[key]['three_befor_year_count'] += value['three_befor_year_count']
-
+                        result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
                         result[key]['total_days_held'] += value['total_days_held']
                     else:
                         result[key] = value
@@ -1192,6 +1206,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
                             result[key]['one_befor_year_count'] += value['one_befor_year_count']
                             result[key]['two_befor_year_count'] += value['two_befor_year_count']
                             result[key]['three_befor_year_count'] += value['three_befor_year_count']
+                            result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
                             result[key]['total_days_held'] += value['total_days_held']
                         else:
                             result[key] = value
@@ -1203,6 +1218,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
                 value['three_befor_year_count'] = 0
                 value['two_befor_year_count'] = 0
                 value['one_befor_year_count'] = 0
+                value['three_befor_year_count_thread'] = 0
             else:
                 value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
             value['ratio'] = value['size_of_result_df'] / value['trade_count']
@@ -1217,6 +1233,10 @@ def statistics_zuhe_good(file_path, target_key='all'):
             value['one_befor_year_rate'] = round(value['one_befor_year_count'] / value['trade_count'], 4)
             value['two_befor_year_rate'] = round(value['two_befor_year_count'] / value['trade_count'], 4)
             value['three_befor_year_rate'] = round(value['three_befor_year_count'] / value['trade_count'], 4)
+            if value['three_befor_year_count'] != 0:
+                value['three_befor_year_count_thread_ratio'] = round(value['three_befor_year_count_thread'] / value['three_befor_year_count'], 4)
+            else:
+                value['three_befor_year_count_thread_ratio'] = 1
         else:
             value['ratio'] = 1
             value['average_profit'] = 0
@@ -1229,6 +1249,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
             value['one_befor_year_rate'] = 0
             value['two_befor_year_rate'] = 0
             value['three_befor_year_rate'] = 0
+            value['three_befor_year_count_thread_ratio'] =1
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将result写入file_path上一级文件
@@ -1238,6 +1259,100 @@ def statistics_zuhe_good(file_path, target_key='all'):
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
+    return result
+
+@timeit
+def statistics_zuhe_gen_both(file_path, target_key='all'):
+    """
+    读取file_path下的所有.json文件，将有相同key的数据进行合并
+    :param file_path:
+    :return:
+    """
+    result = {}
+    sublist_list = read_json('../back/gen/sublist.json')
+    sublist_set = set()
+    for sublist in sublist_list:
+        temp_key = ':'.join(sublist)
+        sublist_set.add(temp_key)
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = read_json(fullname)
+            for key, value in data.items():
+                if 'three_befor_year_count_thread' not in value:
+                    value['one_befor_year_count'] = 0
+                    value['two_befor_year_count'] = 0
+                    value['three_befor_year_count'] = 0
+                    value['three_befor_year_count_thread'] = 0
+                if key in result:
+                    result[key]['trade_count'] += value['trade_count']
+                    result[key]['total_profit'] += value['total_profit']
+                    result[key]['total_cost'] += value['total_cost']
+                    result[key]['size_of_result_df'] += value['size_of_result_df']
+                    result[key]['total_days_held'] += value['total_days_held']
+                    result[key]['one_befor_year_count'] += value['one_befor_year_count']
+                    result[key]['two_befor_year_count'] += value['two_befor_year_count']
+                    result[key]['three_befor_year_count'] += value['three_befor_year_count']
+                    result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
+                else:
+                    result[key] = value
+    # 再计算result每一个key的平均值
+    for key, value in result.items():
+        if value['trade_count'] != 0:
+            if 'total_cost' not in value:
+                value['average_1w_profit'] = 0
+                value['three_befor_year_count'] = 0
+                value['two_befor_year_count'] = 0
+                value['one_befor_year_count'] = 0
+                value['three_befor_year_count_thread'] = 0
+            else:
+                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
+            value['ratio'] = value['size_of_result_df'] / value['trade_count']
+            value['average_days_held'] = value['total_days_held'] / value['trade_count']
+            value['average_profit'] = value['total_profit'] / value['trade_count']
+
+            # 将value['ratio']保留4位小数
+            value['ratio'] = round(value['ratio'], 4)
+            value['average_profit'] = round(value['average_profit'], 4)
+            value['average_days_held'] = round(value['average_days_held'], 4)
+            value['total_profit'] = round(value['total_profit'], 4)
+            value['one_befor_year_rate'] = round(value['one_befor_year_count'] / value['trade_count'], 4)
+            value['two_befor_year_rate'] = round(value['two_befor_year_count'] / value['trade_count'], 4)
+            value['three_befor_year_rate'] = round(value['three_befor_year_count'] / value['trade_count'], 4)
+            if value['three_befor_year_count'] != 0:
+                value['three_befor_year_count_thread_ratio'] = round(value['three_befor_year_count_thread'] / value['three_befor_year_count'], 4)
+            else:
+                value['three_befor_year_count_thread_ratio'] = 1
+        else:
+            value['ratio'] = 1
+            value['average_profit'] = 0
+            value['average_1w_profit'] = 0
+            value['average_days_held'] = 0
+            value['total_profit'] = 0
+    # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # 将result写入file_path上一级文件
+    target_key = 'all'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+
+    # 先删除原来的statistics.json文件
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, result)
+    # 写入target_key.json
+    target_key_result = {}
+    for key in sublist_set:
+        try:
+            target_key_result[key] = result[key]
+        except:
+            pass
+    target_key = 'target_key'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+
+    # 先删除原来的statistics.json文件
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, target_key_result)
     return result
 
 

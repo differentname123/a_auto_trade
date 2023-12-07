@@ -236,6 +236,7 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
     three_befor_year_count = 0
     two_befor_year_count = 0
     one_befor_year_count = 0
+    three_befor_year_count_thread = 0
     # 统计'Buy Date'大于三年前的数据
     three_year = datetime.datetime.now() - relativedelta(years=2)
     # 将three_year只保留到年份，不要月和日
@@ -253,6 +254,7 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         three_befor_year_count = all_df[all_df['Buy Date'].dt.year >= three_befor_year].shape[0]
         two_befor_year_count = all_df[all_df['Buy Date'].dt.year >= two_befor_year].shape[0]
         one_befor_year_count = all_df[all_df['Buy Date'].dt.year >= one_befor_year].shape[0]
+        three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
     except Exception as e:
         print(e)
 
@@ -278,6 +280,8 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"two_befor_year_count: {two_befor_year_count}\n")
         f.write(f"three_befor_year_count: {three_befor_year_count}\n")
         f.write(f"three_befor_year_rate: {three_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"three_befor_year_count_thread: {three_befor_year_count_thread}\n")
+        f.write(f"three_befor_year_count_thread_ratio: {three_befor_year_count_thread / three_befor_year_count if three_befor_year_count > 0 else 0}\n")
         f.write(f"two_befor_year_rate: {two_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         # Save the source code of gen_signal_func
@@ -308,6 +312,8 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"three_befor_year_rate: {three_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         f.write(f"two_befor_year_rate: {two_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+        f.write(f"three_befor_year_count_thread: {three_befor_year_count_thread}\n")
+        f.write(f"three_befor_year_count_thread_ratio: {three_befor_year_count_thread / three_befor_year_count if three_befor_year_count > 0 else 0}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))

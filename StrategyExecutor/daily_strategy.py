@@ -10,6 +10,7 @@
 """
 import numpy as np
 import pandas as pd
+import talib
 
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.common import load_data
@@ -871,6 +872,89 @@ def gen_daily_buy_signal_29(data):
     # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
     data['Buy_Signal'] = (data['涨跌幅'].shift(1) > 9.5) & (data['最低'] < (100 - 9.5) * data['收盘'].shift(1) / 100) & (data['日期'] > '2023-01-01')
     return data
+
+def gen_daily_buy_signal_30(data):
+    """
+    曾跌停，但收阳
+    :param data:
+    :return:
+    """
+
+    # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
+    data['Buy_Signal'] = (data['Max_rate'] > 0) & (data['最低'] <= data['收盘'].shift(1) * 0.95 * 0.9) & (data['收盘'] > data['开盘'])& (data['收盘'] > 2)
+    return data
+
+def select_stocks(data):
+    def SMA(S, N, M=1):  # Chinese style SMA
+        return pd.Series(S).ewm(alpha=M / N, adjust=False).mean().values
+    def CROSS(S, constant):
+        return (pd.Series(S).shift(1) < constant) & (pd.Series(S) > constant)
+
+    def CROSS_s(S1, S2):  # 判断向上金叉穿越 CROSS(MA(C,5),MA(C,10))  判断向下死叉穿越 CROSS(MA(C,10),MA(C,5))
+        return (pd.Series(S1).shift(1) < pd.Series(S2).shift(1)) & (pd.Series(S1) > pd.Series(S2))
+
+    def BARSLAST(S):  # 上一次条件成立到当前的周期, BARSLAST(C/REF(C,1)>=1.1) 上一次涨停到今天的天数
+        M = np.concatenate(([0], np.where(S, 1, 0)))
+        for i in range(1, len(M)):  M[i] = 0 if M[i] else M[i - 1] + 1
+        return M[1:]
+
+        # Assuming data columns are in the order: '日期', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率'
+    close = data['收盘']
+    low = data['最低']
+    high = data['最高']
+
+    # V1, V2, V3
+    V1 = EMA(close, 5) - EMA(close, 340)
+    V2 = EMA(V1, 144)
+    V3 = (close - LLV(low, 27)) / (HHV(high, 27) - LLV(low, 27)) * 100
+
+    # GUP0
+    GUP0 = IF(CROSS(V3, 5) & (V1 < V2), 20, 0) + 20
+
+    # VARMM1 to VARMM5
+    VARMM1 = REF(low, 1)
+    VARMM2 = SMA(ABS(low - VARMM1), 13) / SMA(MAX(low - VARMM1, 0), 13) * 4
+    VARMM3 = EMA(VARMM2, 13)
+    VARMM4 = LLV(low, 34)
+    VARMM5 = EMA(IF(low <= VARMM4, VARMM3, 0), 3)
+
+    # 主力 and 主力进场
+    主力 = VARMM5 > REF(VARMM5, 1)
+    主力进场 = SUM(主力, 20)
+
+    # 快线 and 慢线
+    快线 = (close - LLV(low, 9)) / (HHV(high, 9) - LLV(low, 9)) * 100
+    慢线 = SMA(快线, 3)
+
+    # BB
+    BB = IF(BARSLAST(CROSS(慢线, 快线)) >= 3 & CROSS(快线, 慢线) & (慢线 < 30), 20, 0)
+    # data['慢_chaunshang'] = BARSLAST(CROSS_s(慢线, 快线))
+    data['慢_shang'] = pd.Series(CROSS_s(慢线, 快线))
+    data['快_shang'] = CROSS_s(快线, 慢线)
+    data['BB'] = BB
+    data['慢线'] = 慢线
+    data['快线'] = 快线
+    data['主力'] = 主力
+    data['GUP0'] = GUP0
+    data['V3'] = V3
+    data['主力进场'] = 主力进场
+
+
+    # 买点
+    买点 = IF(BB>0 & (GUP0 > 25) & (主力进场 > 5), 35, 0)
+
+    # 底
+    VAR1J = 3
+    VAR2J = ((3 * SMA((((close - LLV(low, 27)) / (HHV(high, 27) - LLV(low, 27))) * 100), 5)) - (2 * SMA(SMA((((close - LLV(low, 27)) / (HHV(high, 27) - LLV(low, 27))) * 100), 5), 3)))
+    data['VAR2J'] = VAR2J
+    data['底'] = IF(CROSS(VAR2J, VAR1J), 1, 0)
+    data['买点'] = 买点
+    # sell
+    sell = 买点 | data['底']
+    data['Buy_Signal'] = sell
+    return sell
+
+
 def gen_daily_buy_signal_last(data):
     """
     在产生信号后，后一天下跌再买入
@@ -893,7 +977,7 @@ def mix(data):
     data_1 = data.copy()
     data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1,'收盘_大于_20_日均线_signal:BAR_20日_小极值_signal:实体rate_大于_10_日均线_signal:最低_小于_5_日均线_signal:最低_5日_小极值_signal:最低_10日_小极值_signal:涨跌幅_20日_小极值_signal:振幅_5日_大极值signal:BAR_10日_小极值_signal_yes:实体rate_大于_20_日均线_signal_yes:涨跌幅_20日_小极值_signal_yes'.split(':'))
+    gen_signal(data_1,'收盘_5日_大极值signal:换手率_大于_5_日均线_signal:最低_5日_大极值signal:振幅_大于_10_日均线_signal:BAR_小于_5_日均线_signal_yes:最高_20日_小极值_signal_yes:振幅_10日_大极值signal_yes'.split(':'))
 
 
 

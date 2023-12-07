@@ -15,7 +15,7 @@ import time
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back_layer_all_op_gen, \
-    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good
+    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both
 
 
 def generate_offspring(args):
@@ -58,12 +58,22 @@ class GeneticAlgorithm:
         :return:
         """
         all_statistics = read_json('../back/gen/statistics_all.json')
+
         self.existed_combinations = set(all_statistics.keys())
         # 找出所有低于1000次交易的组合
         self.low_trade_count_combinations = set()
         for combination in self.existed_combinations:
             if all_statistics[combination]['trade_count'] <= 1000:
                 self.low_trade_count_combinations.add(combination)
+
+        statistics = read_json('../back/statistics_target_key.json')
+        statistics_keys = set(statistics.keys())
+        statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] <= 1000}
+        statistics_new_keys = set(statistics_new.keys())
+        self.existed_combinations = self.existed_combinations | statistics_keys
+        self.low_trade_count_combinations = self.low_trade_count_combinations | statistics_new_keys
+        self.low_trade_count_combinations_set_list = [set(low_trade_count_combination.split(':')) for low_trade_count_combination in
+                                                      self.low_trade_count_combinations]
 
     def judge_gene(self, gene):
         """
@@ -79,7 +89,7 @@ class GeneticAlgorithm:
         combination = ':'.join(combination_list)
         if combination in self.existed_combinations:
             return False
-        if any([set(combination_list) >= set(low_trade_count_combination.split(':')) for low_trade_count_combination in self.low_trade_count_combinations]):
+        if any([set(combination_list) >= low_trade_count_combination for low_trade_count_combination in self.low_trade_count_combinations_set_list]):
             return False
 
         return True
@@ -113,7 +123,7 @@ class GeneticAlgorithm:
             pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
             results = pool.starmap(_generate_gene,
                                    [(self.min_ones, self.max_ones, self.gene_length, self.judge_gene) for _ in
-                                    range(self.population_size * 2)])  # 增加迭代次数以确保足够的种群大小
+                                    range(self.population_size)])  # 增加迭代次数以确保足够的种群大小
             pool.close()
             pool.join()
             for gene_str in results:
@@ -159,17 +169,21 @@ class GeneticAlgorithm:
         :param individual:
         :return:
         """
-        total_trade_count = 1000
-        trade_count_threshold = 100
+        trade_count_threshold = 1000
         # 适应度函数：计算该组合的得分
         if 'average_1w_profit' not in individual:
             individual["average_1w_profit"] = 0
         if individual["trade_count"] == 0:
             return -10000
-        trade_count_score = individual["trade_count"] / total_trade_count
-        if individual["trade_count"] < trade_count_threshold:
-            trade_count_score = individual["trade_count"] - trade_count_threshold * 10 / individual["trade_count"]
+        trade_count_score = math.log(individual["trade_count"])
         total_fitness = trade_count_score
+        if individual["trade_count"] >= trade_count_threshold:
+            if individual["ratio"] > 0:
+                total_fitness = total_fitness / individual["ratio"]
+            else:
+                total_fitness = total_fitness * 400
+            total_fitness -= individual['average_days_held']
+
         return total_fitness
 
     def _select(self):
@@ -231,7 +245,7 @@ class GeneticAlgorithm:
                 # 是因为子组合就是0所以就没有统计到
                 self.relation_map[key] = [-1, 0]
 
-        # statistics = read_json('../back/statistics_target_key.json')
+        # statistics = read_json('../back/gen/statistics_target_key.json')
         # for key in statistics.keys():
         #     self.relation_map[key] = [self._fitness(statistics[key]), statistics[key]]
         # # 将适应度排序
@@ -285,7 +299,7 @@ class GeneticAlgorithm:
         while len(new_population) < self.population_size:
             # 准备传递给 generate_offspring 的参数
             args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
-                         _ in range(self.population_size * 2)]
+                         _ in range(self.population_size)]
 
             # 使用多进程
             pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
@@ -317,7 +331,7 @@ def filter_good_zuhe():
     statistics = read_json('../back/gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.125}
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.17}
     result_combinations = good_ratio_keys.keys()
     final_combinations = []
     for combination in result_combinations:
@@ -328,12 +342,12 @@ def filter_good_zuhe():
 
 if __name__ == '__main__':
     # filter_good_zuhe()
-    # statistics_zuhe_gen('../back/gen/zuhe', target_key='all')
+    # statistics_zuhe_gen_both('../back/gen/zuhe', target_key='all')
     data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
     data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 1000  # 种群大小
+    population_size = 700  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 
