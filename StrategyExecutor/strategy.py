@@ -443,6 +443,7 @@ def show_image(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=back
     show_k(data, results_df)
 
 
+
 if __name__ == "__main__":
     # # daily macd新低买入
     # strategy('../daily_data_exclude_new_can_buy/力佳科技_835237.txt', gen_signal_func=mix,backtest_func=backtest_strategy_low_profit)
