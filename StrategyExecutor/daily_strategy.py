@@ -987,6 +987,39 @@ def mix(data):
 
     data['Buy_Signal'] = data_1['Buy_Signal']
 
+def mix_back(data):
+    """
+    买入信号
+    :param data:
+    :return:
+    """
+
+
+    file_path = '../daily_data_exclude_new_can_buy/新华百货_600785.txt'
+    target_date = '2023-12-07'
+    data_temp = load_data(file_path)
+    data_temp = gen_full_all_basic_signal(data_temp)
+    # 获取data指定时间，值为True的列名
+    target_date = pd.to_datetime(target_date)
+
+    target_data = data_temp[data_temp['日期'] == target_date]
+    satisfied_combinations = []
+    # 获取target_data的signal，并保存值为True的列名
+    for column in target_data.columns:
+        if column.endswith('_signal') and target_data[column].values[0]:
+            satisfied_combinations.append(column)
+
+    # 复制一份数据
+    data_1 = data.copy()
+    combines = satisfied_combinations
+
+    data_1 = gen_full_all_basic_signal(data_1)
+    gen_signal(data_1, combines)
+
+
+
+
+    data['Buy_Signal'] = data_1['Buy_Signal']
 
 def gen_true(data):
     """

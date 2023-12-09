@@ -15,7 +15,8 @@ import time
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back_layer_all_op_gen, \
-    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both
+    gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both, \
+    back_layer_all_op_gen_single
 
 
 def generate_offspring(args):
@@ -112,6 +113,7 @@ class GeneticAlgorithm:
         return list(population)
 
     def _initialize_population_mul(self):
+        # 目前初始化1259耗时 101s
         # 开始计时
         start_time = time.time()
         # 初始化种群，确保每个基因中1的数量在指定范围内
@@ -225,7 +227,7 @@ class GeneticAlgorithm:
         #                             range(len(self.signal_columns))]) for combination in self.combinations]
 
         self.combinations = [self.cover_to_combination(individual) for individual in self.population]
-        back_layer_all_op_gen('../daily_data_exclude_new_can_buy', self.combinations, gen_signal_func=gen_full_all_basic_signal,
+        back_layer_all_op_gen_single('../daily_data_exclude_new_can_buy', self.combinations, gen_signal_func=gen_full_all_basic_signal,
                               backtest_func=backtest_strategy_low_profit)
         self.gen_combination_to_fitness()
         self.load_all_statistics()

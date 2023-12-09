@@ -91,9 +91,6 @@ def load_data(file_path):
 
     # 重置索引
     data.reset_index(drop=True, inplace=True)
-    # if data['名称'].str.contains('st', case=False).any() or data['名称'].str.contains('退市').any():
-    #     data['Max_rate'] = 5
-    # data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 

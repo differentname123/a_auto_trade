@@ -32,9 +32,10 @@ import pandas as pd
 
 from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_daily_buy_signal_27, \
     gen_daily_buy_signal_25, gen_daily_buy_signal_28, gen_true, gen_daily_buy_signal_29, gen_daily_buy_signal_30, \
-    select_stocks
+    select_stocks, mix_back
 from StrategyExecutor.strategy import back_all_stock, strategy
-from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal
+from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
+    create_empty_result, process_results_with_year
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 
@@ -133,7 +134,6 @@ def parse_filename(file_path):
     stock_name, stock_code = file_name_without_ext.split('_')
 
     return stock_name, stock_code
-
 
 def load_data(file_path):
     data = pd.read_csv(file_path)
@@ -665,7 +665,7 @@ def get_good_combinations():
     """
     statistics = read_json('../final_zuhe/statistics_target_key.json')
     statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)}
-    good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 or v['three_befor_year_count_thread_ratio'] <= 0.1}
+    good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1}
     good_statistics = dict(sorted(good_statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将结果写入文件
     write_json('../final_zuhe/good_statistics.json', good_statistics)
@@ -688,6 +688,27 @@ def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_
         return {'stock_name': os.path.basename(file_path).split('.')[0], 'satisfied_combinations': satisfied_combinations}
     return None
 
+def sort_good_stocks(good_stocks):
+    """
+    Sorts a list of stocks based on the minimum value of 'ratio' and 'three_befor_year_count_thread_ratio'
+    within each 'satisfied_combinations' of a stock.
+
+    :param good_stocks: List of stocks with their respective satisfied combinations and statistics.
+    :return: List of stocks sorted in ascending order based on the minimum value of the mentioned ratios.
+    """
+    for stock in good_stocks:
+        # Extract all ratio values and three_befor_year_count_thread_ratio values from each satisfied_combination
+        ratios = [values['ratio'] for values in stock['satisfied_combinations'].values()]
+        three_befor_ratios = [values['three_befor_year_count_thread_ratio'] for values in stock['satisfied_combinations'].values()]
+
+        # Calculate the minimum ratio for each stock
+        stock['min_ratio'] = min(ratios + three_befor_ratios)
+
+    # Sort the stocks based on the minimum ratio calculated
+    sorted_stocks = sorted(good_stocks, key=lambda x: x['min_ratio'])
+
+    return sorted_stocks
+
 def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     get_good_combinations()
     start_time = time.time()
@@ -707,6 +728,8 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     # 过滤出非空结果
     good_stocks = [result for result in results if result is not None]
 
+    # 将good_stocks进行排序
+    good_stocks = sort_good_stocks(good_stocks)
     # 其他逻辑不变
     write_json('../final_zuhe/select_{}.json'.format(target_date.strftime('%Y-%m-%d')), good_stocks)
     print(good_stocks)
@@ -751,6 +774,68 @@ def get_target_date_good_stocks(file_path, target_date, gen_signal_func=gen_full
     # 结束计时
     end_time = time.time()
     print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
+
+def test_back_all():
+    """
+    进行分层函数的性能测试
+    :return:
+    """
+    file_name = Path('../back/gen/zuhe') / f"浪潮软件.json"
+    result_df_dict = read_json(file_name)
+    final_combination = read_json('../final_zuhe/statistics_target_key.json').keys()
+    # 将final_combination中的元素以':'分割
+    final_combinations = [combination.split(':') for combination in final_combination]
+    # 保留final_combinations前100个元素
+    final_combinations = final_combinations[:1000]
+    start_time = time.time()
+    try:
+        zero_combination = set()  # Using a set for faster lookups
+        full_name = '../daily_data_exclude_new_can_buy/浪潮软件_600756.txt'
+        data = load_data(full_name)
+        data = gen_full_all_basic_signal(data)
+        file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
+        recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
+        # file_name = Path('../back/zuhe') / f"C夏厦.json"
+        file_name.parent.mkdir(parents=True, exist_ok=True)
+
+        # 一次性读取JSON
+        result_df_dict = read_json(file_name)
+        recent_result_df_dict = {}
+
+        # 优化：过滤和处理逻辑提取为单独的函数
+        # final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
+
+        # 处理每个组合
+        for combination in final_combinations:
+            combination_key = ':'.join(combination)
+            signal_data = gen_signal(data, combination)
+
+            # 如果Buy_Signal全为False，则不进行回测
+            if not signal_data['Buy_Signal'].any():
+                result_df_dict[combination_key] = create_empty_result()
+                recent_result_df_dict[combination_key] = create_empty_result()
+                continue
+
+            results_df = backtest_strategy_low_profit(signal_data)
+            processed_result = process_results_with_year(results_df, 1)
+
+            if processed_result:
+                result_df_dict[combination_key] = processed_result
+                recent_result_df_dict[combination_key] = processed_result
+
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        # 写入文件
+        write_json(file_name, result_df_dict)
+        write_json(recent_file_name, recent_result_df_dict)
+        end_time = time.time()
+        print(
+            f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+
+
+
+
 
 if __name__ == '__main__':
     # data_1 = load_data('../daily_data_exclude_new/C润本_603193.txt')
@@ -813,24 +898,31 @@ if __name__ == '__main__':
     #         new_file_set.add(filename)
     # print(file_set - new_file_set)
 
-    get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-04', gen_signal_func=gen_full_all_basic_signal)
+    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-08', gen_signal_func=gen_full_all_basic_signal)
+    # good_data = sort_good_stocks(read_json('../final_zuhe/select_2023-12-07.json'))
+    # print(good_data)
+
 
     # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
     #
-    # strategy('../daily_data_exclude_new_can_buy/东方电子_000682.txt', gen_signal_func=select_stocks,backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new_can_buy/第一医药_600833.txt', gen_signal_func=mix_back,backtest_func=backtest_strategy_low_profit)
+    #
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix_back,
+    #                backtest_func=backtest_strategy_low_profit)
 
+    test_back_all()
     # # statistics = read_json('../back/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_all.json')
+    # statistics = read_json('../back/gen/statistics_all.json') # 大小 102336
     # # statistics = read_json('../final_zuhe/statistics_target_key.json')
     # # statistics = read_json('../back/gen/statistics_target_key.json')
     # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
-    # good_statistics = get_good_combinations()
-    # sublist_list = read_json('../back/sublist.json') #大小 55044
+    # # good_statistics = get_good_combinations()
+    # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
     # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # # sublist_list中的元素也是list，帮我对sublist_list进行去重
     # # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 35672 最好数据 513次 ratio:0.0448
-    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 31319 最好数据 2776次 ratio:0.0764
+    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 44040 最好数据 513次 ratio:0.0448
+    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 39382 最好数据 2776次 ratio:0.0764
     # statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
     # statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
     #
