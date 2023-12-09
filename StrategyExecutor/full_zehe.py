@@ -10,6 +10,8 @@
 """
 import multiprocessing
 import os
+import random
+
 import pandas as pd
 from multiprocessing import Pool
 import collections
@@ -719,7 +721,7 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     target_date = pd.to_datetime(target_date)
 
     # 使用 multiprocessing 处理文件
-    pool = Pool(multiprocessing.cpu_count())
+    pool = Pool(20)
     file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
     results = pool.starmap(process_file, [(file, target_date, good_keys, good_statistics, gen_signal_func) for file in file_paths])
     pool.close()
@@ -780,13 +782,14 @@ def test_back_all():
     进行分层函数的性能测试
     :return:
     """
+    should_write_data = True  # 新增变量来控制是否写入数据
     file_name = Path('../back/gen/zuhe') / f"浪潮软件.json"
     result_df_dict = read_json(file_name)
-    final_combination = read_json('../final_zuhe/statistics_target_key.json').keys()
+    final_combination = read_json('../back/gen/statistics_all.json').keys()
     # 将final_combination中的元素以':'分割
     final_combinations = [combination.split(':') for combination in final_combination]
-    # 保留final_combinations前100个元素
-    final_combinations = final_combinations[:1000]
+    # 随机保留final_combinations前100个元素
+    final_combinations = random.sample(final_combinations, 2000)
     start_time = time.time()
     try:
         zero_combination = set()  # Using a set for faster lookups
@@ -800,10 +803,11 @@ def test_back_all():
 
         # 一次性读取JSON
         result_df_dict = read_json(file_name)
+
         recent_result_df_dict = {}
 
         # 优化：过滤和处理逻辑提取为单独的函数
-        # final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
+        final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
 
         # 处理每个组合
         for combination in final_combinations:
@@ -910,27 +914,28 @@ if __name__ == '__main__':
     # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix_back,
     #                backtest_func=backtest_strategy_low_profit)
 
-    test_back_all()
-    # # statistics = read_json('../back/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_all.json') # 大小 102336
-    # # statistics = read_json('../final_zuhe/statistics_target_key.json')
-    # # statistics = read_json('../back/gen/statistics_target_key.json')
-    # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
-    # # good_statistics = get_good_combinations()
-    # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
-    # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
-    # # sublist_list中的元素也是list，帮我对sublist_list进行去重
-    # # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 44040 最好数据 513次 ratio:0.0448
-    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 39382 最好数据 2776次 ratio:0.0764
-    # statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
-    # statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
-    #
-    # statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
-    # statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'],
-    #                                       reverse=True)
-    # print(len(statistics))
-    # print(len(sublist_list))
+    # while True:
+    #     test_back_all()
+    # statistics = read_json('../back/statistics_target_key.json')
+    statistics = read_json('../back/gen/statistics_all.json') # 大小 113926
+    # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    # statistics = read_json('../back/gen/statistics_target_key.json')
+    # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
+    # good_statistics = get_good_combinations()
+    sublist_list = read_json('../back/gen/sublist.json') #大小 55044
+    statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # sublist_list中的元素也是list，帮我对sublist_list进行去重
+    # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 52765 最好数据 513次 ratio:0.0448
+    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 46649 最好数据 2776次 ratio:0.0764
+    statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
+    statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
+
+    statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
+    statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'],
+                                          reverse=True)
+    print(len(statistics))
+    print(len(sublist_list))
 
     # notice_list = read_json('../announcements/000682.json')
     # periods = find_st_periods(notice_list)

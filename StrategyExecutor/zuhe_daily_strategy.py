@@ -312,10 +312,10 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         # 将aother_result_df_dict合并到result_df_dict
         result_df_dict.update(aother_result_df_dict)
         # 如果data长度小于100，不生成信号
-        if data.shape[0] < 100:
-            # 打印相应的日志
-            print(f"Processing {full_name} length {data.shape[0]} less than 100, skip...")
-            return
+        # if data.shape[0] < 100:
+        #     # 打印相应的日志
+        #     print(f"Processing {full_name} length {data.shape[0]} less than 100, skip...")
+        #     return
         if is_skip:
             # 优化：过滤和处理逻辑提取为单独的函数
             final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
@@ -395,7 +395,7 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
-def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=True):
+def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=False):
     """
     会将本次结果单独存储一份
     """
@@ -417,6 +417,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
 
         if is_skip:
             # 优化：过滤和处理逻辑提取为单独的函数
+            print(file_name)
             final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
 
         # 处理每个组合
@@ -426,8 +427,8 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
 
             # 如果Buy_Signal全为False，则不进行回测
             if not signal_data['Buy_Signal'].any():
-                result_df_dict[combination_key] = create_empty_result()
-                recent_result_df_dict[combination_key] = create_empty_result()
+                # result_df_dict[combination_key] = create_empty_result()
+                # recent_result_df_dict[combination_key] = create_empty_result()
                 continue
 
             results_df = backtest_func(signal_data)
@@ -497,6 +498,7 @@ def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
+@timeit
 def filter_combinations(result_df_dict, final_combinations):
     """
     过滤已存在和无效的组合
@@ -647,6 +649,7 @@ def process_results_with_year(results_df, threshold_day):
     """
     result = results_df.sort_values(by='Days Held', ascending=True)
     if result.empty:
+        print("不应该啊")
         return {
             'trade_count': 0,
             'total_profit': 0,
@@ -1308,23 +1311,28 @@ def statistics_zuhe_good(file_path, target_key='all'):
             for f in fs:
                 fullname = os.path.join(root, f)
                 data = read_json(fullname)
-                for key, value in data.items():
-                    if key in sublist_set:
-                        try:
-                            if key in result:
-                                result[key]['trade_count'] += value['trade_count']
-                                result[key]['total_profit'] += value['total_profit']
-                                result[key]['total_cost'] += value['total_cost']
-                                result[key]['size_of_result_df'] += value['size_of_result_df']
-                                result[key]['one_befor_year_count'] += value['one_befor_year_count']
-                                result[key]['two_befor_year_count'] += value['two_befor_year_count']
-                                result[key]['three_befor_year_count'] += value['three_befor_year_count']
-                                result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
-                                result[key]['total_days_held'] += value['total_days_held']
-                            else:
-                                result[key] = value
-                        except Exception as e:
-                            pass
+                try:
+                    for key, value in data.items():
+                        if key in sublist_set:
+                            try:
+                                if key in result:
+                                    result[key]['trade_count'] += value['trade_count']
+                                    result[key]['total_profit'] += value['total_profit']
+                                    result[key]['total_cost'] += value['total_cost']
+                                    result[key]['size_of_result_df'] += value['size_of_result_df']
+                                    result[key]['one_befor_year_count'] += value['one_befor_year_count']
+                                    result[key]['two_befor_year_count'] += value['two_befor_year_count']
+                                    result[key]['three_befor_year_count'] += value['three_befor_year_count']
+                                    if 'three_befor_year_count_thread' not in result[key]:
+                                        result[key]['three_befor_year_count_thread'] = 0
+                                    result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
+                                    result[key]['total_days_held'] += value['total_days_held']
+                                else:
+                                    result[key] = value
+                            except Exception as e:
+                                pass
+                except Exception as e:
+                    pass
     # 再计算result每一个key的平均值
     for key, value in result.items():
         if value['trade_count'] != 0:
