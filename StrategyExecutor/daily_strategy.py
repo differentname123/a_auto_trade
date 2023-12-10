@@ -975,11 +975,9 @@ def mix(data):
     # 复制一份数据
 
     data_1 = data.copy()
-    data_2 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
     gen_signal(data_1,
                "收盘_大于_20_日均线_signal:BAR_20日_小极值_signal:实体rate_大于_10_日均线_signal:最低_小于_5_日均线_signal:最低_5日_小极值_signal:涨跌幅_20日_小极值_signal:振幅_5日_大极值signal:BAR_10日_小极值_signal_yes:实体rate_大于_20_日均线_signal_yes:涨跌幅_20日_小极值_signal_yes"
-
                .split(':'))
 
 
@@ -989,7 +987,7 @@ def mix(data):
 
 def mix_back(data):
     """
-    买入信号
+    使用指定数据指定日期的组合作为买入信号
     :param data:
     :return:
     """

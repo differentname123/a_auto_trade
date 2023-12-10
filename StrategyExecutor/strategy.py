@@ -255,6 +255,8 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         two_befor_year_count = all_df[all_df['Buy Date'].dt.year >= two_befor_year].shape[0]
         one_befor_year_count = all_df[all_df['Buy Date'].dt.year >= one_befor_year].shape[0]
         three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
+        # 将all_df保存到文件中，尽量一个数据都在同一行
+        all_df.to_csv(os.path.join(output_file_path, 'all_df.csv'), index=False)
     except Exception as e:
         print(e)
 
