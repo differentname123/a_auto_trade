@@ -307,7 +307,7 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
-        result_df_dict = read_json(file_name)
+        result_df_dict = {}
         aother_result_df_dict = read_json(aother_file_name)
         # 将aother_result_df_dict合并到result_df_dict
         result_df_dict.update(aother_result_df_dict)
@@ -335,13 +335,14 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
 
             if processed_result:
                 result_df_dict[combination_key] = processed_result
+        aother_result_df_dict.update(result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
     finally:
         # 写入文件
         write_json(file_name, result_df_dict)
-        write_json(aother_file_name, result_df_dict)
+        write_json(aother_file_name, aother_result_df_dict)
         end_time = time.time()
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")

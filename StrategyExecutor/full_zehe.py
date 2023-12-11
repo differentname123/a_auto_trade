@@ -11,7 +11,8 @@
 import multiprocessing
 import os
 import random
-
+import re
+import scipy
 import pandas as pd
 from multiprocessing import Pool
 import collections
@@ -31,6 +32,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
+from sympy.physics.quantum.identitysearch import scipy
+import matplotlib
+matplotlib.use('Agg')
+
 
 from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_daily_buy_signal_27, \
     gen_daily_buy_signal_25, gen_daily_buy_signal_28, gen_true, gen_daily_buy_signal_29, gen_daily_buy_signal_30, \
@@ -70,6 +76,16 @@ def backtest_strategy_low_profit(data):
     while i < len(data):
         if data['Buy_Signal'].iloc[i] == 1:
             high_list = []
+            # 遍历i 后面的三个数据
+            for xx in range(1, 4):
+                j = i + xx
+                if i + xx < len(data):
+                    high_price = data['最高'].iloc[j]
+                    high_price_ratio = 100 * (high_price - data['收盘'].iloc[j - 1]) / data['收盘'].iloc[j - 1]
+                    high_list.append((data['涨跌幅'].iloc[j], high_price_ratio))
+                else:
+                    high_list.append((0, 0))
+
             buy_price = data['收盘'].iloc[i]
             buy_date = data['日期'].iloc[i]
             buy_index = i
@@ -78,9 +94,6 @@ def backtest_strategy_low_profit(data):
             # 找到满足卖出条件的日期
             j = i + 1
             while j < len(data):
-                high_price = data['最高'].iloc[j]
-                high_price_ratio = 100 * (high_price - data['收盘'].iloc[j - 1]) / data['收盘'].iloc[j - 1]
-                high_list.append((high_price, high_price_ratio))
                 if data['最高'].iloc[j] >= get_sell_price(buy_price):
                     break  # 找到了满足卖出条件的日期，跳出循环
 
@@ -670,8 +683,9 @@ def get_good_combinations():
     获取表现好的组合
     :return:
     """
+    min_count = 20
     statistics = read_json('../final_zuhe/statistics_target_key.json')
-    statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)}
+    statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)}
     good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1}
     good_statistics = dict(sorted(good_statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将结果写入文件
@@ -694,6 +708,33 @@ def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_
     if satisfied_combinations:
         return {'stock_name': os.path.basename(file_path).split('.')[0], 'satisfied_combinations': satisfied_combinations}
     return None
+
+def sort_good_stocks_op(good_stocks):
+    """
+    Sorts a list of stocks based on a custom score calculated from
+    'three_befor_year_rate', 'three_befor_year_count_thread_ratio', and 'ratio'.
+
+    :param good_stocks: List of stocks with their respective satisfied combinations and statistics.
+    :return: List of stocks sorted in ascending order based on the calculated score.
+    """
+    for stock in good_stocks:
+        scores = []
+        for values in stock['satisfied_combinations'].values():
+            three_befor_year_rate = values['three_befor_year_rate']
+            three_befor_year_count_thread_ratio = values['three_befor_year_count_thread_ratio']
+            ratio = values['ratio']
+
+            # Calculate the custom score for each combination
+            score = three_befor_year_rate * three_befor_year_count_thread_ratio + (1 - three_befor_year_rate) * ratio
+            scores.append(score)
+
+        # Find the minimum score for each stock
+        stock['min_score'] = min(scores)
+
+    # Sort the stocks based on their minimum score
+    sorted_stocks = sorted(good_stocks, key=lambda x: x['min_score'])
+
+    return sorted_stocks
 
 def sort_good_stocks(good_stocks):
     """
@@ -726,7 +767,7 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     target_date = pd.to_datetime(target_date)
 
     # 使用 multiprocessing 处理文件
-    pool = Pool(20)
+    pool = Pool(multiprocessing.cpu_count())
     file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
     results = pool.starmap(process_file, [(file, target_date, good_keys, good_statistics, gen_signal_func) for file in file_paths])
     pool.close()
@@ -910,7 +951,21 @@ def get_threshold_close(data, gen_signal_func=gen_daily_buy_signal_26, step=0.01
     return buy_data
 
 
+def parse_row(row):
+    """
+    解析文件中的每一行，将字符串格式的数据转换为元组列表。
 
+    :param row: 文件中的一行数据。
+    :return: 解析后的数据，为一个包含元组的列表。
+    """
+    # 使用正则表达式找出所有的元组
+    tuples = re.findall(r'\[?\((.*?)\)\]?', row)
+    parsed_data = []
+    for t in tuples:
+        # 将字符串分割成两部分，并转换为浮点数
+        closing, highest = t.split(',')
+        parsed_data.append((float(closing.strip()), float(highest.strip())))
+    return parsed_data
 
 def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=gen_daily_buy_signal_26):
     """
@@ -918,7 +973,45 @@ def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=gen_daily
     :param all_df_file_path:
     :return:
     """
-    thread_day = 5
+    # file_path = '../back/complex/high_list.csv'
+    # # 读取文件并将每一行数据进行解析
+    # parsed_lines = []
+    # with open(file_path, 'r') as file:
+    #     for line in file:
+    #         # 忽略空行
+    #         if line.strip():
+    #             parsed_lines.append(parse_row(line.strip()))
+    #
+    # # 将解析后的数据转换为 pandas DataFrame
+    # parsed_df = pd.DataFrame(parsed_lines, columns=['Day 1', 'Day 2', 'Day 3'])
+    #
+    # # 显示解析后的数据
+    # parsed_df.head()
+    #
+    # # 定义新的卖出阈值范围进行测试，从1%到10%
+    # new_thresholds_range = np.arange(0, 10, 1)
+    #
+    # # 重新运行分析，使用新的卖出阈值范围
+    # best_profit_realistic = float('-inf')
+    # best_thresholds_realistic = None
+    #
+    # # 遍历第1天和第2天可能的阈值组合
+    # for threshold1 in new_thresholds_range:
+    #     for threshold2 in new_thresholds_range:
+    #         # threshold1 = 11
+    #         # threshold2 = 14
+    #         total_profit_realistic = 0
+    #         # 对数据集中的每一行进行策略模拟
+    #         for index, row_data in parsed_df.iterrows():
+    #             profit_realistic = simulate_strategy_profitable(row_data, [threshold1, threshold2])
+    #             total_profit_realistic += profit_realistic
+    #
+    #         # 检查当前策略是否比目前找到的最好策略更优
+    #         if total_profit_realistic > best_profit_realistic:
+    #             best_profit_realistic = total_profit_realistic
+    #             best_thresholds_realistic = (threshold1, threshold2)
+
+    thread_day = 1
     # 加载all_df，但是不要把000001变成1
     all_df = pd.read_csv(all_df_file_path, dtype={'代码': str})
     # 截取all_df的后100个元素
@@ -949,10 +1042,102 @@ def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=gen_daily
     # 每一行的high_list的值格式为'[(4.13, 2.2277227722772244)]'，现在按照第二个元素升序排序,应该先将字符串变成元组
     high_list = [eval(high_list_item) for high_list_item in high_list]
     high_list = sorted(high_list, key=lambda x: x[thread_day - 1][1])
+    # 获取high_list中每个元素的第二个元素，即最小值
+    high_list = [high_list_item[thread_day - 1][1] for high_list_item in high_list]
+    # 剔除high_list中为0的元素
+    high_list = [high_list_item for high_list_item in high_list if high_list_item != 0]
+
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    # 计算均值和标准差
+    mean = np.mean(high_list)
+    std_dev = np.std(high_list)
+    # 设置图形样式
+    sns.set(style="whitegrid")
+
+    threshold_above_90 = norm.ppf(1 - 0.90, loc=mean, scale=std_dev)  # 大于等于 90% 的阈值
+    threshold_above_95 = norm.ppf(1 - 0.95, loc=mean, scale=std_dev)  # 大于等于 95% 的阈值
+
+    # 绘制涨跌幅的直方图和正态分布曲线，并标注这两个阈值
+    plt.figure(figsize=(10, 6))
+    sns.histplot(high_list, bins=30, kde=True, color='blue')
+    plt.title("Stock Price Change Distribution")
+    plt.xlabel("Price Change (%)")
+    plt.ylabel("Frequency")
+    plt.axvline(x=mean, color='red', linestyle='--', label=f'Mean: {mean:.2f}%')
+    plt.axvline(x=threshold_above_90, color='green', linestyle='--', label=f'90% Threshold: {threshold_above_90:.2f}%')
+    plt.axvline(x=threshold_above_95, color='purple', linestyle='--', label=f'95% Threshold: {threshold_above_95:.2f}%')
+    plt.legend()
+
+    plt.savefig('../back/complex/image.png')  # 保存图像
+    # plt.show()  # 保存后不需要这行代码
+
+    #将high_list写入'../back/complex/high_list.csv'
+    with open('../back/complex/high_list.csv', 'w') as f:
+        for high_list_item in high_list:
+            f.write(str(high_list_item) + '\n')
     print(high_list)
     # 将all_df写入'../back/complex/all_df_full.csv'
     # all_df.to_csv('../back/complex/all_df_full.csv', index=False)
 
+def calculate_normal_distribution(data):
+  """
+  计算数据的正态分布。
+
+  Args:
+    data: 数据列表，每个元素都是浮点数。
+
+  Returns:
+    均值、标准差、正态分布概率密度函数。
+  """
+
+  # 计算均值和标准差
+  mean = np.mean(data)
+  std = np.std(data)
+
+  # 生成正态分布概率密度函数
+  pdf = scipy.stats.norm(mean, std).pdf
+
+  return mean, std, pdf
+
+
+def simulate_strategy_profitable(data, sell_thresholds):
+    """
+    根据设定的卖出阈值来卖出股票的交易策略，并记录股票数量来计算利润。
+
+    :param data: 包含每天（收盘价涨跌幅，最高价涨跌幅）的元组列表。
+    :param sell_thresholds: 第1天和第2天的卖出阈值列表。
+    :return: 策略的总利润。
+    """
+    initial_stock_price = 100  # 初始股价
+    current_stock_price = initial_stock_price  # 当前股价
+    total_cost = initial_stock_price  # 总成本
+    stock_count = 1  # 初始股票数量
+    total_profit = 0  # 总利润
+
+    for i, day_data in enumerate(data):
+        closing_change, highest_change = day_data
+
+        # 检查当天的最高价是否达到卖出阈值
+        if stock_count != 0 and i < 2 and current_stock_price * (1 + highest_change / 100) >= current_stock_price * (1 + sell_thresholds[i] / 100):
+            sell_price = current_stock_price * (1 + sell_thresholds[i] / 100)  # 计算卖出价格
+            profit = stock_count * (sell_price - total_cost / stock_count)  # 计算利润
+            total_profit += profit  # 累加利润
+            stock_count = 0  # 卖出后股票数量变为0
+
+        # 更新当前股价为收盘价
+        current_stock_price *= (1 + closing_change / 100)
+
+        # 如果当天未卖出，股票数量不为0，且不是最后一天，则以当天收盘价买入股票
+        if stock_count != 0 and i < 2:
+            total_cost += current_stock_price  # 更新总成本
+            stock_count += 1  # 股票数量增加
+
+    # 如果最后一天结束时还持有股票，以最后一天的收盘价卖出
+    if stock_count > 0:
+        total_profit += stock_count * (current_stock_price - total_cost / stock_count)
+
+    return total_profit
 
 if __name__ == '__main__':
     # data_1 = load_data('../daily_data_exclude_new/C润本_603193.txt')
@@ -1015,12 +1200,14 @@ if __name__ == '__main__':
     #         new_file_set.add(filename)
     # print(file_set - new_file_set)
 
-    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-08', gen_signal_func=gen_full_all_basic_signal)
-    # good_data = sort_good_stocks(read_json('../final_zuhe/select_2023-12-07.json'))
+    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-11', gen_signal_func=gen_full_all_basic_signal)
+    # good_data = sort_good_stocks_op(read_json('../final_zuhe/select_2023-12-11.json'))
     # print(good_data)
 
+
+
     count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv')
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy/中国卫星_600118.txt', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
     #
@@ -1036,7 +1223,7 @@ if __name__ == '__main__':
     # # statistics = read_json('../final_zuhe/statistics_target_key.json')
     # # statistics = read_json('../back/gen/statistics_target_key.json')
     # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
-    # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
+    # # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
     # # good_statistics = get_good_combinations()
     # # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
     # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))

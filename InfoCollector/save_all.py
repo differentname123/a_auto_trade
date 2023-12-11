@@ -9,6 +9,7 @@
     
 """
 import json
+import multiprocessing
 import os
 import traceback
 from datetime import datetime
@@ -21,6 +22,9 @@ import threading
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+
+from StrategyExecutor.common import timeit
+
 
 def read_json(file_path):
     try:
@@ -253,7 +257,7 @@ def fix_announcements():
         if file.endswith('.json'):
             os.rename('../announcements/' + file, '../announcements/' + file.split('_')[1])
 
-
+@timeit
 def save_all_data():
 
     stock_data_df = ak.stock_zh_a_spot_em()
@@ -270,7 +274,7 @@ def save_all_data():
     new_exclude_code.extend(exclude_code)
     # 将new_exclude_code去重
     new_exclude_code = list(set(new_exclude_code))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
         futures = [executor.submit(save_stock_data, stock_data, new_exclude_code) for _, stock_data in
                    stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
@@ -279,9 +283,28 @@ def save_all_data():
             except Exception as e:
                 logging.error(f"Error occurred: {e}")
 
+@timeit
+def save_all_data_mul():
+    stock_data_df = ak.stock_zh_a_spot_em()
+    all_code_set = set(stock_data_df['代码'].tolist())
+
+    exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
+    exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+
+    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    new_exclude_code_set = all_code_set - need_code_set
+    new_exclude_code_set.update(exclude_code_set)
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
+        futures = [executor.submit(save_stock_data, stock_data, new_exclude_code_set) for _, stock_data in stock_data_df.iterrows()]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Error occurred: {e}")
 
 def fun():
-    save_all_data()
+    save_all_data_mul()
 
 
 if __name__ == '__main__':

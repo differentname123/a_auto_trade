@@ -14,23 +14,23 @@ if __name__ == '__main__':
     
     auto = ThsAuto()                                        # 连接客户端
     auto.active_mian_window()
-    auto.kill_client()
-    run_client()
-    time.sleep(5)
+    # auto.kill_client()
+    # run_client()
+    # time.sleep(5)
     auto.bind_client()
 
-    print('可用资金')
-    print(auto.get_balance())                               # 获取当前可用资金
 
-    print('持仓')
-    print(auto.get_position())                              # 获取当前持有的股票
 
-    print('卖出')
-    print(auto.sell(stock_no='000573', amount=100, price=3.5))   # 卖出股票
 
-    print('买入')
-    result = auto.buy(stock_no='162411', amount=100, price=0.41)    # 买入股票
-    print(result)
+    for i in range(10):
+        # 开始计时
+        start = time.time()
+        print('买入')
+        result = auto.buy(stock_no='162411', amount=100, price=None)    # 买入股票
+        print(result)
+        # 结束计时
+        end = time.time()
+        print('耗时：', end - start)
 
     print('已成交')
     print(auto.get_filled_orders())                                 # 获取已成交订单
