@@ -967,49 +967,82 @@ def parse_row(row):
         parsed_data.append((float(closing.strip()), float(highest.strip())))
     return parsed_data
 
-def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=gen_daily_buy_signal_26):
+def get_best_threshold(file_path, num_days):
+    """
+    穷举法，在指定的data获取最好的阈值组合，data为每天可能的表现，是个二维数组
+    :param file_path: 文件路径
+    :param num_days: 考虑的天数，决定循环的深度
+    :return:
+    """
+    # 读取文件并将每一行数据进行解析
+    parsed_lines = []
+    with open(file_path, 'r') as file:
+        for line in file:
+            if line.strip():
+                parsed_lines.append(parse_row(line.strip()))
+
+    # 定义新的卖出阈值范围进行测试，从-10%到10%
+    new_thresholds_range = np.arange(0, 10.1, 0.1)
+
+    # 初始化最佳利润和阈值组合
+    best_profit_realistic = float('-inf')
+    best_thresholds_realistic = None
+
+    # 生成所有可能的阈值组合
+    for thresholds in itertools.product(new_thresholds_range, repeat=num_days):
+        total_profit_realistic = 0
+        jian_count = 0
+        fail_rate = 1
+        for change_rate_list in parsed_lines:
+            # 保留change_rate_list的前num_days个元素
+            change_rate_list = change_rate_list[:num_days]
+            profit_realistic = simulate_strategy_profitable(change_rate_list, list(thresholds))
+            if profit_realistic < 0:
+                jian_count += 1
+            total_profit_realistic += profit_realistic
+
+        if total_profit_realistic > best_profit_realistic:
+            best_profit_realistic = total_profit_realistic
+            best_thresholds_realistic = thresholds
+            print('fail_rate: ', jian_count / len(parsed_lines))
+            print('thresholds: ', thresholds)
+            print('total_profit_realistic_rate: ', total_profit_realistic/len(parsed_lines))
+
+    print('best_profit_realistic: ', best_profit_realistic)
+    return best_thresholds_realistic
+
+def fill_all_df(all_df, file_path, code_list, gen_signal_func=mix):
+    """
+    将阈值收盘价填充到all_df中
+    :param all_df:
+    :param file_path:
+    :param code_list:
+    :param gen_signal_func:
+    :return:
+    """
+    fullname_map = {}
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            code = f.split('_')[1].split('.')[0]
+            fullname = os.path.join(root, f)
+            fullname_map[code] = fullname
+    for code in code_list:
+        data = load_data(fullname_map[code])
+        buy_data = get_threshold_close(data, gen_signal_func)
+        # 将buy_data和all_df匹配，条件为 代码 和 日期 相等，将buy_data中的threshold_close_up和threshold_close_down的值赋给all_df
+        for index, row in buy_data.iterrows():
+            all_df.loc[(all_df['代码'] == code) & (all_df['Buy Date'] == row['日期']), 'threshold_close_down'] = row[
+                'threshold_close_down']
+            all_df.loc[(all_df['代码'] == code) & (all_df['Buy Date'] == row['日期']), 'threshold_close_up'] = row[
+                'threshold_close_up']
+    return all_df
+
+def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=mix):
     """
     计算最低的收益率，及后续的售出策略
     :param all_df_file_path:
     :return:
     """
-    # file_path = '../back/complex/high_list.csv'
-    # # 读取文件并将每一行数据进行解析
-    # parsed_lines = []
-    # with open(file_path, 'r') as file:
-    #     for line in file:
-    #         # 忽略空行
-    #         if line.strip():
-    #             parsed_lines.append(parse_row(line.strip()))
-    #
-    # # 将解析后的数据转换为 pandas DataFrame
-    # parsed_df = pd.DataFrame(parsed_lines, columns=['Day 1', 'Day 2', 'Day 3'])
-    #
-    # # 显示解析后的数据
-    # parsed_df.head()
-    #
-    # # 定义新的卖出阈值范围进行测试，从1%到10%
-    # new_thresholds_range = np.arange(0, 10, 1)
-    #
-    # # 重新运行分析，使用新的卖出阈值范围
-    # best_profit_realistic = float('-inf')
-    # best_thresholds_realistic = None
-    #
-    # # 遍历第1天和第2天可能的阈值组合
-    # for threshold1 in new_thresholds_range:
-    #     for threshold2 in new_thresholds_range:
-    #         # threshold1 = 11
-    #         # threshold2 = 14
-    #         total_profit_realistic = 0
-    #         # 对数据集中的每一行进行策略模拟
-    #         for index, row_data in parsed_df.iterrows():
-    #             profit_realistic = simulate_strategy_profitable(row_data, [threshold1, threshold2])
-    #             total_profit_realistic += profit_realistic
-    #
-    #         # 检查当前策略是否比目前找到的最好策略更优
-    #         if total_profit_realistic > best_profit_realistic:
-    #             best_profit_realistic = total_profit_realistic
-    #             best_thresholds_realistic = (threshold1, threshold2)
 
     thread_day = 1
     # 加载all_df，但是不要把000001变成1
@@ -1023,62 +1056,26 @@ def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=gen_daily
     high_list = success_data['high_list'].values
     code_list = list(success_data['代码'].values)
     code_list = list(set(code_list))
-    fullname_map = {}
-    # for root, ds, fs in os.walk(file_path):
-    #     for f in fs:
-    #         code = f.split('_')[1].split('.')[0]
-    #         fullname = os.path.join(root, f)
-    #         fullname_map[code] = fullname
-    # for code in code_list:
-    #     data = load_data(fullname_map[code])
-    #     buy_data = get_threshold_close(data, gen_signal_func)
-    #     # 将buy_data和all_df匹配，条件为 代码 和 日期 相等，将buy_data中的threshold_close_up和threshold_close_down的值赋给all_df
-    #     for index, row in buy_data.iterrows():
-    #         all_df.loc[(all_df['代码'] == code) & (all_df['Buy Date'] == row['日期']), 'threshold_close_down'] = row[
-    #             'threshold_close_down']
-    #         all_df.loc[(all_df['代码'] == code) & (all_df['Buy Date'] == row['日期']), 'threshold_close_up'] = row[
-    #             'threshold_close_up']
 
-    # 每一行的high_list的值格式为'[(4.13, 2.2277227722772244)]'，现在按照第二个元素升序排序,应该先将字符串变成元组
+    # # 将阈值收盘价填充到all_df中
+    # all_df = fill_all_df(all_df, file_path, code_list, gen_signal_func)
+
+
+    # 计算相对于收盘价的最优阈值
+     # 1.简单进行排序
     high_list = [eval(high_list_item) for high_list_item in high_list]
     high_list = sorted(high_list, key=lambda x: x[thread_day - 1][1])
-    # 获取high_list中每个元素的第二个元素，即最小值
-    high_list = [high_list_item[thread_day - 1][1] for high_list_item in high_list]
-    # 剔除high_list中为0的元素
-    high_list = [high_list_item for high_list_item in high_list if high_list_item != 0]
-
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    # 计算均值和标准差
-    mean = np.mean(high_list)
-    std_dev = np.std(high_list)
-    # 设置图形样式
-    sns.set(style="whitegrid")
-
-    threshold_above_90 = norm.ppf(1 - 0.90, loc=mean, scale=std_dev)  # 大于等于 90% 的阈值
-    threshold_above_95 = norm.ppf(1 - 0.95, loc=mean, scale=std_dev)  # 大于等于 95% 的阈值
-
-    # 绘制涨跌幅的直方图和正态分布曲线，并标注这两个阈值
-    plt.figure(figsize=(10, 6))
-    sns.histplot(high_list, bins=30, kde=True, color='blue')
-    plt.title("Stock Price Change Distribution")
-    plt.xlabel("Price Change (%)")
-    plt.ylabel("Frequency")
-    plt.axvline(x=mean, color='red', linestyle='--', label=f'Mean: {mean:.2f}%')
-    plt.axvline(x=threshold_above_90, color='green', linestyle='--', label=f'90% Threshold: {threshold_above_90:.2f}%')
-    plt.axvline(x=threshold_above_95, color='purple', linestyle='--', label=f'95% Threshold: {threshold_above_95:.2f}%')
-    plt.legend()
-
-    plt.savefig('../back/complex/image.png')  # 保存图像
-    # plt.show()  # 保存后不需要这行代码
-
-    #将high_list写入'../back/complex/high_list.csv'
-    with open('../back/complex/high_list.csv', 'w') as f:
-        for high_list_item in high_list:
-            f.write(str(high_list_item) + '\n')
     print(high_list)
+
+    # 穷尽得到指定天数内的最优阈值搭配
+    #将high_list写入'../back/complex/high_list.csv'
+    # with open('../back/complex/high_list.csv', 'w') as f:
+    #     for high_list_item in high_list:
+    #         f.write(str(high_list_item) + '\n')
+    # print(high_list)
+    # get_best_threshold('../back/complex/high_list.csv', 2)
     # 将all_df写入'../back/complex/all_df_full.csv'
-    # all_df.to_csv('../back/complex/all_df_full.csv', index=False)
+    all_df.to_csv('../back/complex/all_df_full.csv', index=False)
 
 def calculate_normal_distribution(data):
   """
@@ -1114,22 +1111,22 @@ def simulate_strategy_profitable(data, sell_thresholds):
     total_cost = initial_stock_price  # 总成本
     stock_count = 1  # 初始股票数量
     total_profit = 0  # 总利润
-
+    max_hold_day = len(sell_thresholds)  # 最大持有天数
     for i, day_data in enumerate(data):
         closing_change, highest_change = day_data
 
         # 检查当天的最高价是否达到卖出阈值
-        if stock_count != 0 and i < 2 and current_stock_price * (1 + highest_change / 100) >= current_stock_price * (1 + sell_thresholds[i] / 100):
+        if stock_count != 0 and i <= max_hold_day and current_stock_price * (1 + highest_change / 100) >= current_stock_price * (1 + sell_thresholds[i] / 100):
             sell_price = current_stock_price * (1 + sell_thresholds[i] / 100)  # 计算卖出价格
             profit = stock_count * (sell_price - total_cost / stock_count)  # 计算利润
             total_profit += profit  # 累加利润
-            stock_count = 0  # 卖出后股票数量变为0
+            return total_profit
 
         # 更新当前股价为收盘价
         current_stock_price *= (1 + closing_change / 100)
 
         # 如果当天未卖出，股票数量不为0，且不是最后一天，则以当天收盘价买入股票
-        if stock_count != 0 and i < 2:
+        if stock_count != 0 and i <= max_hold_day:
             total_cost += current_stock_price  # 更新总成本
             stock_count += 1  # 股票数量增加
 
@@ -1206,8 +1203,8 @@ if __name__ == '__main__':
 
 
 
-    count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv')
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy/中国卫星_600118.txt', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
     #
@@ -1219,7 +1216,7 @@ if __name__ == '__main__':
 
 
     # # statistics = read_json('../back/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_all.json') # 大小 149824
+    # statistics = read_json('../back/gen/statistics_all.json') # 大小 187492
     # # statistics = read_json('../final_zuhe/statistics_target_key.json')
     # # statistics = read_json('../back/gen/statistics_target_key.json')
     # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
@@ -1229,8 +1226,8 @@ if __name__ == '__main__':
     # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # # sublist_list中的元素也是list，帮我对sublist_list进行去重
     # # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 84928 最好数据 507次 ratio:0.0414
-    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 75016 最好数据 1246次 ratio:0.0594
+    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 121298 最好数据 111次 ratio:0.036
+    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 121298 最好数据 1246次 ratio:0.0594
     # statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
     # statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
     #

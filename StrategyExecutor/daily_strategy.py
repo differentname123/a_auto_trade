@@ -986,6 +986,7 @@ def mix(data):
 
 
     data['Buy_Signal'] = data_1['Buy_Signal']
+    return data
 
 def mix_back(data):
     """
