@@ -310,7 +310,6 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         result_df_dict = {}
         aother_result_df_dict = read_json(aother_file_name)
         # 将aother_result_df_dict合并到result_df_dict
-        result_df_dict.update(aother_result_df_dict)
         # 如果data长度小于100，不生成信号
         # if data.shape[0] < 100:
         #     # 打印相应的日志

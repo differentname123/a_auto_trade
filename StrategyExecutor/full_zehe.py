@@ -706,7 +706,7 @@ def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_
         if signal_data['Buy_Signal'].values[0]:
             satisfied_combinations[good_key] = good_statistics[good_key]
     if satisfied_combinations:
-        return {'stock_name': os.path.basename(file_path).split('.')[0], 'satisfied_combinations': satisfied_combinations}
+        return {'stock_name': os.path.basename(file_path).split('.')[0], 'satisfied_combinations': satisfied_combinations, '收盘':target_data['收盘'].values[0]}
     return None
 
 def sort_good_stocks_op(good_stocks):
@@ -775,9 +775,8 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
 
     # 过滤出非空结果
     good_stocks = [result for result in results if result is not None]
-
     # 将good_stocks进行排序
-    good_stocks = sort_good_stocks(good_stocks)
+    good_stocks = sort_good_stocks_op(good_stocks)
     # 其他逻辑不变
     write_json('../final_zuhe/select_{}.json'.format(target_date.strftime('%Y-%m-%d')), good_stocks)
     print(good_stocks)
@@ -1197,13 +1196,13 @@ if __name__ == '__main__':
     #         new_file_set.add(filename)
     # print(file_set - new_file_set)
 
-    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-11', gen_signal_func=gen_full_all_basic_signal)
+    get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-12', gen_signal_func=gen_full_all_basic_signal)
     # good_data = sort_good_stocks_op(read_json('../final_zuhe/select_2023-12-11.json'))
     # print(good_data)
 
 
 
-    count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
+    # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy/中国卫星_600118.txt', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)

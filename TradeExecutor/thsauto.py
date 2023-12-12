@@ -19,7 +19,7 @@ DdddOcr = ddddocr.DdddOcr()
 
 from const import VK_CODE, BALANCE_CONTROL_ID_GROUP
 
-sleep_time = 0.2
+sleep_time = 0.07
 short_sleep_time = 0.05
 refresh_sleep_time = 0.5
 retry_time = 5
