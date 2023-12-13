@@ -394,16 +394,22 @@ def filter_good_zuhe():
     过滤出好的指标，并且全部再跑一次
     :return:
     """
+    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     statistics = read_json('../back/gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
     good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1}
+    good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
+    good_ratio_keys.update(good_ratio_keys_day)
 
+    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     old_statistics = read_json('../back/statistics_target_key.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new_old = {k: v for k, v in old_statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
     good_ratio_keys_old = {k: v for k, v in statistics_new_old.items() if v['ratio'] <= 0.1}
+    good_ratio_keys_old_day = {k: v for k, v in statistics_new_old.items() if v['than_1_average_days_held'] <= 3}
+    good_ratio_keys_old.update(good_ratio_keys_old_day)
 
     result_combinations = good_ratio_keys.keys()
 
