@@ -51,7 +51,7 @@ class GeneticAlgorithm:
         self.mutation_rate = mutation_rate
         self.signal_columns = signal_columns
         self.combinations = []
-        self.population = self._initialize_population_mul()
+        self.population = self._initialize_population()
 
     def load_all_statistics(self):
         """
@@ -96,21 +96,45 @@ class GeneticAlgorithm:
         return True
 
     def _initialize_population(self):
+        statistics = read_json('../back/gen/statistics_target_key.json')
+        if len(statistics) == 0:
+            self._initialize_population_mul()
+        else:
+            self._initialize_population_mul_load()
+
+    def _initialize_population_mul_load(self):
+        """
+        读取最近的组合信息来进行初始化
+        :return:
+        """
+        self.load_all_statistics()
         # 开始计时
         start_time = time.time()
-        # 初始化种群，确保每个基因中1的数量在指定范围内
-        population = set()
-        self.load_all_statistics()
-        while len(population) < self.population_size:
-            ones_count = random.randint(self.min_ones, self.max_ones)
-            gene = ['1'] * ones_count + ['0'] * (self.gene_length - ones_count)
-            random.shuffle(gene)
-            if self.judge_gene(gene):
-                population.add(''.join(gene))
+        new_population = set()
+        statistics = read_json('../back/gen/statistics_target_key.json')
+        self.population = [self.cover_to_individual(combination) for combination in statistics.keys()]
+        self.gen_combination_to_fitness()
+        while len(new_population) < self.population_size:
+            # 准备传递给 generate_offspring 的参数
+            args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
+                         _ in range(self.population_size)]
+
+            # 使用多进程
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            results = pool.map(generate_offspring, args_list)
+            pool.close()
+            pool.join()
+
+            for offspring in results:
+                new_population.update(offspring)
+            print('new_population:', len(new_population))
+
+        self.population = list(new_population)
+        self.population = [individual for individual in self.population if '1' in individual]
+
         # 结束计时
         end_time = time.time()
-        print('sig初始化种群耗时：', end_time - start_time)
-        return list(population)
+        print('mul_load生成新种群耗时：', end_time - start_time)
 
     def _initialize_population_mul(self):
         # 目前初始化1259耗时 101s
@@ -195,6 +219,13 @@ class GeneticAlgorithm:
     def cover_to_combination(self, individual):
         # 将个体转换为组合
         return [self.signal_columns[i] for i, gene in enumerate(individual) if gene == '1']
+
+    def cover_to_individual(self, combination):
+        # 组合转换为个体
+        individual = ['0'] * self.gene_length
+        for signal in combination.split(':'):
+            individual[self.signal_columns.index(signal)] = '1'
+        return ''.join(individual)
 
     def _crossover(self, parent1, parent2):
         # 交叉
@@ -325,6 +356,38 @@ class GeneticAlgorithm:
         temp_map = sorted(self.relation_map.items(), key=lambda x: x[1][0], reverse=True)
         return temp_map[0]
 
+def find_extra_elements(a, b):
+    """
+    Find elements that are in array 'a' but not in array 'b'.
+
+    :param a: First 2D array
+    :param b: Second 2D array
+    :return: List of elements that are in 'a' but not in 'b'
+    """
+    # Convert 2D arrays to sets of tuples for comparison
+    set_a = {tuple(row) for row in a}
+    set_b = {tuple(row) for row in b}
+
+    # Find elements in set_a that are not in set_b
+    extra_elements = set_a - set_b
+
+    return list(extra_elements)
+
+def deduplicate_2d_array(array_2d):
+    """
+    Remove duplicate elements from a 2D array.
+
+    :param array_2d: A 2D array
+    :return: A 2D array with duplicates removed
+    """
+    # Convert each sub-array to a tuple and add to a set for uniqueness
+    unique_elements = set(tuple(row) for row in array_2d)
+
+    # Convert back to list of lists
+    deduplicated_array = [list(elem) for elem in unique_elements]
+
+    return deduplicated_array
+
 def filter_good_zuhe():
     """
     过滤出好的指标，并且全部再跑一次
@@ -333,12 +396,24 @@ def filter_good_zuhe():
     statistics = read_json('../back/gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.17}
+    # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1}
+
+    old_statistics = read_json('../back/statistics_target_key.json')
+    # 所有的指标都应该满足10次以上的交易
+    statistics_new_old = {k: v for k, v in old_statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
+    good_ratio_keys_old = {k: v for k, v in statistics_new_old.items() if v['ratio'] <= 0.1}
+
     result_combinations = good_ratio_keys.keys()
+
     final_combinations = []
     for combination in result_combinations:
         final_combinations.append(combination.split(':'))
-    back_layer_all_good('../daily_data_exclude_new_can_buy', final_combinations,
+    # 将good_ratio_keys_old.keys()中的指标加入到result_combinations中
+    for combination in good_ratio_keys_old.keys():
+        final_combinations.append(combination.split(':'))
+    no_duplicate_final_combinations = deduplicate_2d_array(final_combinations)
+    back_layer_all_good('../daily_data_exclude_new_can_buy', no_duplicate_final_combinations,
                           gen_signal_func=gen_full_all_basic_signal,
                           backtest_func=backtest_strategy_low_profit)
 
