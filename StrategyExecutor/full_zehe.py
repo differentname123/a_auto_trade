@@ -35,6 +35,9 @@ import pandas as pd
 from scipy.stats import norm
 from sympy.physics.quantum.identitysearch import scipy
 import matplotlib
+
+from InfoCollector.save_all import save_all_data_mul
+
 matplotlib.use('Agg')
 
 
@@ -684,12 +687,25 @@ def get_good_combinations():
     :return:
     """
     min_count = 20
-    statistics = read_json('../final_zuhe/statistics_target_key.json')
-    statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)}
-    good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1}
-    good_statistics = dict(sorted(good_statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+
+    # # 成功率优先
+    # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    # statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)}
+    # good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1}
+    # good_statistics = dict(sorted(good_statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+
+    # 盈利优先
+    statistics = read_json('../back/gen/statistics_all.json')
+    # 所有的指标都应该满足10次以上的交易
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)} # 100交易次数以上 13859
+    # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v["average_1w_profit"] >= 150}
+    good_statistics = dict(sorted(good_ratio_keys.items(), key=lambda x: (x[1]['average_1w_profit'], -x[1]['than_1_average_days_held']), reverse=True))
+
     # 将结果写入文件
     write_json('../final_zuhe/good_statistics.json', good_statistics)
+    # # 增加计算超过一天的平均持有天数
+    # compute_more_than_one_day_held('../final_zuhe/good_statistics.json')
     return good_statistics
 
 def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_func):
@@ -756,6 +772,22 @@ def sort_good_stocks(good_stocks):
     sorted_stocks = sorted(good_stocks, key=lambda x: x['min_ratio'])
 
     return sorted_stocks
+
+def get_newest_stock():
+    """
+    获取最新时间的选股
+    :return:
+    """
+    # 开始计时
+    start_time = time.time()
+    # 获取当前时间，保留到日
+    target_date = datetime.now()
+    save_all_data_mul()
+    target_date = datetime(target_date.year, target_date.month, target_date.day)
+    get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', target_date, gen_signal_func=gen_full_all_basic_signal)
+    # 结束计时
+    end_time = time.time()
+    print('耗时：', end_time - start_time)
 
 def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     get_good_combinations()
@@ -1135,87 +1167,42 @@ def simulate_strategy_profitable(data, sell_thresholds):
 
     return total_profit
 
+def compute_more_than_one_day_held(file_path):
+    """
+    计算超过一天的平均持有天数
+    :return:
+    """
+    good_statistics = read_json(file_path)
+    for key, value in good_statistics.items():
+        than_1_average_days_held = 0
+        if value['ratio'] > 0:
+            than_1_average_days_held = (value['ratio'] - 1 + value['average_days_held']) / value['ratio']
+        value['than_1_average_days_held'] = than_1_average_days_held
+    write_json(file_path, good_statistics)
+
+
 if __name__ == '__main__':
-    # data_1 = load_data('../daily_data_exclude_new/C润本_603193.txt')
-    # data_2 = load_data_optimized('../daily_data_exclude_new/东方电子_000682.txt')
-    # data_2 = gen_full_all_basic_signal(data_2)
-    #
-    # data_signal = gen_signal(data_2,"振幅_大于_10_固定区间_signal:最高_10日_大极值signal".split(':'))
-    # data_signal_op = gen_signal_optimized(data_2, "振幅_大于_10_固定区间_signal:最高_10日_大极值signal".split(':'))
-    # # 分别采用两种信号生成方式统计时间
-    # print(timeit.timeit('gen_signal(data_2,"振幅_大于_10_固定区间_signal:最高_10日_大极值signal".split(":"))', globals=globals(), number=1000))
-    # print(timeit.timeit('gen_signal_optimized(data_2,"振幅_大于_10_固定区间_signal:最高_10日_大极值signal".split(":"))', globals=globals(), number=1000))
-    # sta = read_json('..\back\zuhe\C夏厦.json')
 
-    # # 分别采用两种加载方式统计时间
-    #
-    # print(timeit.timeit('load_data_optimized("../daily_data_exclude_new/东方电子_000682.txt")', globals=globals(), number=100))
-    # print(timeit.timeit('load_data("../daily_data_exclude_new/东方电子_000682.txt")', globals=globals(), number=100))
-    # temp_dict = read_json(f'../back/combination_list_2.json')
-    # result_combination_list = temp_dict['result_combination_list']
-    # full_combination_list = temp_dict['full_combination_list']
-    # newest_indicators = temp_dict['newest_indicators']
 
-    # 获取目录下文件的所有key的交集
-
-    # for root, ds, fs in os.walk('../back/zuhe'):
-    #     for f in fs:
-    #         fullname = os.path.join(root, f)
-    #         data = read_json(fullname)
-    #         # 获取data的所有key
-    #         keys = list(data.keys())
-    #         # 如果keys长度小于1000
-    #         if len(keys) < 1000:
-    #             print(fullname)
-    #         # 获取所有文件的key的交集
-    #         if 'all_keys' not in locals():
-    #             all_keys = set(keys)
-    #         else:
-    #             all_keys = all_keys & set(keys)
-    # statistics = read_json('../back/statistics_all.json')
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
-
-    # data = load_data('../daily_data_exclude_new/九阳股份_002242.txt')
-    # data = gen_full_all_basic_signal(data)
-    # print(data)
-
-    # file_set = set()
-    # new_file_set = set()
-    # file_list = []
-    # for root, ds, fs in os.walk('../daily_data_exclude_new_can_buy'):
-    #     for f in fs:
-    #         file_set.add(f.split('_')[0])
-    #         file_list.append(f.split('_')[0])
-    # #找到file_list中重复的元素
-    # print([item for item, count in collections.Counter(file_list).items() if count > 1])
-    #
-    # for root, ds, fs in os.walk('../back/zuhe'):
-    #     for f in fs:
-    #         fullname = os.path.join(root, f)
-    #         filename = f.split('.')[0]
-    #         new_file_set.add(filename)
-    # print(file_set - new_file_set)
-
-    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-12', gen_signal_func=gen_full_all_basic_signal)
+    # compute_more_than_one_day_held('../back/statistics_target_key.json')
+    # get_newest_stock()
+    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-07', gen_signal_func=gen_full_all_basic_signal)
     # good_data = sort_good_stocks_op(read_json('../final_zuhe/select_2023-12-11.json'))
     # print(good_data)
 
 
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy/中国卫星_600118.txt', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
-    #
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix_back,
-    #                backtest_func=backtest_strategy_low_profit)
 
     # while True:
     #     test_back_all()
 
 
     # statistics = read_json('../back/statistics_target_key.json')
-    statistics = read_json('../back/gen/statistics_all.json') # 大小 218426
+    statistics = read_json('../back/gen/statistics_all.json') # 大小 250007
     # statistics = read_json('../final_zuhe/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_target_key.json')
     # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
@@ -1225,8 +1212,9 @@ if __name__ == '__main__':
     statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # sublist_list中的元素也是list，帮我对sublist_list进行去重
     # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
-    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 136382 最好数据 1246次 ratio:0.0594
+    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 181139 最好数据 111次 ratio:0.036
+    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 163834 最好数据 1246次 ratio:0.0594
     statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
     statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
     statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}

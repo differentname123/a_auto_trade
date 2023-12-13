@@ -21,24 +21,33 @@ if __name__ == '__main__':
 
 
 
+    print('持仓')
+    data = auto.get_position()
+    print(data)
+    stock_nos = []
+    for detail_data in data['data']:
+        if int(detail_data['实际数量']) > 0:
+            stock_nos.append(detail_data['证券代码'])
+    print(stock_nos)
 
-    for i in range(10):
-        # 开始计时
-        start = time.time()
-        print('买入')
-        result = auto.buy(stock_no='162411', amount=100, price=None)    # 买入股票
-        print(result)
-        # 结束计时
-        end = time.time()
-        print('耗时：', end - start)
-
-    print('已成交')
-    print(auto.get_filled_orders())                                 # 获取已成交订单
-    
-    print('未成交')
-    print(auto.get_active_orders())                                 # 获取未成交订单
-
-    if result and result['code'] == 0:                                # 如果买入下单成功，尝试撤单
-        print('撤单')
-        print(auto.cancel(entrust_no=result['entrust_no']))
-
+    #
+    # for i in range(10):
+    #     # 开始计时
+    #     start = time.time()
+    #     print('买入')
+    #     result = auto.buy(stock_no='162411', amount=100, price=None)    # 买入股票
+    #     print(result)
+    #     # 结束计时
+    #     end = time.time()
+    #     print('耗时：', end - start)
+    #
+    # print('已成交')
+    # print(auto.get_filled_orders())                                 # 获取已成交订单
+    #
+    # print('未成交')
+    # print(auto.get_active_orders())                                 # 获取未成交订单
+    #
+    # if result and result['code'] == 0:                                # 如果买入下单成功，尝试撤单
+    #     print('撤单')
+    #     print(auto.cancel(entrust_no=result['entrust_no']))
+    #

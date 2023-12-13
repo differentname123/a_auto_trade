@@ -98,9 +98,9 @@ class GeneticAlgorithm:
     def _initialize_population(self):
         statistics = read_json('../back/gen/statistics_target_key.json')
         if len(statistics) == 0:
-            self._initialize_population_mul()
+            return self._initialize_population_mul()
         else:
-            self._initialize_population_mul_load()
+            return self._initialize_population_mul_load()
 
     def _initialize_population_mul_load(self):
         """
@@ -135,6 +135,7 @@ class GeneticAlgorithm:
         # 结束计时
         end_time = time.time()
         print('mul_load生成新种群耗时：', end_time - start_time)
+        return self.population
 
     def _initialize_population_mul(self):
         # 目前初始化1259耗时 101s
