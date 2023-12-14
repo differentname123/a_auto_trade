@@ -400,22 +400,23 @@ def filter_good_zuhe():
     # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 or v['three_befor_year_count_thread_ratio'] <= 0.1}
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['1w_rate'] >= 100 and v['average_1w_profit'] >= 100 and v['three_befor_year_count_thread_ratio'] <= 0.1 }
     # good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
     # good_ratio_keys.update(good_ratio_keys_day)
     statistics_ratio = dict(sorted(good_ratio_keys.items(), key=lambda x: x[1]['ratio'], reverse=False))
 
 
-    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['fitness'] >= 100}
-    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['fitness'], reverse=True))
+    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3.84 and v['average_1w_profit'] >= 100}
+    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['than_1_average_days_held'], reverse=True))
 
 
-    good_1w_keys = {k: v for k, v in statistics_new.items() if v['average_1w_profit'] >= 100}
+    good_1w_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 2 or v["ratio"] <= 0.05}
     statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
 
 
-    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if v['1w_rate'] >= 100}
+    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if (v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05) or v['1w_rate'] >= 200}
     statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+
 
     # 将所有的指标都写入文件,去重
     statistics_all = dict()

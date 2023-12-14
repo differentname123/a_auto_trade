@@ -705,7 +705,7 @@ def get_good_combinations():
     statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
 
 
-    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05}
+    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if (v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05) or v['1w_rate'] >= 200}
     statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
 
     # 将所有的指标都写入文件,去重
@@ -1306,9 +1306,10 @@ if __name__ == '__main__':
 
     # temp()
 
-    # compute_more_than_one_day_held('../final_zuhe/statistics_target_key.json')
-    # compute_all_round_value('../final_zuhe/statistics_target_key.json')
-    # compute_1w_rate_day_held('../final_zuhe/statistics_target_key.json')
+    # file_path = '../back/gen/statistics_all.json'
+    # compute_more_than_one_day_held(file_path)
+    # compute_all_round_value(file_path)
+    # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
     # get_newest_stock()
