@@ -412,7 +412,6 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
-        result_df_dict = read_json(file_name)
         recent_result_df_dict = {}
 
         if is_skip:
@@ -435,8 +434,9 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
             processed_result = process_results_with_year(results_df, threshold_day)
 
             if processed_result:
-                result_df_dict[combination_key] = processed_result
                 recent_result_df_dict[combination_key] = processed_result
+        result_df_dict = read_json(file_name)
+        result_df_dict.update(recent_result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
@@ -982,7 +982,7 @@ def process_combinations_good(result_combination_list, file_path, gen_signal_fun
     回测最终好指标的函数
     """
     # 按照一定数量分割list
-    split_size = 10000
+    split_size = 100000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
@@ -1021,9 +1021,6 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
-    # 删除'../back/gen/sublist.json'
-    if os.path.exists('../back/gen/sublist.json'):
-        os.remove('../back/gen/sublist.json')
     sublist_json = []
     for sublist in result_combination_lists:
         # 开始计时
@@ -1377,7 +1374,11 @@ def statistics_zuhe_good(file_path, target_key='all'):
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将result写入file_path上一级文件
     file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
-
+    # 写入一份备份文件
+    file_name_backup = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    if os.path.exists(file_name_backup):
+        os.remove(file_name_backup)
+    write_json(file_name_backup, result)
     # 先删除原来的statistics.json文件
     if os.path.exists(file_name):
         os.remove(file_name)
@@ -1456,26 +1457,17 @@ def statistics_zuhe_gen_both(file_path, target_key='all'):
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将result写入file_path上一级文件
     target_key = 'all'
+    # 先写入一份到备份文件
+    file_name_backup = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    if os.path.exists(file_name_backup):
+        os.remove(file_name_backup)
+    write_json(file_name_backup, result)
     file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
 
     # 先删除原来的statistics.json文件
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
-    # 写入target_key.json
-    target_key_result = {}
-    for key in sublist_set:
-        try:
-            target_key_result[key] = result[key]
-        except:
-            pass
-    target_key = 'target_key'
-    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
-
-    # 先删除原来的statistics.json文件
-    if os.path.exists(file_name):
-        os.remove(file_name)
-    write_json(file_name, target_key_result)
     return result
 
 @timeit
@@ -1571,6 +1563,9 @@ def statistics_zuhe_gen_both_single(file_path, target_key='all'):
             old_result[key] = value
         result = old_result
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # 再写入一份到备份文件
+    file_name_back = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    write_json(file_name_back, result)
     # 先删除原来的statistics.json文件
     if os.path.exists(file_name):
         os.remove(file_name)

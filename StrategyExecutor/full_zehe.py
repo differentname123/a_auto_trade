@@ -686,27 +686,35 @@ def get_good_combinations():
     获取表现好的组合
     :return:
     """
-    min_count = 20
-
-    # # 成功率优先
-    # statistics = read_json('../final_zuhe/statistics_target_key.json')
-    # statistics_filter = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)}
-    # good_statistics = {k: v for k, v in statistics_filter.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1}
-    # good_statistics = dict(sorted(good_statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
-
-    # 盈利优先
-    statistics = read_json('../back/gen/statistics_all.json')
+    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
+    statistics = read_json('../final_zuhe/statistics_target_key.json')
     # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > min_count and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > min_count / 2)} # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v["average_1w_profit"] >= 150}
-    good_statistics = dict(sorted(good_ratio_keys.items(), key=lambda x: (x[1]['average_1w_profit'], -x[1]['than_1_average_days_held']), reverse=True))
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['1w_rate'] >= 100 and v['average_1w_profit'] >= 100 and v['three_befor_year_count_thread_ratio'] <= 0.1 }
+    # good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
+    # good_ratio_keys.update(good_ratio_keys_day)
+    statistics_ratio = dict(sorted(good_ratio_keys.items(), key=lambda x: x[1]['ratio'], reverse=False))
 
-    # 将结果写入文件
-    write_json('../final_zuhe/good_statistics.json', good_statistics)
-    # # 增加计算超过一天的平均持有天数
-    # compute_more_than_one_day_held('../final_zuhe/good_statistics.json')
-    return good_statistics
+
+    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3.84 and v['average_1w_profit'] >= 100}
+    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['than_1_average_days_held'], reverse=True))
+
+
+    good_1w_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 2 or v["ratio"] <= 0.05}
+    statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
+
+
+    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05}
+    statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+
+    # 将所有的指标都写入文件,去重
+    statistics_all = dict()
+    statistics_all.update(statistics_ratio)
+    statistics_all.update(statistics_fitness)
+    statistics_all.update(statistics_1w)
+    statistics_all.update(statistics_1w_rate)
+    write_json('../final_zuhe/good_statistics.json', statistics_all)
 
 def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_func):
     # 为每个文件执行的处理逻辑
@@ -812,6 +820,13 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     # 其他逻辑不变
     write_json('../final_zuhe/select_{}.json'.format(target_date.strftime('%Y-%m-%d')), good_stocks)
     print(good_stocks)
+    total_price = 0
+    for stock_info in good_stocks:
+        stock_no = stock_info['stock_name'].split('_')[1]
+        price = stock_info['收盘']
+        if price > 2:
+            total_price += price
+    print('总价值：', total_price)
     end_time = time.time()
     print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
 
@@ -1172,7 +1187,9 @@ def compute_more_than_one_day_held(file_path):
     计算超过一天的平均持有天数
     :return:
     """
-    good_statistics = read_json(file_path)
+    # 先将file_path备份一份
+    shutil.copyfile(file_path, file_path + '.bak')
+    good_statistics = dict(read_json(file_path))
     for key, value in good_statistics.items():
         than_1_average_days_held = 0
         if value['ratio'] > 0:
@@ -1180,16 +1197,124 @@ def compute_more_than_one_day_held(file_path):
         value['than_1_average_days_held'] = than_1_average_days_held
     write_json(file_path, good_statistics)
 
+def compute_1w_rate_day_held(file_path):
+    """
+    计算1w利润和超过一天的比例
+    :return:
+    """
+    # 先将file_path备份一份
+    shutil.copyfile(file_path, file_path + '.bak')
+    good_statistics = dict(read_json(file_path))
+    for k, v in good_statistics.items():
+        if v['than_1_average_days_held'] != 0 and v['ratio'] != 0:
+            v['1w_rate'] = v['average_1w_profit'] / v['than_1_average_days_held'] / v['ratio']
+        else:
+            v['1w_rate'] = v['average_1w_profit']
+    statistics_1w = dict(sorted(good_statistics.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+    write_json(file_path, statistics_1w)
+
+def _fitness(statistic):
+    """
+    单个统计信息,适应度得分计算
+    :param statistic:
+    :return:
+    """
+    trade_count_threshold = 10
+    # 适应度函数：计算该组合的得分
+    if 'average_1w_profit' not in statistic:
+        statistic["average_1w_profit"] = 0
+    if statistic["trade_count"] == 0:
+        return -10000
+    trade_count_score = math.log(statistic["trade_count"])
+    total_fitness = trade_count_score
+    if statistic["three_befor_year_count"] >= trade_count_threshold or statistic["three_befor_year_rate"] >= 0.2:
+        if statistic["ratio"] > 0:
+            total_fitness = total_fitness / statistic["ratio"]
+        else:
+            total_fitness = total_fitness * 400
+            total_fitness += 400
+        total_fitness -= statistic['average_days_held']
+        total_fitness += statistic['average_1w_profit'] / 4
+        total_fitness -= statistic["ratio"] * 10 * statistic['than_1_average_days_held']
+
+    return total_fitness
+
+def compute_all_round_value(file_path):
+    """
+    计算综合得分
+    :param file_path:
+    :return:
+    """
+    # 先将file_path备份一份
+    shutil.copyfile(file_path, file_path + '.bak')
+    statistics = dict(read_json(file_path))
+    for key, value in statistics.items():
+        value['fitness'] = _fitness(value)
+    # 按照fitness排序
+    statistics_average_days_held = dict(sorted(statistics.items(), key=lambda x: x[1]['fitness'],
+                                          reverse=True))
+    write_json(file_path, statistics_average_days_held)
+
+
+def filter_good_zuhe():
+    """
+    过滤出好的指标，并且全部再跑一次
+    :return:
+    """
+    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
+    statistics = read_json('../final_zuhe/statistics_target_key.json')
+    # 所有的指标都应该满足10次以上的交易
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
+    # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['1w_rate'] >= 100 and v['average_1w_profit'] >= 100 and v['three_befor_year_count_thread_ratio'] <= 0.1 }
+    # good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
+    # good_ratio_keys.update(good_ratio_keys_day)
+    statistics_ratio = dict(sorted(good_ratio_keys.items(), key=lambda x: x[1]['ratio'], reverse=False))
+
+
+    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3.84 and v['average_1w_profit'] >= 100}
+    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['than_1_average_days_held'], reverse=True))
+
+
+    good_1w_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 2 or v["ratio"] <= 0.05}
+    statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
+
+
+    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if (v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05) or v['1w_rate'] >= 200}
+    statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+
+    # 将所有的指标都写入文件,去重
+    statistics_all = dict()
+    statistics_all.update(statistics_ratio)
+    statistics_all.update(statistics_fitness)
+    statistics_all.update(statistics_1w)
+    statistics_all.update(statistics_1w_rate)
+    write_json('../final_zuhe/good_statistics.json', statistics_all)
+
+
+def temp():
+    statistics = read_json('../back/gen/statistics_all_good_1w_not_in_fitness.json')
+    for k, v in statistics.items():
+        if v['than_1_average_days_held'] != 0:
+            v['1w_rate'] = v['average_1w_profit'] / v['than_1_average_days_held']
+        else:
+            v['1w_rate'] = v['average_1w_profit']
+    statistics_1w = dict(sorted(statistics.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+    write_json('../back/gen/statistics_all_good_1w_rate.json', statistics_1w)
 
 if __name__ == '__main__':
 
+    # temp()
 
-    # compute_more_than_one_day_held('../back/statistics_target_key.json')
+    # compute_more_than_one_day_held('../final_zuhe/statistics_target_key.json')
+    # compute_all_round_value('../final_zuhe/statistics_target_key.json')
+    # compute_1w_rate_day_held('../final_zuhe/statistics_target_key.json')
+    # filter_good_zuhe()
+
     # get_newest_stock()
-    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-07', gen_signal_func=gen_full_all_basic_signal)
+    # get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', '2023-12-14', gen_signal_func=gen_full_all_basic_signal)
     # good_data = sort_good_stocks_op(read_json('../final_zuhe/select_2023-12-11.json'))
     # print(good_data)
-
 
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
@@ -1202,7 +1327,7 @@ if __name__ == '__main__':
 
 
     # statistics = read_json('../back/statistics_target_key.json')
-    statistics = read_json('../back/gen/statistics_all.json') # 大小 250007
+    statistics = read_json('../back/gen/statistics_all.json') # 大小 283516
     # statistics = read_json('../final_zuhe/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_target_key.json')
     # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
@@ -1213,16 +1338,15 @@ if __name__ == '__main__':
     # sublist_list中的元素也是list，帮我对sublist_list进行去重
     # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
     # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 181139 最好数据 111次 ratio:0.036
-    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 163834 最好数据 1246次 ratio:0.0594
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 212327 最好数据 111次 ratio:0.036
+    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 191585 最好数据 1246次 ratio:0.0594
     statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
     statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
     statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
     statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
 
     statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
-    statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'],
-                                          reverse=True)
+    statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True)
     print(len(statistics))
 
     # notice_list = read_json('../announcements/000682.json')

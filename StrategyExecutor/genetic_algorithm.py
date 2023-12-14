@@ -14,9 +14,10 @@ import random
 import time
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
+from StrategyExecutor.full_zehe import compute_more_than_one_day_held
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back_layer_all_op_gen, \
     gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both, \
-    back_layer_all_op_gen_single
+    back_layer_all_op_gen_single, statistics_zuhe_gen_both_single
 
 
 def generate_offspring(args):
@@ -209,6 +210,7 @@ class GeneticAlgorithm:
                 total_fitness = total_fitness / individual["ratio"]
             else:
                 total_fitness = total_fitness * 400
+            total_fitness += individual["average_1w_profit"] / 4
             total_fitness -= individual['average_days_held']
 
         return total_fitness
@@ -394,14 +396,33 @@ def filter_good_zuhe():
     过滤出好的指标，并且全部再跑一次
     :return:
     """
-    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     statistics = read_json('../back/gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1}
-    good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
-    good_ratio_keys.update(good_ratio_keys_day)
+    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 or v['three_befor_year_count_thread_ratio'] <= 0.1}
+    # good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
+    # good_ratio_keys.update(good_ratio_keys_day)
+    statistics_ratio = dict(sorted(good_ratio_keys.items(), key=lambda x: x[1]['ratio'], reverse=False))
+
+
+    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['fitness'] >= 100}
+    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['fitness'], reverse=True))
+
+
+    good_1w_keys = {k: v for k, v in statistics_new.items() if v['average_1w_profit'] >= 100}
+    statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
+
+
+    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if v['1w_rate'] >= 100}
+    statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
+
+    # 将所有的指标都写入文件,去重
+    statistics_all = dict()
+    statistics_all.update(statistics_ratio)
+    statistics_all.update(statistics_fitness)
+    statistics_all.update(statistics_1w)
+    statistics_all.update(statistics_1w_rate)
 
     # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     old_statistics = read_json('../back/statistics_target_key.json')
@@ -411,13 +432,11 @@ def filter_good_zuhe():
     good_ratio_keys_old_day = {k: v for k, v in statistics_new_old.items() if v['than_1_average_days_held'] <= 3}
     good_ratio_keys_old.update(good_ratio_keys_old_day)
 
-    result_combinations = good_ratio_keys.keys()
+    statistics_all.update(good_ratio_keys_old)
+    result_combinations = statistics_all.keys()
 
     final_combinations = []
     for combination in result_combinations:
-        final_combinations.append(combination.split(':'))
-    # 将good_ratio_keys_old.keys()中的指标加入到result_combinations中
-    for combination in good_ratio_keys_old.keys():
         final_combinations.append(combination.split(':'))
     no_duplicate_final_combinations = deduplicate_2d_array(final_combinations)
     back_layer_all_good('../daily_data_exclude_new_can_buy', no_duplicate_final_combinations,
@@ -425,6 +444,7 @@ def filter_good_zuhe():
                           backtest_func=backtest_strategy_low_profit)
 
 if __name__ == '__main__':
+    # statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
     # filter_good_zuhe()
     # statistics_zuhe_gen_both('../back/gen/zuhe', target_key='all')
     data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
