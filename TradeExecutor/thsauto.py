@@ -333,6 +333,7 @@ class ThsAuto:
             price = '%.3f' % price
             ctrl = win32gui.GetDlgItem(hwnd, 0x409)
             set_text(ctrl, price)
+            print(get_text(ctrl))
             time.sleep(sleep_time)
         ctrl = win32gui.GetDlgItem(hwnd, 0x40A)
         set_text(ctrl, str(amount))

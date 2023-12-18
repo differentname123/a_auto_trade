@@ -395,7 +395,7 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
-def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=False):
+def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=True):
     """
     会将本次结果单独存储一份
     """
@@ -412,13 +412,12 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
-        recent_result_df_dict = {}
+        recent_result_df_dict = read_json(recent_file_name)
 
         if is_skip:
-            # 优化：过滤和处理逻辑提取为单独的函数
-            print(file_name)
-            final_combinations, zero_combination = filter_combinations(result_df_dict, final_combinations)
+            final_combinations, zero_combination = filter_combinations(recent_result_df_dict, final_combinations)
 
+        recent_result_df_dict = {}
         # 处理每个组合
         for combination in final_combinations:
             combination_key = ':'.join(combination)
@@ -437,13 +436,13 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
                 recent_result_df_dict[combination_key] = processed_result
         result_df_dict = read_json(file_name)
         result_df_dict.update(recent_result_df_dict)
+        write_json(recent_file_name, recent_result_df_dict)
+        write_json(file_name, result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
     finally:
         # 写入文件
-        write_json(file_name, result_df_dict)
-        write_json(recent_file_name, recent_result_df_dict)
         end_time = time.time()
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
@@ -498,7 +497,7 @@ def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
-@timeit
+# @timeit
 def filter_combinations(result_df_dict, final_combinations):
     """
     过滤已存在和无效的组合
@@ -998,7 +997,7 @@ def process_combinations_good(result_combination_list, file_path, gen_signal_fun
         # 打印进度
         print(f"Processing {total_len} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1) as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
             total_files = len(tasks)
             for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_good, tasks), 1):
                 print(f"Processing file {i} of {total_files}...")
@@ -1030,7 +1029,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         # 打印进度
         print(f"Processing {total_len} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count() - 1) as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
             total_files = len(tasks)
             for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_gen_single_file, tasks), 1):
                 print(f"Processing file {i} of {total_files}...")
@@ -1040,6 +1039,8 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         sublist_json.extend(sublist)
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/gen/sublist.json', sublist_json)
+        # 再写一份到../back/gen/sublist/目录下，文件名增加时间戳
+        write_json(f"../back/gen/sublist/sublist_{int(time.time())}.json", sublist_json)
 
         statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
@@ -1558,9 +1559,7 @@ def statistics_zuhe_gen_both_single(file_path, target_key='all'):
     # 读取file_name
     if os.path.exists(file_name):
         old_result = read_json(file_name)
-        # 将old_result和result合并
-        for key, value in result.items():
-            old_result[key] = value
+        old_result.update(target_key_result)
         result = old_result
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 再写入一份到备份文件

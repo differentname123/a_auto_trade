@@ -27,7 +27,7 @@ def get_stock_and_price(file_path):
     for stock_info in data:
         stock_no = stock_info['stock_name'].split('_')[1]
         price = stock_info['收盘']
-        if price > 2:
+        if stock_info['涨跌幅'] >= -0.95 * stock_info['Max_rate'] and price >= 1:
             total_price += price
             result.append((stock_no, price))
     print('总价值：', total_price)
@@ -60,8 +60,8 @@ if __name__ == '__main__':
         #     # 结束计时
         #     end = time.time()
         #     print('耗时：', end - start)
-
-        stock_and_price = get_stock_and_price('../final_zuhe/select_2023-12-14.json')
+        select_file_path = '../final_zuhe/select/select_2023-12-18.json'
+        stock_and_price = get_stock_and_price(select_file_path)
         for stock_no, price in stock_and_price:
             # 开始计时
             start = time.time()
@@ -71,7 +71,9 @@ if __name__ == '__main__':
             # 结束计时
             end = time.time()
             print('耗时：', end - start)
-
+        # 复制select_file_path，名字增加当前时间戳
+        select_file_path_new = select_file_path.replace('.json', '_{}.json'.format(time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())))
+        os.system('copy {} {}'.format(select_file_path, select_file_path_new))
 
 
 

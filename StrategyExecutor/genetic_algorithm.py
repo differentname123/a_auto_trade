@@ -8,6 +8,7 @@
 :description:
     区别于之前的全排列组合，这里使用遗传算法来进行参数的优化
 """
+import datetime
 import math
 import multiprocessing
 import random
@@ -459,6 +460,8 @@ if __name__ == '__main__':
     # 创建遗传算法实例并运行
     ga = GeneticAlgorithm(population_size, crossover_rate, mutation_rate, signal_columns)
     for _ in range(5000):  # 运行50代
+        # 打印当前时间
+        print('time: ', datetime.datetime.now())
         ga.run_generation_mul()
         best_info = ga.get_best_individual()
         try:

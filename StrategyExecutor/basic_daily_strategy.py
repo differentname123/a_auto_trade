@@ -183,6 +183,8 @@ def gen_basic_daily_buy_signal_4(data):
     :param data:
     :return:
     """
+    data['股价_非跌停_signal'] = False
+    data['股价_非跌停_signal'] = data['涨跌幅'] >= -9.9
     data['股价_跌停_signal'] = False
     data['股价_跌停_signal'] = data['涨跌幅'] <= -9.9
     data['日期_新股_100_signal'] = False

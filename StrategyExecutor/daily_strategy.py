@@ -977,8 +977,7 @@ def mix(data):
     data_1 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
     gen_signal(data_1,
-               "最高_5_到_10_固定区间_signal:振幅_大于_10_固定区间_signal:振幅_大于_20_日均线_signal:振幅_5日_小极值_signal"
-
+               "最高_大于昨日_最低_signal:实体_阴线_signal:最高_5日_小极值_signal:换手率_小于_20_日均线_signal_yes:日期_老股_100_signal_yes"
 
 
                .split(':'))
