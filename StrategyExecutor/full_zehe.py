@@ -238,7 +238,12 @@ def parse_filename(file_path):
 
 
 def load_data(file_path):
-    data = pd.read_csv(file_path)
+    try:
+        data = pd.read_csv(file_path)
+    except Exception:
+        print(file_path)
+        traceback.print_exc()
+        return None
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
         data = data.rename(columns={'时间': '日期'})
@@ -820,6 +825,8 @@ def get_good_combinations():
 def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_func):
     # 为每个文件执行的处理逻辑
     stock_data = load_data(file_path)
+    if stock_data is None:
+        return None
     stock_data = gen_signal_func(stock_data)
     target_data = stock_data[stock_data['日期'] == pd.to_datetime(target_date)]
 
@@ -1509,7 +1516,7 @@ if __name__ == '__main__':
     # filter_good_zuhe()
 
     # get_newest_stock()
-    back_range_select(start_time='2023-12-15', end_time='2023-12-15')
+    # back_range_select(start_time='2023-12-18', end_time='2023-12-18')
     # back_range_select(start_time='2023-12-11', end_time='2023-12-13')
     # print(good_data)
 
@@ -1521,28 +1528,28 @@ if __name__ == '__main__':
     # while True:
     #     test_back_all()
 
-    # # statistics = read_json('../back/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_all.json') # 大小 383880
-    # # statistics = read_json('../final_zuhe/statistics_target_key.json')
-    # # statistics = read_json('../back/gen/statistics_target_key.json')
-    # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
-    # # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
-    # # good_statistics = get_good_combinations()
-    # # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
-    # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
-    # # sublist_list中的元素也是list，帮我对sublist_list进行去重
-    # # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    # # statistics = {k: v for k, v in statistics.items() if v['trade_count'] > 100 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
-    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 295872 最好数据 111次 ratio:0.036
-    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 263455 最好数据 1246次 ratio:0.0594
-    # statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
-    # statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
-    # statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
-    # statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
-    #
-    # statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
-    # statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True)
-    # print(len(statistics))
+    # statistics = read_json('../back/statistics_target_key.json')
+    statistics = read_json('../back/gen/statistics_all.json') # 大小 417780
+    # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    # statistics = read_json('../back/gen/statistics_target_key.json')
+    # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
+    # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
+    # good_statistics = get_good_combinations()
+    # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
+    statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # sublist_list中的元素也是list，帮我对sublist_list进行去重
+    # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
+    # statistics = {k: v for k, v in statistics.items() if v['trade_count'] > 100 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 329458 最好数据 111次 ratio:0.036
+    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 294493 最好数据 1246次 ratio:0.0594
+    statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
+    statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
+    statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
+    statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
+
+    statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
+    statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True)
+    print(len(statistics))
 
     # notice_list = read_json('../announcements/000682.json')
     # periods = find_st_periods(notice_list)

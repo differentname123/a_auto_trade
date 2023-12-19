@@ -306,7 +306,6 @@ def save_all_data_mul():
 def fun():
     save_all_data_mul()
 
-
 if __name__ == '__main__':
     # price_data = get_price('000001', '19700101', '20231017', period='daily')
     # print(price_data)

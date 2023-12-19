@@ -1384,6 +1384,17 @@ def statistics_zuhe_good(file_path, target_key='all'):
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
+
+    # 读取'../back/gen/statistics_all.json'文件，然后将result中的数据合并到statistics_all.json中
+    statistics_all = read_json('../back/gen/statistics_all.json')
+    statistics_all.update(result)
+    statistics_all_backup = '../back/gen/statistics_all_backup.json'
+    if os.path.exists(statistics_all_backup):
+        os.remove(statistics_all_backup)
+    write_json(statistics_all_backup, statistics_all)
+
+    # 将statistics_all.json写入文件
+    write_json('../back/gen/statistics_all.json', statistics_all)
     return result
 
 @timeit
