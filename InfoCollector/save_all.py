@@ -8,6 +8,8 @@
 :description:
     
 """
+import time
+
 import json
 import multiprocessing
 import os
@@ -173,7 +175,6 @@ def save_stock_data(stock_data, exclude_code):
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")
-
 def write_json(file_path, data):
     try:
         if os.path.exists(file_path):
@@ -317,3 +318,4 @@ if __name__ == '__main__':
     # get_all_notice()
     # fix_announcements()
     # fetch_announcements('002740')
+

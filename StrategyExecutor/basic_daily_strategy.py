@@ -184,9 +184,9 @@ def gen_basic_daily_buy_signal_4(data):
     :return:
     """
     data['股价_非跌停_signal'] = False
-    data['股价_非跌停_signal'] = data['涨跌幅'] >= -9.9
+    data['股价_非跌停_signal'] = (data['涨跌幅'] >= -(data['Max_rate'] - 1.0 / data['收盘']))
     data['股价_跌停_signal'] = False
-    data['股价_跌停_signal'] = data['涨跌幅'] <= -9.9
+    data['股价_跌停_signal'] = (data['涨跌幅'] <= -(data['Max_rate'] - 1.0 / data['收盘']))
     data['日期_新股_100_signal'] = False
     data['日期_老股_100_signal'] = False
     # 将data['新股_100_signal']前100天的值赋值为True

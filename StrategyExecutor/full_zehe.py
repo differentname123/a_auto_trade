@@ -8,9 +8,15 @@
 :description:
     
 """
+import logging
+
+import concurrent
+
 import multiprocessing
 import os
 import random
+
+import akshare as ak
 import re
 import scipy
 import pandas as pd
@@ -36,7 +42,7 @@ from scipy.stats import norm
 from sympy.physics.quantum.identitysearch import scipy
 import matplotlib
 
-from InfoCollector.save_all import save_all_data_mul
+from InfoCollector.save_all import save_all_data_mul, get_price, fix_st
 
 matplotlib.use('Agg')
 
@@ -240,6 +246,42 @@ def parse_filename(file_path):
 def load_data(file_path):
     try:
         data = pd.read_csv(file_path)
+    except Exception:
+        print(file_path)
+        traceback.print_exc()
+        return None
+    name, code = parse_filename(file_path)
+    if '时间' in data.columns:
+        data = data.rename(columns={'时间': '日期'})
+    data['日期'] = pd.to_datetime(data['日期'])
+    data['名称'] = name
+    data['代码'] = code
+    data['数量'] = 0
+    data.sort_values(by='日期', ascending=True, inplace=True)
+
+    # 使用 pandas 查找并移除第一个日期，如果它与其它日期不连续
+    date_diff = data['日期'].diff(-1).abs()
+    filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
+
+    # 如果有大于30天的断层
+    if not filtered_diff.empty:
+        cutoff_index = filtered_diff.idxmax()
+        if cutoff_index and cutoff_index != 0:
+            data = data.loc[cutoff_index + 1:]  # 跳过第一个数据点
+    # 如果没有大于30天的断层，保留所有数据
+
+    data.reset_index(drop=True, inplace=True)
+
+    data['Max_rate'] = data['名称'].str.contains('st', case=False).map({True: 5, False: 10})
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
+    return data
+
+
+def load_data_limit(file_path, limit=100):
+    try:
+        data = pd.read_csv(file_path)
+        # 保留最近的limit条数据，考虑data长度小于limit的情况
+        data = data[-limit:]
     except Exception:
         print(file_path)
         traceback.print_exc()
@@ -772,24 +814,36 @@ def get_good_combinations():
     获取表现好的组合
     :return:
     """
-    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     statistics = read_json('../final_zuhe/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json')
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if
-                      v['trade_count'] > 30 and (v['three_befor_year_count'] >= 1)}  # 100交易次数以上 13859
+                      v['trade_count'] > 10 and (v['three_befor_year_count'] >= 1)}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if
                        (v['ratio'] <= 0.085 and v['than_1_average_days_held'] <= 3)
                        or (v['ratio'] <= 0.06)
-                       or (v['three_befor_year_count'] >= 10 and v['three_befor_year_count_thread_ratio'] <= 0.035)
-                        or (v['average_days_held'] <= 1.14)
+                       or (v['three_befor_year_count'] >= 30 and v['three_befor_year_count_thread_ratio'] <= 0.035)
+                       or (v['average_days_held'] <= 1.14)
                        or (v['average_1w_profit'] >= 100 and v['ratio'] < 0.1)
                        or (v['ratio'] < 0.066 and v['three_befor_year_count_thread_ratio'] < 0.063)
                        or (v['than_1_average_days_held'] <= 3 and v['three_befor_year_count_thread_ratio'] < 0.07)
                        or (v['1w_rate'] >= 370)
+                       or ((v['three_befor_year_rate'] * v['three_befor_year_count_thread_ratio'] + (1 - v['three_befor_year_rate']) * v['ratio']) <= 0.06)
+                       or (v['average_days_held'] <= (1 + v['ratio']) + 0.001)  # 代表两天之内一定会卖出去
+                       or (v['than_1_average_days_held'] >= 2.01 and v['ratio'] <= 0.05)
+                       or (v['than_1_average_days_held'] >= 2.01 and v['ratio'] <= 0.06 and v[
+                           'three_befor_year_count_thread_ratio'] <= 0.06)
                        }
+
+    # good_ratio_keys = {k: v for k, v in statistics_new.items()
+    #                    if
+    #                    (v['average_days_held'] <= (1 + v['ratio']) + 0.001) # 代表两天之内一定会卖出去
+    #                    or (v['than_1_average_days_held'] >= 2.01 and v['ratio'] <= 0.05)
+    #                    or (v['than_1_average_days_held'] >= 2.01 and v['ratio'] <= 0.06 and v['three_befor_year_count_thread_ratio'] <= 0.06)
+    #                    }
+
 
     # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
     # # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
@@ -821,10 +875,58 @@ def get_good_combinations():
     statistics_all.update(good_ratio_keys)
     write_json('../final_zuhe/good_statistics.json', statistics_all)
 
+def filter_combinations_good(zero_combinations_set, good_keys):
+    """
+    过滤已存在和无效的组合
+    """
+    final_combinations_set = good_keys
+    return [comb.split(':') for comb in final_combinations_set if
+            not any(frozenset(comb.split(':')) >= zc for zc in zero_combinations_set)], zero_combinations_set
+
+def process_file_op(file_path, target_date, good_keys, good_statistics, gen_signal_func):
+    # 为每个文件执行的处理逻辑
+    # origin_data = load_data_limit('../daily_data_exclude_new_can_buy/易普力_002096.txt')
+    origin_data = load_data_limit(file_path, 200)
+    stock_data = origin_data.copy()
+    if stock_data is None:
+        return None
+    stock_data = gen_signal_func(stock_data)
+    target_data = stock_data[stock_data['日期'] == pd.to_datetime(target_date)]
+    # 获取target_data中值为False的列名
+    false_columns = target_data.columns[(target_data == False).any()]
+    # 将false_columns转换为frozenset
+    false_columns = [frozenset([col]) for col in false_columns]
+    final_combinations, zero_combination = filter_combinations_good(false_columns, good_keys)
+
+    if target_data.empty:
+        return None
+    satisfied_combinations = dict()
+    for good_key in final_combinations:
+        good_key_str = ':'.join(good_key)
+        signal_data = gen_signal(target_data, good_key)
+        if signal_data['Buy_Signal'].values[0]:
+            satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+
+    # stock_data = origin_data.copy()
+    # good_key = "超级短线_26"
+    # signal_data = gen_daily_buy_signal_26(stock_data)
+    # target_data = signal_data[signal_data['日期'] == pd.to_datetime(target_date)]
+    # if target_data['Buy_Signal'].values[0]:
+    #     satisfied_combinations[good_key] = {'ratio': 0.0721, 'three_befor_year_count_thread_ratio': 0.0755,
+    #                                         'three_befor_year_rate': 0.244, 'than_1_average_days_held': 4.4,
+    #                                         'average_1w_profit': 56.929, 'average_days_held': 1.2556,
+    #                                         'three_befor_year_count': 6117, 'trade_count': 25057, '1w_rate': 0.0}
+    if satisfied_combinations:
+        return {'stock_name': os.path.basename(file_path).split('.')[0],
+                'satisfied_combinations': satisfied_combinations,
+                '收盘': target_data['收盘'].values[0], '涨跌幅': target_data['涨跌幅'].values[0],
+                'Max_rate': int(target_data['Max_rate'].values[0])}
+    return None
 
 def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_func):
     # 为每个文件执行的处理逻辑
     stock_data = load_data(file_path)
+    # stock_data = load_data('../daily_data_exclude_new_can_buy/易普力_002096.txt')
     if stock_data is None:
         return None
     stock_data = gen_signal_func(stock_data)
@@ -915,10 +1017,12 @@ def get_newest_stock():
     start_time = time.time()
     # 获取当前时间，保留到日
     target_date = datetime.now()
+    good_statistics = read_json('../final_zuhe/good_statistics.json')
+    good_keys = list(good_statistics.keys())
     save_all_data_mul()
     target_date = datetime(target_date.year, target_date.month, target_date.day)
-    get_target_date_good_stocks_mul('../daily_data_exclude_new_can_buy', target_date,
-                                    gen_signal_func=gen_full_all_basic_signal)
+    get_target_date_good_stocks_mul_op('../daily_data_exclude_new_can_buy', target_date,
+                                    gen_full_all_basic_signal, good_keys, good_statistics)
     # 结束计时
     end_time = time.time()
     print('耗时：', end_time - start_time)
@@ -953,6 +1057,46 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     for stock_info in good_stocks:
         price = stock_info['收盘']
         if stock_info['涨跌幅'] >= -0.95 * stock_info['Max_rate'] and price >= 1:
+            total_price += price
+            final_good_stocks.append(stock_info)
+
+    print('总价值：', total_price)
+    end_time = time.time()
+    print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
+    write_json('../final_zuhe/select/select_{}.json'.format(target_date.strftime('%Y-%m-%d')), final_good_stocks)
+    # 结束计时
+    end_time = time.time()
+    print('耗时：', end_time - start_time)
+
+def get_target_date_good_stocks_mul_op(file_path, target_date, gen_signal_func, good_keys, good_statistics):
+    # 开始计时
+    get_good_combinations()
+    start_time = time.time()
+
+
+    # 将 target_date 转换为 datetime 一次
+    target_date = pd.to_datetime(target_date)
+
+    # 使用 multiprocessing 处理文件
+    pool = Pool(multiprocessing.cpu_count())
+    file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    results = pool.starmap(process_file_op,
+                           [(file, target_date, good_keys, good_statistics, gen_signal_func) for file in file_paths])
+    pool.close()
+    pool.join()
+
+    # 过滤出非空结果
+    good_stocks = [result for result in results if result is not None]
+    # 将good_stocks进行排序
+    good_stocks = sort_good_stocks_op(good_stocks)
+    # 其他逻辑不变
+
+    print(good_stocks)
+    total_price = 0
+    final_good_stocks = []
+    for stock_info in good_stocks:
+        price = stock_info['收盘']
+        if stock_info['涨跌幅'] >= -(stock_info['Max_rate'] - 1.0 / price):
             total_price += price
             final_good_stocks.append(stock_info)
 
@@ -1473,6 +1617,17 @@ def back_select(file_path):
         print(result_df)
     if len(all_df_list) > 0:
         all_df = pd.concat(all_df_list, ignore_index=True)
+        trade_count = all_df.shape[0]
+        total_cost = all_df['total_cost'].sum()
+        total_profit = all_df['Profit'].sum()
+        average_1w_profit = total_profit * 10000 / total_cost
+        all_df['this_pici_average_1w_profit'] = average_1w_profit
+
+        result_df = all_df[all_df['Days Held'] > 1]
+        result_df_size = result_df.shape[0]
+        ratio = result_df_size / trade_count
+        all_df['this_pici_ratio'] = ratio
+
         all_df.to_csv(output_file_path, index=False)
         return all_df
     else:
@@ -1507,6 +1662,124 @@ def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
         all_df.to_csv('../final_zuhe/back/back.csv', index=False)
         return all_df
 
+def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
+    """
+    回测一段时间内选中的文件
+    :param start_time:
+    :param end_time:
+    :return:
+    """
+    # 生成时间在start_time和end_time之间的所有时间
+    date_list = []
+    out_put_file_path = '../final_zuhe/back/' + start_time + '_' + end_time + 'back.csv'
+    start_time = datetime.strptime(start_time, '%Y-%m-%d')
+    end_time = datetime.strptime(end_time, '%Y-%m-%d')
+    good_statistics = read_json('../final_zuhe/good_statistics.json')
+    good_keys = list(good_statistics.keys())
+    all_back_result = []
+    while start_time <= end_time:
+        date_list.append(start_time)
+        start_time += timedelta(days=1)
+    for date in date_list:
+        get_target_date_good_stocks_mul_op('../daily_data_exclude_new_can_buy', date,
+                                        gen_full_all_basic_signal, good_keys, good_statistics)
+        date = date.strftime('%Y-%m-%d')
+        file_path = '../final_zuhe/select/select_' + date + '.json'
+        back_result = back_select(file_path)
+        if back_result is not None:
+            all_back_result.append(back_result)
+    if len(all_back_result) > 0:
+        all_df = pd.concat(all_back_result, ignore_index=True)
+        trade_count = all_df.shape[0]
+        total_cost = all_df['total_cost'].sum()
+        total_profit = all_df['Profit'].sum()
+        average_1w_profit = total_profit * 10000 / total_cost
+        all_df['this_pici_average_1w_profit'] = average_1w_profit
+
+        result_df = all_df[all_df['Days Held'] > 1]
+        result_df_size = result_df.shape[0]
+        ratio = result_df_size / trade_count
+        all_df['this_pici_ratio'] = ratio
+        all_df.to_csv(out_put_file_path, index=False)
+        return all_df
+
+def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path,  gen_signal_func=gen_full_all_basic_signal):
+    """
+    拉取并且分析股票数据
+    :param stock_data:
+    :param exclude_code:
+    :return:
+    """
+
+    code = stock_data['代码']
+    name = stock_data['名称'].replace('*', '')
+    if code not in exclude_code:
+        # 开始计时
+        start = time.time()
+        price_data = get_price(code, '20230101', '20291021', period='daily')
+
+        # price_data不为空才保存
+        if not price_data.empty:
+            origin_data = fix_st(price_data, '../announcements/{}.json'.format(code))
+            stock_data = origin_data.copy()
+
+            if stock_data is None:
+                return None
+            stock_data = gen_signal_func(stock_data)
+            target_data = stock_data[stock_data['日期'] == pd.to_datetime(target_date)]
+            # 获取target_data中值为False的列名
+            false_columns = target_data.columns[(target_data == False).any()]
+            # 将false_columns转换为frozenset
+            false_columns = [frozenset([col]) for col in false_columns]
+            final_combinations, zero_combination = filter_combinations_good(false_columns, good_keys)
+
+            if target_data.empty:
+                return None
+            price = target_data['收盘'].values[0]
+            if target_data['涨跌幅'].values[0] <= -(target_data['Max_rate'].values[0] - 1.0 / price):
+                return None
+            satisfied_combinations = dict()
+            for good_key in final_combinations:
+                good_key_str = ':'.join(good_key)
+                signal_data = gen_signal(target_data, good_key)
+                if signal_data['Buy_Signal'].values[0]:
+                    satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+                    end = time.time()
+                    # 将code增量写入output_file_path，注意这个文件可能会被多个线程同时写入
+                    with open(output_file_path, 'a') as f:
+                        f.write(code + '\n')
+                    print("{}耗时：{}".format(name, end - start))
+
+def save_and_analyse_all_data_mul(target_date):
+    """
+    多线程拉取最新数据并且分析出结果
+    :return:
+    """
+    # 开始计时
+    start = time.time()
+    good_statistics = read_json('../final_zuhe/good_statistics.json')
+    good_keys = list(good_statistics.keys())
+    stock_data_df = ak.stock_zh_a_spot_em()
+    all_code_set = set(stock_data_df['代码'].tolist())
+    output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
+
+    exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
+    exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+
+    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    new_exclude_code_set = all_code_set - need_code_set
+    new_exclude_code_set.update(exclude_code_set)
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
+        futures = [executor.submit(save_and_analyse_stock_data, stock_data, new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path) for _, stock_data in stock_data_df.iterrows()]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Error occurred: {e}")
+    end = time.time()
+    print("总耗时：{}".format(end - start))
+
 
 if __name__ == '__main__':
     # file_path = '../back/gen/statistics_all.json'
@@ -1515,9 +1788,11 @@ if __name__ == '__main__':
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
-    # get_newest_stock()
-    # back_range_select(start_time='2023-12-18', end_time='2023-12-18')
-    # back_range_select(start_time='2023-12-11', end_time='2023-12-13')
+    # save_and_analyse_all_data_mul('2023-12-22')
+    get_newest_stock()
+    # back_range_select_op(start_time='2023-12-22', end_time='2023-12-22')
+    # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
+    # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
     # print(good_data)
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
@@ -1528,28 +1803,28 @@ if __name__ == '__main__':
     # while True:
     #     test_back_all()
 
-    # statistics = read_json('../back/statistics_target_key.json')
-    statistics = read_json('../back/gen/statistics_all.json') # 大小 417780
-    # statistics = read_json('../final_zuhe/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_target_key.json')
-    # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
-    # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
-    # good_statistics = get_good_combinations()
-    # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
-    statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
-    # sublist_list中的元素也是list，帮我对sublist_list进行去重
-    # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
-    # statistics = {k: v for k, v in statistics.items() if v['trade_count'] > 100 and (v['three_befor_year_rate'] > 0.2 or v['three_befor_year_count'] > 10)} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 329458 最好数据 111次 ratio:0.036
-    statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 294493 最好数据 1246次 ratio:0.0594
-    statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
-    statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
-    statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
-    statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
-
-    statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
-    statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True)
-    print(len(statistics))
+    # # statistics = read_json('../back/statistics_target_key.json')
+    # statistics = read_json('../back/gen/statistics_all.json') # 大小 476490
+    # # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    # # statistics = read_json('../back/gen/statistics_target_key.json')
+    # # temp_data = read_json('../back/gen/zuhe/贵绳股份.json')
+    # # temp_data = read_json('../final_zuhe/zuhe/贵绳股份.json')
+    # # good_statistics = get_good_combinations()
+    # # sublist_list = read_json('../back/gen/sublist.json') #大小 55044
+    # statistics = dict(sorted(statistics.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # # sublist_list中的元素也是list，帮我对sublist_list进行去重
+    # # 将statistics中trade_count大于100的筛选出来，并且按照average_profit降序排序
+    # statistics = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1} # 100交易次数以上 150999 最好数据 111次 ratio:0.036
+    # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 100} # 100交易次数以上 285921 最好数据 105次 ratio:0
+    # statistics_new_1000 = {k: v for k, v in statistics.items() if v['trade_count'] > 1000}  # 1000交易次数以上 346991 最好数据 1246次 ratio:0.0594
+    # statistics_three_befor_year_count = {k: v for k, v in statistics.items() if v['three_befor_year_count'] > 1000}
+    # statistics_three_befor_year_rate = dict(sorted(statistics_three_befor_year_count.items(), key=lambda x: x[1]['three_befor_year_count_thread_ratio'], reverse=False))
+    # statistics_profit_temp = {k: v for k, v in statistics_new.items() if '实体_' not in k and '开盘_大于_20_固定区间' not in k and '收盘_大于_20_固定区间' not in k and '最高_大于_20_固定区间' not in k and '最低_大于_20_固定区间' not in k}
+    # statistics_profit = sorted(statistics_profit_temp.items(), key=lambda x: x[1]['average_profit'], reverse=True)
+    #
+    # statistics_average_days_held = sorted(statistics_new.items(), key=lambda x: x[1]['average_days_held'], reverse=False)
+    # statistics_1w_profit = sorted(statistics_new.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True)
+    # print(len(statistics))
 
     # notice_list = read_json('../announcements/000682.json')
     # periods = find_st_periods(notice_list)

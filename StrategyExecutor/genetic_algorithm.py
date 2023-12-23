@@ -206,13 +206,17 @@ class GeneticAlgorithm:
             return -10000
         trade_count_score = math.log(individual["trade_count"])
         total_fitness = trade_count_score
+        total_fitness = total_fitness - 50 * individual['average_days_held'] + 100
         if individual["trade_count"] >= trade_count_threshold:
             if individual["ratio"] > 0:
                 total_fitness = total_fitness / individual["ratio"]
             else:
-                total_fitness = total_fitness * 400
-            total_fitness += individual["average_1w_profit"] / 4
-            total_fitness -= individual['average_days_held']
+                total_fitness += 100
+            total_fitness += individual["average_1w_profit"] / 10
+            if (individual['average_days_held'] <= (1 + individual['ratio']) + 0.001):
+                total_fitness += 50
+        else:
+            total_fitness = total_fitness - 100
 
         return total_fitness
 
@@ -399,33 +403,15 @@ def filter_good_zuhe():
     """
     statistics = read_json('../back/gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 1)} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
-    good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['1w_rate'] >= 100 and v['average_1w_profit'] >= 100 and v['three_befor_year_count_thread_ratio'] <= 0.1 }
-    # good_ratio_keys_day = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3 or v["average_1w_profit"] >= 100}
-    # good_ratio_keys.update(good_ratio_keys_day)
-    statistics_ratio = dict(sorted(good_ratio_keys.items(), key=lambda x: x[1]['ratio'], reverse=False))
-
-
-    good_fitness_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 3.84 and v['average_1w_profit'] >= 100}
-    statistics_fitness = dict(sorted(good_fitness_keys.items(), key=lambda x: x[1]['than_1_average_days_held'], reverse=True))
-
-
-    good_1w_keys = {k: v for k, v in statistics_new.items() if v['than_1_average_days_held'] <= 2 or v["ratio"] <= 0.05}
-    statistics_1w = dict(sorted(good_1w_keys.items(), key=lambda x: x[1]['average_1w_profit'], reverse=True))
-
-
-    good_1w_rate_keys = {k: v for k, v in statistics_new.items() if (v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.05) or v['1w_rate'] >= 200}
-    statistics_1w_rate = dict(sorted(good_1w_rate_keys.items(), key=lambda x: x[1]['1w_rate'], reverse=True))
-
-
-    # 将所有的指标都写入文件,去重
+    good_ratio_keys = {k: v for k, v in statistics_new.items()
+                       if
+                       v['ratio'] < 0.1 or v['than_1_average_days_held'] <= 3 or v['average_days_held'] <= 1.14 or v['average_1w_profit'] >= 100 or v['three_befor_year_count_thread_ratio'] < 0.07
+                       or v['1w_rate'] >= 370
+                       }
     statistics_all = dict()
-    statistics_all.update(statistics_ratio)
-    statistics_all.update(statistics_fitness)
-    statistics_all.update(statistics_1w)
-    statistics_all.update(statistics_1w_rate)
-
+    statistics_all.update(good_ratio_keys)
     # compute_more_than_one_day_held('../back/gen/statistics_all.json')
     old_statistics = read_json('../back/statistics_target_key.json')
     # 所有的指标都应该满足10次以上的交易

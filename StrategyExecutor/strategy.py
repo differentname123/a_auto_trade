@@ -205,7 +205,7 @@ def process_single_file(args):
 
 
 def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func=gen_buy_signal_one,
-                   backtest_func=backtest_strategy_highest, is_keep_all=True):
+                   backtest_func=backtest_strategy_highest, is_keep_all=False):
     all_dfs = []
     trade_count = 0
     total_profit = 0

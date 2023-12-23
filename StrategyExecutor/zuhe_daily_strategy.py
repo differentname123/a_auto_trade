@@ -1029,7 +1029,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         # 打印进度
         print(f"Processing {total_len} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        with multiprocessing.Pool(processes=25) as pool:
             total_files = len(tasks)
             for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_gen_single_file, tasks), 1):
                 print(f"Processing file {i} of {total_files}...")
@@ -1552,7 +1552,7 @@ def statistics_zuhe_gen_both_single(file_path, target_key='all'):
             value['average_days_held'] = 0
             value['total_profit'] = 0
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
-    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    result = dict(sorted(result.items(), key=lambda x: (x[1]['trade_count'], -x[1]['ratio']), reverse=True))
     # 写入target_key.json
     target_key_result = result
     target_key = 'target_key'
