@@ -308,13 +308,13 @@ def fun():
     save_all_data_mul()
 
 if __name__ == '__main__':
-    # price_data = get_price('000001', '19700101', '20231017', period='daily')
-    # print(price_data)
+    price_data = get_price('000001', '19700101', '20231017', period='daily')
+    print(price_data)
     # data = ak.stock_financial_analysis_indicator('600242')
     # data1 = ak.stock_zh_a_st_em()
     # data2 = ak.stock_notice_report(symbol='全部', date="20231106")
     # data3 = ak.stock_zh_a_gdhs_detail_em(symbol="600242")
-    fun()
+    # fun()
     # get_all_notice()
     # fix_announcements()
     # fetch_announcements('002740')

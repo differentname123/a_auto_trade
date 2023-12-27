@@ -395,6 +395,52 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
+def gen_all_signal_processing_with_back_data(args, threshold_day=1, is_skip=True):
+    """
+    会将本次结果单独存储一份
+    """
+    start_time = time.time()
+    try:
+        zero_combination = set()  # Using a set for faster lookups
+        origin_file_name, task_data, final_combinations = args
+
+        data = task_data
+        file_name = '../back/gen/with_back_data/' + origin_file_name
+        recent_file_name = '../back/gen/with_back_data_single/' + origin_file_name
+        # file_name = Path('../back/zuhe') / f"C夏厦.json"
+        # file_name.parent.mkdir(parents=True, exist_ok=True)
+
+        recent_result_df_dict = {}
+        # 处理每个组合
+        for combination in final_combinations:
+            combination_key = ':'.join(combination)
+            signal_data = gen_signal(data, combination)
+
+            # 如果Buy_Signal全为False，则不进行回测
+            if not signal_data['Buy_Signal'].any():
+                # result_df_dict[combination_key] = create_empty_result()
+                # recent_result_df_dict[combination_key] = create_empty_result()
+                continue
+            # 获取signal_data中Buy_Signal为True的数据
+            results_df = signal_data[signal_data['Buy_Signal'] == True]
+            processed_result = process_results_with_year(results_df, threshold_day)
+
+            if processed_result:
+                recent_result_df_dict[combination_key] = processed_result
+        result_df_dict = read_json(file_name)
+        result_df_dict.update(recent_result_df_dict)
+        write_json(recent_file_name, recent_result_df_dict)
+        write_json(file_name, result_df_dict)
+
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        # 写入文件
+        end_time = time.time()
+        print(
+            f"{file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+
+
 def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=True):
     """
     会将本次结果单独存储一份
@@ -410,10 +456,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
         recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
-
-        # 一次性读取JSON
         recent_result_df_dict = read_json(recent_file_name)
-
         if is_skip:
             final_combinations, zero_combination = filter_combinations(recent_result_df_dict, final_combinations)
 
@@ -976,6 +1019,15 @@ def back_layer_all_op_gen_single(file_path, result_combination_list, gen_signal_
     if result_combination_list:
         process_combinations_gen_single(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
 
+def back_layer_all_with_back_data(task_with_back_data, result_combination_list, gen_signal_func=gen_full_all_basic_signal,
+                          backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+    """
+    直接将有回测的数据进行指标效果统计
+    """
+    # 优化5: 使用并行处理
+    if result_combination_list:
+        process_combinations_with_back_data(result_combination_list, task_with_back_data, gen_signal_func, backtest_func, target_key)
+
 def process_combinations_good(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
     回测最终好指标的函数
@@ -1011,12 +1063,44 @@ def process_combinations_good(result_combination_list, file_path, gen_signal_fun
         statistics_zuhe_good('../final_zuhe/zuhe', target_key=target_key)
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
+def process_combinations_with_back_data(result_combination_list, task_with_back_data, gen_signal_func, backtest_func, target_key):
+    """
+    直接将有回测的数据进行指标效果统计
+    """
+    # 按照一定数量分割list
+    split_size = 30000
+    result_combination_lists = [result_combination_list[i:i + split_size] for i in
+                                range(0, len(result_combination_list), split_size)]
+    total_len = 0
+    sublist_json = []
+    for sublist in result_combination_lists:
+        # 开始计时
+        start_time = time.time()
+        # 读取sublist
+        total_len += len(sublist)
+        # 打印进度
+        print(f"Processing {total_len} files... of {len(result_combination_list)}")
+        tasks = prepare_task_with_back_data(sublist, task_with_back_data)
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+            total_files = len(tasks)
+            for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_with_back_data, tasks), 1):
+                print(f"Processing file {i} of {total_files}...")
+        # 结束计时
+        end_time = time.time()
+        # 将sublist增加到sublist_json,并写入文件
+        sublist_json.extend(sublist)
+        sublist_json = deduplicate_2d_list(sublist_json)
+        write_json('../back/gen/sublist.json', sublist_json)
+
+        statistics_zuhe_gen_with_back_data('../back/gen/with_back_data_single', target_key='all')
+        print(f"Time taken: {end_time - start_time:.2f} seconds")
+
 def process_combinations_gen_single(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
     """
     使用多进程处理组合
     """
     # 按照一定数量分割list
-    split_size = 10000
+    split_size = 30000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
@@ -1029,7 +1113,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         # 打印进度
         print(f"Processing {total_len} files... of {len(result_combination_list)}")
         tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
-        with multiprocessing.Pool(processes=25) as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
             total_files = len(tasks)
             for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_gen_single_file, tasks), 1):
                 print(f"Processing file {i} of {total_files}...")
@@ -1039,8 +1123,6 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         sublist_json.extend(sublist)
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/gen/sublist.json', sublist_json)
-        # 再写一份到../back/gen/sublist/目录下，文件名增加时间戳
-        write_json(f"../back/gen/sublist/sublist_{int(time.time())}.json", sublist_json)
 
         statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
@@ -1147,6 +1229,17 @@ def prepare_tasks(combination_list, file_path, gen_signal_func, backtest_func):
     tasks.reverse()  # 逆序排列任务
     return tasks
 
+def prepare_task_with_back_data(combination_list, task_with_back_data):
+    """
+    准备多进程任务
+    """
+    tasks = []
+    count = 0
+    for task_data in task_with_back_data:
+        count += 1
+        file_name = str(count) + '.json'
+        tasks.append((file_name, task_data, combination_list))
+    return tasks
 
 def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtest_func=backtest_strategy_low_profit,
                    target_key='all'):
@@ -1480,6 +1573,108 @@ def statistics_zuhe_gen_both(file_path, target_key='all'):
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
+    return result
+
+@timeit
+def statistics_zuhe_gen_with_back_data(file_path, target_key='all'):
+    """
+    读取file_path下的所有.json文件，将有相同key的数据进行合并
+    统计的是单次新增，然后将结果加入之前的all.json文件中
+    :param file_path:
+    :return:
+    """
+    result = {}
+    sublist_list = read_json('../back/gen/sublist.json')
+    sublist_set = set()
+    for sublist in sublist_list:
+        temp_key = ':'.join(sublist)
+        sublist_set.add(temp_key)
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = read_json(fullname)
+            for key, value in data.items():
+                if 'three_befor_year_count_thread' not in value:
+                    value['one_befor_year_count'] = 0
+                    value['two_befor_year_count'] = 0
+                    value['three_befor_year_count'] = 0
+                    value['three_befor_year_count_thread'] = 0
+                if key in result:
+                    result[key]['trade_count'] += value['trade_count']
+                    result[key]['total_profit'] += value['total_profit']
+                    result[key]['total_cost'] += value['total_cost']
+                    result[key]['size_of_result_df'] += value['size_of_result_df']
+                    result[key]['total_days_held'] += value['total_days_held']
+                    result[key]['one_befor_year_count'] += value['one_befor_year_count']
+                    result[key]['two_befor_year_count'] += value['two_befor_year_count']
+                    result[key]['three_befor_year_count'] += value['three_befor_year_count']
+                    result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
+                else:
+                    result[key] = value
+    # 再计算result每一个key的平均值
+    for key, value in result.items():
+        if value['trade_count'] != 0:
+            if 'total_cost' not in value:
+                value['average_1w_profit'] = 0
+                value['three_befor_year_count'] = 0
+                value['two_befor_year_count'] = 0
+                value['one_befor_year_count'] = 0
+                value['three_befor_year_count_thread'] = 0
+            else:
+                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
+            value['ratio'] = value['size_of_result_df'] / value['trade_count']
+            value['average_days_held'] = value['total_days_held'] / value['trade_count']
+            value['average_profit'] = value['total_profit'] / value['trade_count']
+
+            # 将value['ratio']保留4位小数
+            value['ratio'] = round(value['ratio'], 4)
+            value['average_profit'] = round(value['average_profit'], 4)
+            value['average_days_held'] = round(value['average_days_held'], 4)
+            value['total_profit'] = round(value['total_profit'], 4)
+            value['one_befor_year_rate'] = round(value['one_befor_year_count'] / value['trade_count'], 4)
+            value['two_befor_year_rate'] = round(value['two_befor_year_count'] / value['trade_count'], 4)
+            value['three_befor_year_rate'] = round(value['three_befor_year_count'] / value['trade_count'], 4)
+            if value['three_befor_year_count'] != 0:
+                value['three_befor_year_count_thread_ratio'] = round(value['three_befor_year_count_thread'] / value['three_befor_year_count'], 4)
+            else:
+                value['three_befor_year_count_thread_ratio'] = 1
+        else:
+            value['ratio'] = 1
+            value['average_profit'] = 0
+            value['average_1w_profit'] = 0
+            value['average_days_held'] = 0
+            value['total_profit'] = 0
+    # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
+    result = dict(sorted(result.items(), key=lambda x: (x[1]['trade_count'], -x[1]['ratio']), reverse=True))
+    # 写入target_key.json
+    target_key_result = result
+    target_key = 'target_key'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+
+    # 先删除原来的statistics.json文件
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, target_key_result)
+
+
+    # 将result写入file_path上一级文件
+    target_key = 'all'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+    # 读取file_name
+    if os.path.exists(file_name):
+        old_result = read_json(file_name)
+        old_result.update(target_key_result)
+        result = old_result
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    # 再写入一份到备份文件
+    file_name_back = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    write_json(file_name_back, result)
+    # 先删除原来的statistics.json文件
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, result)
+
+
     return result
 
 @timeit

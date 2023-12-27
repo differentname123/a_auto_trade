@@ -11,8 +11,12 @@
 import datetime
 import math
 import multiprocessing
+import os
 import random
+import sys
 import time
+
+from pandas import DataFrame
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
 from StrategyExecutor.full_zehe import compute_more_than_one_day_held
@@ -20,18 +24,6 @@ from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back
     gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both, \
     back_layer_all_op_gen_single, statistics_zuhe_gen_both_single
 
-
-def generate_offspring(args):
-    parent1, parent2, crossover_func, judge_gene_func, mutate_func = args
-    child1, child2 = crossover_func(parent1, parent2)
-    offspring = []
-    mutate_child1 = mutate_func(child1)
-    mutate_child2 = mutate_func(child2)
-    if judge_gene_func(mutate_child1):
-        offspring.append(mutate_child1)
-    if judge_gene_func(mutate_child2):
-        offspring.append(mutate_child2)
-    return offspring
 
 def _generate_gene(min_ones, max_ones, gene_length, judge_gene):
     ones_count = random.randint(min_ones, max_ones)
@@ -77,6 +69,7 @@ class GeneticAlgorithm:
         self.low_trade_count_combinations = self.low_trade_count_combinations | statistics_new_keys
         self.low_trade_count_combinations_set_list = [set(low_trade_count_combination.split(':')) for low_trade_count_combination in
                                                       self.low_trade_count_combinations]
+        self.low_trade_count_combinations = set()
 
     def judge_gene(self, gene):
         """
@@ -86,7 +79,7 @@ class GeneticAlgorithm:
         """
         # 如果gene中1的个数小于3，则不合法
         ones_count = gene.count('1')
-        if ones_count < self.min_ones:
+        if ones_count <= self.min_ones:
             return False
         combination_list = self.cover_to_combination(gene)
         combination = ':'.join(combination_list)
@@ -104,6 +97,22 @@ class GeneticAlgorithm:
         else:
             return self._initialize_population_mul_load()
 
+    def generate_offspring(self, args):
+        # 开始计时
+        per_size = args[0]
+        offspring = []
+        for i in range(per_size):
+            parent1, parent2 = self._select()
+            child1, child2 = self._crossover(parent1, parent2)
+            mutate_child1 = self._mutate(child1)
+            mutate_child2 = self._mutate(child2)
+            if self.judge_gene(mutate_child1):
+                offspring.append(mutate_child1)
+            if self.judge_gene(mutate_child2):
+                offspring.append(mutate_child2)
+
+        return offspring
+
     def _initialize_population_mul_load(self):
         """
         读取最近的组合信息来进行初始化
@@ -118,12 +127,18 @@ class GeneticAlgorithm:
         self.gen_combination_to_fitness()
         while len(new_population) < self.population_size:
             # 准备传递给 generate_offspring 的参数
-            args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
-                         _ in range(self.population_size)]
+            per_size = 200
+            # 开始计时
+            start_time = time.time()
+            args_list = [(per_size, ) for
+                         _ in range(math.ceil(1.2 * self.population_size / per_size))]
+            # 结束计时
+            end_time = time.time()
+            print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-            results = pool.map(generate_offspring, args_list)
+            pool = multiprocessing.Pool(processes=8)
+            results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
 
@@ -206,7 +221,7 @@ class GeneticAlgorithm:
             return -10000
         trade_count_score = math.log(individual["trade_count"])
         total_fitness = trade_count_score
-        total_fitness = total_fitness - 50 * individual['average_days_held'] + 100
+        # total_fitness = total_fitness - 50 * individual['average_days_held'] + 100
         if individual["trade_count"] >= trade_count_threshold:
             if individual["ratio"] > 0:
                 total_fitness = total_fitness / individual["ratio"]
@@ -222,6 +237,9 @@ class GeneticAlgorithm:
 
     def _select(self):
         # 选择：轮盘赌选择法
+        #判断self.selection_probs是否全部为0
+        if sum(self.selection_probs) == 0:
+            return random.choices(self.population, k=2)
         return random.choices(self.population, weights=self.selection_probs, k=2)
 
     def cover_to_combination(self, individual):
@@ -291,8 +309,10 @@ class GeneticAlgorithm:
         #     self.relation_map[key] = [self._fitness(statistics[key]), statistics[key]]
         # # 将适应度排序
         # self.relation_map = sorted(self.relation_map.items(), key=lambda x: x[1][0], reverse=True)
-        self.total_fitness = sum(value[0] for value in self.relation_map.values())
-        self.selection_probs = [value[0] / self.total_fitness for value in self.relation_map.values()]
+        self.total_fitness = sum(value[0] for value in self.relation_map.values() if value[0] > 0)
+        self.selection_probs = [value[0] / self.total_fitness if value[0] > 0 else 0 for value in
+                                self.relation_map.values()]
+
         return self.relation_map
 
     def re_gen_population(self):
@@ -336,15 +356,15 @@ class GeneticAlgorithm:
         # 运行一代
         new_population = set()
         self.get_fitness()
-
+        per_size = 200
         while len(new_population) < self.population_size:
             # 准备传递给 generate_offspring 的参数
-            args_list = [(self._select()[0], self._select()[1], self._crossover, self.judge_gene, self._mutate) for
-                         _ in range(self.population_size)]
+            args_list = [(per_size, ) for
+                         _ in range(math.ceil(1.2 * self.population_size / per_size))]
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-            results = pool.map(generate_offspring, args_list)
+            pool = multiprocessing.Pool(processes=8)
+            results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
 

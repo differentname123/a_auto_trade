@@ -47,9 +47,13 @@ if __name__ == '__main__':
         auto.bind_client()
 
         exist_codes= []
-        # target_date = datetime.now().strftime('%Y-%m-%d')
-        target_date = '2023-12-22'
+
+        target_date = datetime.now().strftime('%Y-%m-%d')
+        # target_date = '2023-12-22'
         output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
+        # 如果output_file_path存在则删除
+        if os.path.exists(output_file_path):
+            os.remove(output_file_path)
         # 用一个新的进程去执行save_and_analyse_all_data_mul(target_date)
         import multiprocessing
         p = multiprocessing.Process(target=save_and_analyse_all_data_mul, args=(target_date,))
@@ -75,6 +79,7 @@ if __name__ == '__main__':
                 if stock_no not in exist_codes:
                     exist_codes.append(stock_no)
                     result = auto.buy(stock_no=stock_no, amount=100, price=price)
+        print(len(exist_codes))
         print(exist_codes)
 
         # select_file_path = '../final_zuhe/select/select_2023-12-22.json'
