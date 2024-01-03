@@ -223,7 +223,7 @@ def gen_signal(data, combination):
     :return: 带有 Buy_Signal 列的 DataFrame
     """
     # 预先计算涨跌幅条件
-    buy_condition = data['涨跌幅'] < 0.95 * data['Max_rate']
+    buy_condition = ((data['涨跌幅'] >= -(data['Max_rate'] - 1.0 / data['收盘'])) & (data['涨跌幅'] <= (data['Max_rate'] - 1.0 / data['收盘'])) & (data['收盘'] >= 3) & (data['Max_rate'] > 0.1))
 
     # 使用 reduce 函数结合所有的条件
     combined_condition = np.logical_and.reduce([data[col] for col in combination])
@@ -301,14 +301,15 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         data = load_data(full_name)
 
         data = gen_signal_func(data)
+        data['Buy Date'] = pd.to_datetime(data['Buy Date'])
         file_name = Path('../final_zuhe/zuhe') / f"{data['名称'].iloc[0]}.json"
-        aother_file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
+        # aother_file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
 
         # 一次性读取JSON
         result_df_dict = {}
-        aother_result_df_dict = read_json(aother_file_name)
+        # aother_result_df_dict = read_json(aother_file_name)
         # 将aother_result_df_dict合并到result_df_dict
         # 如果data长度小于100，不生成信号
         # if data.shape[0] < 100:
@@ -329,19 +330,20 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
                 result_df_dict[combination_key] = create_empty_result()
                 continue
 
-            results_df = backtest_func(signal_data)
+            # results_df = backtest_func(signal_data)
+            results_df = signal_data[signal_data['Buy_Signal'] == True]
             processed_result = process_results_with_year(results_df, threshold_day)
 
             if processed_result:
                 result_df_dict[combination_key] = processed_result
-        aother_result_df_dict.update(result_df_dict)
+        # aother_result_df_dict.update(result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
     finally:
         # 写入文件
         write_json(file_name, result_df_dict)
-        write_json(aother_file_name, aother_result_df_dict)
+        # write_json(aother_file_name, aother_result_df_dict)
         end_time = time.time()
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
@@ -427,10 +429,10 @@ def gen_all_signal_processing_with_back_data(args, threshold_day=1, is_skip=True
 
             if processed_result:
                 recent_result_df_dict[combination_key] = processed_result
-        result_df_dict = read_json(file_name)
-        result_df_dict.update(recent_result_df_dict)
+        # result_df_dict = read_json(file_name)
+        # result_df_dict.update(recent_result_df_dict)
         write_json(recent_file_name, recent_result_df_dict)
-        write_json(file_name, result_df_dict)
+        # write_json(file_name, result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
@@ -452,6 +454,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
 
         data = load_data(full_name)
         data = gen_signal_func(data)
+        data['Buy Date'] = pd.to_datetime(data['Buy Date'])
         file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
@@ -472,15 +475,20 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
                 # recent_result_df_dict[combination_key] = create_empty_result()
                 continue
 
-            results_df = backtest_func(signal_data)
+            # origin_results_df = backtest_func(signal_data)
+            results_df = signal_data[signal_data['Buy_Signal'] == True]
+            # if results_df.shape[0] != origin_results_df.shape[0]:
+            #     print('diff:')
+            #     print(origin_results_df)
+            #     print(results_df)
             processed_result = process_results_with_year(results_df, threshold_day)
 
             if processed_result:
                 recent_result_df_dict[combination_key] = processed_result
-        result_df_dict = read_json(file_name)
-        result_df_dict.update(recent_result_df_dict)
+        # result_df_dict = read_json(file_name)
+        # result_df_dict.update(recent_result_df_dict)
         write_json(recent_file_name, recent_result_df_dict)
-        write_json(file_name, result_df_dict)
+        # write_json(file_name, result_df_dict)
 
     except Exception as e:
         traceback.print_exc()
@@ -540,7 +548,6 @@ def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
-# @timeit
 def filter_combinations(result_df_dict, final_combinations):
     """
     过滤已存在和无效的组合
@@ -717,7 +724,8 @@ def process_results_with_year(results_df, threshold_day):
     one_befor_year_count = result[result['Buy Date'].dt.year >= one_befor_year].shape[0]
     total_days_held = result['Days Held'].sum()
     total_cost = result['total_cost'].sum()
-    Total_Profit = results_df['Total_Profit'].iloc[-1]
+    # Total_Profit=所有Profit的和
+    Total_Profit = result['Profit'].sum()
     result_df = result[result['Days Held'] > threshold_day]
     result_shape = result.shape[0]
     three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
@@ -1092,7 +1100,7 @@ def process_combinations_with_back_data(result_combination_list, task_with_back_
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/gen/sublist.json', sublist_json)
 
-        statistics_zuhe_gen_with_back_data('../back/gen/with_back_data_single', target_key='all')
+        # statistics_zuhe_gen_with_back_data('../back/gen/with_back_data_single', target_key='all')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def process_combinations_gen_single(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
@@ -1474,6 +1482,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
         os.remove(file_name_backup)
     write_json(file_name_backup, result)
     # 先删除原来的statistics.json文件
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
@@ -1747,7 +1756,7 @@ def statistics_zuhe_gen_both_single(file_path, target_key='all'):
             value['average_days_held'] = 0
             value['total_profit'] = 0
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
-    result = dict(sorted(result.items(), key=lambda x: (x[1]['trade_count'], -x[1]['ratio']), reverse=True))
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 写入target_key.json
     target_key_result = result
     target_key = 'target_key'

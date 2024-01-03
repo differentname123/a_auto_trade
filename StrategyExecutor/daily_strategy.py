@@ -977,19 +977,18 @@ def mix(data):
     data_1 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
     gen_signal(data_1,
-               "收盘_5日_小极值_signal:最高_小于_10_日均线_signal:振幅_2_到_5_固定区间_signal:开盘_大于昨日_收盘_signal_yes:涨跌幅_小于_5_日均线_signal_yes:振幅_小于_5_日均线_signal_yes"
-
-
-
-
-
-
+               "振幅_小于_2_固定区间_signal:收盘_大于_5_日均线_signal:涨跌幅_大于_5_固定区间_signal"
                .split(':'))
 
 
-
-
+    # # 找到日期为1996-05-31的数据
+    # target_date = pd.to_datetime('2023-12-05')
+    # target_data = data_1[data_1['日期'] == target_date]
+    # for comb in comb_list:
+    #     print(comb + ' : ' + str(target_data[comb].values[0]))
     data['Buy_Signal'] = data_1['Buy_Signal']
+    # target_date = pd.to_datetime('2023-12-04')
+    # target_data = data_1[data_1['日期'] == target_date]
     return data
 
 def mix_back(data):

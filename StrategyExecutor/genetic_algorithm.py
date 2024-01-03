@@ -137,7 +137,7 @@ class GeneticAlgorithm:
             print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -227,7 +227,7 @@ class GeneticAlgorithm:
                 total_fitness = total_fitness / individual["ratio"]
             else:
                 total_fitness += 100
-            total_fitness += individual["average_1w_profit"] / 10
+            # total_fitness += individual["average_1w_profit"] / 10
             if (individual['average_days_held'] <= (1 + individual['ratio']) + 0.001):
                 total_fitness += 50
         else:
@@ -283,8 +283,9 @@ class GeneticAlgorithm:
         # self.population = [''.join(['1' if self.signal_columns[i] in combination else '0' for i in
         #                             range(len(self.signal_columns))]) for combination in self.combinations]
 
+        # self.combinations = ['收盘_5日_小极值_signal:换手率_小于_10_日均线_signal:股价_非跌停_signal:开盘_小于_5_固定区间_signal:开盘_小于_10_日均线_signal:涨跌幅_小于_20_日均线_signal:收盘_5日_小极值_signal_yes:换手率_大于_5_日均线_signal_yes:实体rate_5日_大极值signal_yes:开盘_小于_20_日均线_signal_yes:振幅_小于_5_日均线_signal_yes'.split(':')]
         self.combinations = [self.cover_to_combination(individual) for individual in self.population]
-        back_layer_all_op_gen_single('../daily_data_exclude_new_can_buy', self.combinations, gen_signal_func=gen_full_all_basic_signal,
+        back_layer_all_op_gen_single('../daily_data_exclude_new_can_buy_with_back', self.combinations, gen_signal_func=gen_full_all_basic_signal,
                               backtest_func=backtest_strategy_low_profit)
         self.gen_combination_to_fitness()
         self.load_all_statistics()
@@ -356,6 +357,15 @@ class GeneticAlgorithm:
         # 运行一代
         new_population = set()
         self.get_fitness()
+        best_info = self.get_best_individual()
+        try:
+            if best_info[1][1]['trade_count'] < 100:
+                self._initialize_population_mul()
+        except:
+            pass
+        # 增量写入文件
+        with open('../back/gen/best.txt', 'a') as f:
+            f.write(str(best_info) + '\n')
         per_size = 200
         while len(new_population) < self.population_size:
             # 准备传递给 generate_offspring 的参数
@@ -363,7 +373,7 @@ class GeneticAlgorithm:
                          _ in range(math.ceil(1.2 * self.population_size / per_size))]
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -459,25 +469,16 @@ if __name__ == '__main__':
     data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 2000  # 种群大小
+    population_size = 10000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 
     # 创建遗传算法实例并运行
     ga = GeneticAlgorithm(population_size, crossover_rate, mutation_rate, signal_columns)
-    for _ in range(5000):  # 运行50代
+    for _ in range(10000):  # 运行50代
         # 打印当前时间
         print('time: ', datetime.datetime.now())
         ga.run_generation_mul()
-        best_info = ga.get_best_individual()
-        try:
-            if best_info[1][1]['trade_count'] < 100:
-                ga._initialize_population_mul()
-        except:
-            pass
-        # 增量写入文件
-        with open('../back/gen/best.txt', 'a') as f:
-            f.write(str(best_info) + '\n')
 
 
     # # # 输出最佳个体及其适应度

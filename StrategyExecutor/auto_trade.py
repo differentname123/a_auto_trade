@@ -45,6 +45,7 @@ if __name__ == '__main__':
         # run_client()
         # time.sleep(5)
         auto.bind_client()
+        amount = 100
 
         exist_codes= []
 
@@ -65,20 +66,20 @@ if __name__ == '__main__':
             if os.path.exists(output_file_path):
                 with open(output_file_path, 'r', encoding='utf-8') as f:
                     for line in f.readlines():
-                        stock_no = line.strip()
+                        stock_no, price = line.strip().split(',')
                         if stock_no not in exist_codes:
                             exist_codes.append(stock_no)
 
-                            result = auto.buy(stock_no=stock_no, amount=100, price=price)
+                            result = auto.buy(stock_no=stock_no, amount=amount, price=price)
             else:
                 time.sleep(1)
         # 读取output_file_path，买入股票
         with open(output_file_path, 'r', encoding='utf-8') as f:
             for line in f.readlines():
-                stock_no = line.strip()
+                stock_no, price = line.strip().split(',')
                 if stock_no not in exist_codes:
                     exist_codes.append(stock_no)
-                    result = auto.buy(stock_no=stock_no, amount=100, price=price)
+                    result = auto.buy(stock_no=stock_no, amount=amount, price=price)
         print(len(exist_codes))
         print(exist_codes)
 

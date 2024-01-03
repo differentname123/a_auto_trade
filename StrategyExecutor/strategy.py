@@ -38,8 +38,12 @@ def strategy(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     # 加载数据
     data = load_data(file_path)
 
+    # 将data数据只保留1996到1997年的数据
+    # data = data[data['日期'] >= '1996-01-01']
+    # data = data[data['日期'] <= '1997-01-01']
+
     # 计算指标
-    get_indicators(data, True)
+    # get_indicators(data, True)
 
     # 产生买入信号
     gen_signal_func(data)
@@ -116,7 +120,7 @@ def back_one(file_path, gen_signal_func=gen_buy_signal_one, backtest_func=backte
     :return:
     """
     data = load_data(file_path)
-    get_indicators(data)
+    # get_indicators(data)
     gen_signal_func(data)
     results_df = backtest_func(data)
     return results_df

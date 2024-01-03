@@ -536,7 +536,7 @@ def backtest_strategy_low_profit(data):
                 new_buy_price = data['收盘'].iloc[j]  # 第二天的收盘价作为新的买入价
                 buy_price = (buy_price * (
                         total_shares - additional_shares) + new_buy_price * additional_shares) / total_shares
-                data.at[i, '数量'] = additional_shares  # 记录买入数量
+                data.at[i, '数量'] = total_shares  # 记录买入数量
 
                 j += 1
 
@@ -551,9 +551,9 @@ def backtest_strategy_low_profit(data):
                 sell_price = data['收盘'].iloc[j]
 
             sell_date = data['日期'].iloc[j]
-            profit = (sell_price - buy_price) * 100  # 每次卖出100股
+            profit = (sell_price - buy_price) * total_shares  # 每次卖出100股
             total_profit += profit
-            total_cost = buy_price * 100
+            total_cost = buy_price * total_shares
             days_held = j - buy_index
             results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, total_cost,
                             days_held, i])

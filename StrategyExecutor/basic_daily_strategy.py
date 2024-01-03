@@ -73,10 +73,16 @@ def gen_multiple_daily_buy_signal_ma(data, key, ma_list):
     # 产生平均值的区间信号
     if ma_list:
         for value in ma_list:
-            column_name = f'{key}_大于_{value}_日均线_signal'
-            data[column_name] = data[key] > data[key].rolling(window=value).mean()
-            column_name = f'{key}_小于_{value}_日均线_signal'
-            data[column_name] = data[key] <= data[key].rolling(window=value).mean()
+            epsilon = 1e-6
+            rolling_mean = data[key].rolling(window=value).mean()
+
+            greater_than_column_name = f'{key}_大于_{value}_日均线_signal'
+            # 用加上epsilon的方式来处理浮点数精度问题
+            data[greater_than_column_name] = data[key] >= (rolling_mean - epsilon)
+
+            less_than_column_name = f'{key}_小于_{value}_日均线_signal'
+            # 用减去epsilon的方式来处理浮点数精度问题
+            data[less_than_column_name] = data[key] <= (rolling_mean + epsilon)
 
     # 创建一个空的 DataFrame 用于存储新列
     new_columns = pd.DataFrame(index=data.index)
