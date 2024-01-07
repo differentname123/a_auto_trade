@@ -319,6 +319,55 @@ class ThsAuto:
             'msg': '获取结果失败,请自行确认订单状态',
         }
 
+    def init_buy(self):
+        """
+        初始化买入准备，后续就只用输入价格和数量就可以了
+        :return:
+        """
+        self.switch_to_normal()
+        win32gui.SetForegroundWindow(self.hwnd_main)
+        hot_key(['F1'])
+        self.stock_no_hwnd = self.get_right_hwnd()
+        self.stock_no_ctrl = win32gui.GetDlgItem(self.stock_no_hwnd, 0x408)
+        self.price_ctrl = win32gui.GetDlgItem(self.stock_no_hwnd, 0x409)
+        self.amount_ctrl = win32gui.GetDlgItem(self.stock_no_hwnd, 0x40A)
+
+    def quick_buy(self, stock_no, amount, price):
+        """
+        快速买入，只用输入数量股票和价格，没有其它的操作
+        :param stock_no:
+        :param amount:
+        :param price:
+        :return:
+        """
+
+        set_text(self.stock_no_ctrl, stock_no)
+        time.sleep(sleep_time)
+        if price is not None:
+            time.sleep(sleep_time)
+            price = '%.3f' % price
+            set_text(self.price_ctrl, price)
+            time.sleep(sleep_time)
+
+        set_text(self.amount_ctrl, str(amount))
+        time.sleep(sleep_time)
+        hot_key(['enter'])
+        result = None
+        retry = 0
+        while retry < retry_time:
+            time.sleep(sleep_time)
+            result = self.get_result()
+            if result:
+                hot_key(['enter'])
+                return result
+            hot_key(['enter'])
+            retry += 1
+        return {
+            'code': 2,
+            'status': 'unknown',
+            'msg': '获取结果失败,请自行确认订单状态',
+        }
+
     def buy(self, stock_no, amount, price):
         self.switch_to_normal()
         win32gui.SetForegroundWindow(self.hwnd_main)

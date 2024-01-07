@@ -1869,10 +1869,10 @@ if __name__ == '__main__':
 
     # save_and_analyse_all_data_mul('2024-01-03')
     # get_newest_stock()
-    back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
-    back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
-    back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
-    back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
+    # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
+    # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
+    # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
+    # back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
     back_range_select_op(start_time='2024-01-02', end_time='2024-01-04')
     # print(good_data)
 

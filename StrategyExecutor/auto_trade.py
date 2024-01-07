@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import multiprocessing
 from datetime import datetime
 
 import json
@@ -37,73 +38,55 @@ def get_stock_and_price(file_path):
     return result
 
 
-if __name__ == '__main__':
+def delete_file_if_exists(file_path):
+    if os.path.exists(file_path):
+        os.remove(file_path)
 
-        auto = ThsAuto()                                        # 连接客户端
-        auto.active_mian_window()
-        # auto.kill_client()
-        # run_client()
-        # time.sleep(5)
-        auto.bind_client()
-        amount = 100
 
-        exist_codes= []
-
-        target_date = datetime.now().strftime('%Y-%m-%d')
-        # target_date = '2023-12-22'
-        output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
-        # 如果output_file_path存在则删除
-        if os.path.exists(output_file_path):
-            os.remove(output_file_path)
-        # 用一个新的进程去执行save_and_analyse_all_data_mul(target_date)
-        import multiprocessing
-        p = multiprocessing.Process(target=save_and_analyse_all_data_mul, args=(target_date,))
-        p.start()
-        price = None
-        # 如果p进程未结束就一直循环
-        while p.is_alive():
-            # 读取output_file_path，买入股票
-            if os.path.exists(output_file_path):
-                with open(output_file_path, 'r', encoding='utf-8') as f:
-                    for line in f.readlines():
-                        try:
-                            stock_no, price = line.strip().split(',')
-                            price = float(price)
-                            if stock_no not in exist_codes:
-                                exist_codes.append(stock_no)
-
-                                result = auto.buy(stock_no=stock_no, amount=amount, price=price)
-                        except Exception:
-                            traceback.print_exc()
-                            print(line)
-            else:
-                time.sleep(1)
-        # 读取output_file_path，买入股票
-        with open(output_file_path, 'r', encoding='utf-8') as f:
-            for line in f.readlines():
+def process_stock_data(file_path, auto, exist_codes, amount):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        for line in file.readlines():
+            try:
                 stock_no, price = line.strip().split(',')
                 price = float(price)
                 if stock_no not in exist_codes:
                     exist_codes.append(stock_no)
-                    result = auto.buy(stock_no=stock_no, amount=amount, price=price)
-        print(len(exist_codes))
-        print(exist_codes)
+                    result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
+            except Exception:
+                traceback.print_exc()
+                print(line)
 
-        # select_file_path = '../final_zuhe/select/select_2023-12-22.json'
-        # stock_and_price = get_stock_and_price(select_file_path)
-        # for stock_no, price in stock_and_price:
-        #     # 开始计时
-        #     start = time.time()
-        #     print('买入')
-        #     result = auto.buy(stock_no=stock_no, amount=100, price=price)    # 买入股票
-        #     print(result)
-        #     # 结束计时
-        #     end = time.time()
-        #     print('耗时：', end - start)
-        # # 复制select_file_path，名字增加当前时间戳
-        # import shutil
-        # shutil.copy(select_file_path, select_file_path.replace('.json', '_' + str(int(time.time())) + '.json'))
 
+if __name__ == '__main__':
+    auto = ThsAuto()  # 连接客户端
+    auto.active_mian_window()
+    # auto.kill_client()
+    # run_client()
+    # time.sleep(5)
+    auto.bind_client()
+    auto.init_buy()
+    amount = 100
+    exist_codes = []
+    # target_date = datetime.now().strftime('%Y-%m-%d')
+    target_date = '2024-01-04'
+    output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
+
+    delete_file_if_exists(output_file_path)
+
+    # 用一个新的进程去执行save_and_analyse_all_data_mul(target_date)
+    process = multiprocessing.Process(target=save_and_analyse_all_data_mul, args=(target_date,))
+    process.start()
+
+    while process.is_alive():
+        if os.path.exists(output_file_path):
+            process_stock_data(output_file_path, auto, exist_codes, amount)
+        else:
+            time.sleep(1)
+
+    process_stock_data(output_file_path, auto, exist_codes, amount)
+
+    print(len(exist_codes))
+    print(exist_codes)
 
 
 
