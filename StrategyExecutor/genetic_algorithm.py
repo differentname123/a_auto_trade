@@ -137,7 +137,7 @@ class GeneticAlgorithm:
             print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            pool = multiprocessing.Pool(processes=10)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -373,7 +373,7 @@ class GeneticAlgorithm:
                          _ in range(math.ceil(1.2 * self.population_size / per_size))]
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            pool = multiprocessing.Pool(processes=10)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()

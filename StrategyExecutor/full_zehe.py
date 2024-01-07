@@ -62,7 +62,7 @@ def get_buy_price(close_price):
     :param close_price:
     :return:
     """
-    buy_price = close_price * 1.001
+    buy_price = close_price * 1.0025
     buy_price = math.ceil(buy_price * 100) / 100
     return buy_price
 
@@ -849,11 +849,14 @@ def get_good_combinations():
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if (v['ratio'] <= 0.05 and v['three_befor_year_count_thread_ratio'] <= 0.05)
                        or (v['average_days_held'] <= (1 + v['ratio']) + 0.001)  # 代表两天之内一定会卖出去
-                       or (v['ratio'] == 0 or v['three_befor_year_count_thread_ratio'] == 0)
+                       or (v['ratio'] == 0 or (v['three_befor_year_count_thread_ratio'] == 0) and v['one_befor_year_count'] > 0)
+                       # or (v['average_days_held'] <= 1.1 and v['ratio'] <= 0.06)
+                       # # or ((v['ratio'] <= 0.07) and v['trade_count'] > 1000 and v['three_befor_year_count_thread_ratio'] < v['ratio'])
+                       # or ((v['ratio'] <= 0.06) and v['trade_count'] > 1000)
                        }
 
     # good_1w_keys = {k: v for k, v in statistics.items()
-    #                    if (v['average_1w_profit'] >= 200) and (v['trade_count'] >= 10)
+    #                    if (v['average_1w_profit'] >= 100) and (v['trade_count'] >= 10)
     #                    }
     # statistics_all.update(good_1w_keys)
 
@@ -892,7 +895,7 @@ def get_good_combinations():
     # # statistics_all.update(statistics_1w)
     # # statistics_all.update(statistics_1w_rate)
 
-    statistics_all.update(good_ratio_keys) # 5256
+    statistics_all.update(good_ratio_keys) # 945
     statistics_all = dict(sorted(statistics_all.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     write_json('../final_zuhe/good_statistics.json', statistics_all)
 
@@ -1813,6 +1816,14 @@ def process_file_all(fullname, out_put_file_path):
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
     origin_data_df.to_csv(output_filename, index=False)
 
+def process_file_zhibiao(fullname, out_put_file_path):
+    origin_data_df = load_full_data(fullname)
+    origin_data_df['Buy_Signal'] = True
+    back_result_df = backtest_strategy_low_profit(origin_data_df)
+    origin_data_df = origin_data_df.merge(back_result_df, on=['日期'], how='left')
+    output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
+    origin_data_df.to_csv(output_filename, index=False)
+
 def gen_all_back():
     """
     为所有数据生成回测结果并写入文件，这样后续就不用每次进行回测了，大大节约时间
@@ -1825,6 +1836,22 @@ def gen_all_back():
             for f in fs:
                 fullname = os.path.join(root, f)
                 pool.apply_async(process_file_all, args=(fullname, out_put_file_path))
+
+        pool.close()
+        pool.join()
+
+def gen_all_zhibiao():
+    """
+    为所有数据生成所有指标（天，周，月，上证）并写入文件，这样后续就不用每次新生成，大大节约时间
+    :return:
+    """
+    file_path = '../daily_data_exclude_new_can_buy_with_back/'
+    out_put_file_path = '../daily_data_exclude_new_can_buy_with_all_zhibiao'
+    with Pool() as pool:
+        for root, ds, fs in os.walk(file_path):
+            for f in fs:
+                fullname = os.path.join(root, f)
+                pool.apply_async(process_file_zhibiao, args=(fullname, out_put_file_path))
 
         pool.close()
         pool.join()
@@ -1842,11 +1869,11 @@ if __name__ == '__main__':
 
     # save_and_analyse_all_data_mul('2024-01-03')
     # get_newest_stock()
-    # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
-    # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
-    # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
-    # back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
-    back_range_select_op(start_time='2024-01-02', end_time='2024-01-02')
+    back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
+    back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
+    back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
+    back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
+    back_range_select_op(start_time='2024-01-02', end_time='2024-01-04')
     # print(good_data)
 
     # # 读取../back/complex/all_df.csv

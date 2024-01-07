@@ -833,6 +833,18 @@ def gen_full_all_basic_signal(data):
     data = gen_multiple_daily_buy_signal_yes(data)
     return data
 
+def gen_full_all_dimension_signal(data):
+    """
+    生成所有维度（天，周，月，上证）的信号
+    :param data:
+    :return:
+    """
+    # 扫描basic_daily_strategy.py文件，生成所有的天基础信号
+    for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
+        if name.startswith('gen_basic_daily_buy_signal_'):
+            data = func(data)
+    data = gen_multiple_daily_buy_signal_yes(data)
+    return data
 
 def gen_full_all_basic_signal_gen(data):
     """

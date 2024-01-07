@@ -977,9 +977,11 @@ def mix(data):
     data_1 = data.copy()
     data_1 = gen_full_all_basic_signal(data_1)
     gen_signal(data_1,
-               "振幅_小于_2_固定区间_signal:收盘_大于_5_日均线_signal:涨跌幅_大于_5_固定区间_signal"
-               .split(':'))
+               "收盘_小于_5_日均线_signal:BAR_20日_小极值_signal:成交额_小于_5_日均线_signal:换手率_小于_10_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:实体rate_大于_10_日均线_signal:股价_非跌停_signal:最高_小于_5_日均线_signal:最高_5日_小极值_signal:最低_5日_小极值_signal:涨跌幅_小于_10_日均线_signal:收盘_小于_5_日均线_signal_yes:开盘_大于昨日_收盘_signal_yes:成交额_20日_小极值_signal_yes:涨跌幅_小于_20_日均线_signal_yes:振幅_2_到_5_固定区间_signal_yes:振幅_大于_10_日均线_signal_yes"
 
+
+
+               .split(':'))
 
     # # 找到日期为1996-05-31的数据
     # target_date = pd.to_datetime('2023-12-05')
