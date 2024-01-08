@@ -65,9 +65,9 @@ def parse_filename(file_path):
 
     return stock_name, stock_code
 
-
+# @timeit
 def load_data(file_path):
-    data = pd.read_csv(file_path)
+    data = pd.read_csv(file_path, low_memory=False)
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
         data = data.rename(columns={'时间': '日期'})

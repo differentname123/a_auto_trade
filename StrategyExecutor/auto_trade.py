@@ -65,10 +65,11 @@ if __name__ == '__main__':
     # time.sleep(5)
     auto.bind_client()
     auto.init_buy()
-    amount = 100
+    amount = 200
     exist_codes = []
-    # target_date = datetime.now().strftime('%Y-%m-%d')
-    target_date = '2024-01-04'
+
+    target_date = datetime.now().strftime('%Y-%m-%d')
+    # target_date = '2024-01-04'
     output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
 
     delete_file_if_exists(output_file_path)

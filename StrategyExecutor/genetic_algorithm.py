@@ -137,7 +137,7 @@ class GeneticAlgorithm:
             print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=10)
+            pool = multiprocessing.Pool(processes=8)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -373,7 +373,7 @@ class GeneticAlgorithm:
                          _ in range(math.ceil(1.2 * self.population_size / per_size))]
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=10)
+            pool = multiprocessing.Pool(processes=8)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -465,8 +465,8 @@ if __name__ == '__main__':
     # statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
     # filter_good_zuhe()
     # statistics_zuhe_gen_both('../back/gen/zuhe', target_key='all')
-    data = load_data('../daily_data_exclude_new_can_buy/龙洲股份_002682.txt')
-    data = gen_full_all_basic_signal(data)
+    data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
+    # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
     population_size = 10000  # 种群大小

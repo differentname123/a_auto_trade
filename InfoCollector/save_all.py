@@ -307,9 +307,38 @@ def save_all_data_mul():
 def fun():
     save_all_data_mul()
 
+def save_index_data():
+    """
+    下载指数数据（目前是上证和深证指数），保存到output_path
+    :param output_path:
+    :return:
+    """
+    sz_data = ak.stock_zh_index_daily(symbol="sz399001")
+    sh_data = ak.stock_zh_index_daily(symbol="sh000001")
+    # 将sz_data和sh_data的列date改为日期
+    sz_data.rename(columns={'date': '日期'}, inplace=True)
+    sz_data.rename(columns={'open': '深证指数开盘'}, inplace=True)
+    sz_data.rename(columns={'high': '深证指数最高'}, inplace=True)
+    sz_data.rename(columns={'low': '深证指数最低'}, inplace=True)
+    sz_data.rename(columns={'close': '深证指数收盘'}, inplace=True)
+    sz_data.rename(columns={'volume': '深证指数成交额'}, inplace=True)
+    sh_data.rename(columns={'date': '日期'}, inplace=True)
+    sh_data.rename(columns={'open': '上证指数开盘'}, inplace=True)
+    sh_data.rename(columns={'high': '上证指数最高'}, inplace=True)
+    sh_data.rename(columns={'low': '上证指数最低'}, inplace=True)
+    sh_data.rename(columns={'close': '上证指数收盘'}, inplace=True)
+    sh_data.rename(columns={'volume': '上证指数成交额'}, inplace=True)
+    # 将sz_data和sh_data按照日期合并
+    index_data = pd.merge(sz_data, sh_data, on='日期')
+    # 将index_data的日期改为datetime格式
+    index_data['日期'] = pd.to_datetime(index_data['日期'])
+    return index_data
+
 if __name__ == '__main__':
-    price_data = get_price('000001', '19700101', '20231017', period='daily')
-    print(price_data)
+    # price_data = get_price('000001', '19700101', '20291017', period='daily')
+    # print(price_data)
+    data = ak.stock_zh_index_daily(symbol="sz399001")
+    print(data)
     # data = ak.stock_financial_analysis_indicator('600242')
     # data1 = ak.stock_zh_a_st_em()
     # data2 = ak.stock_notice_report(symbol='全部', date="20231106")

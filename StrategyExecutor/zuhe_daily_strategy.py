@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
-from StrategyExecutor import basic_daily_strategy
+from StrategyExecutor import basic_daily_strategy, basic_zhishu_strategy
 from common import *
 from StrategyExecutor.MyTT import *
 from StrategyExecutor.basic_daily_strategy import *
@@ -300,7 +300,7 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
 
         data = load_data(full_name)
 
-        data = gen_signal_func(data)
+        # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
         file_name = Path('../final_zuhe/zuhe') / f"{data['名称'].iloc[0]}.json"
         # aother_file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
@@ -453,12 +453,12 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
         full_name, final_combinations, gen_signal_func, backtest_func = args
 
         data = load_data(full_name)
-        data = gen_signal_func(data)
+        # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
-        file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
+        # file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
-        file_name.parent.mkdir(parents=True, exist_ok=True)
+        # file_name.parent.mkdir(parents=True, exist_ok=True)
         recent_result_df_dict = read_json(recent_file_name)
         if is_skip:
             final_combinations, zero_combination = filter_combinations(recent_result_df_dict, final_combinations)
@@ -829,6 +829,19 @@ def gen_full_all_basic_signal(data):
     # 扫描basic_daily_strategy.py文件，生成所有的基础信号
     for name, func in inspect.getmembers(basic_daily_strategy, inspect.isfunction):
         if name.startswith('gen_basic_daily_buy_signal_'):
+            data = func(data)
+    data = gen_multiple_daily_buy_signal_yes(data)
+    return data
+
+def gen_full_zhishu_basic_signal(data):
+    """
+    扫描basic_daily_zhishu_strategy.py文件，生成所有的基础信号,过滤出以gen_basic_daily_buy_signal开头的函数，并应用于data
+    :param data:
+    :return:
+    """
+    # 扫描basic_daily_strategy.py文件，生成所有的基础信号
+    for name, func in inspect.getmembers(basic_zhishu_strategy, inspect.isfunction):
+        if name.startswith('gen_basic_daily_zhishu_buy_signal_'):
             data = func(data)
     data = gen_multiple_daily_buy_signal_yes(data)
     return data

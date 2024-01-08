@@ -42,7 +42,7 @@ from scipy.stats import norm
 from sympy.physics.quantum.identitysearch import scipy
 import matplotlib
 
-from InfoCollector.save_all import save_all_data_mul, get_price, fix_st
+from InfoCollector.save_all import save_all_data_mul, get_price, fix_st, save_index_data
 
 matplotlib.use('Agg')
 
@@ -51,7 +51,7 @@ from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_da
     select_stocks, mix_back
 from StrategyExecutor.strategy import back_all_stock, strategy
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
-    create_empty_result, process_results_with_year
+    create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 
@@ -1808,12 +1808,16 @@ def save_and_analyse_all_data_mul(target_date):
     end = time.time()
     print("总耗时：{}".format(end - start))
 
-def process_file_all(fullname, out_put_file_path):
+def process_file_all(fullname, out_put_file_path, new_index_data_df):
     origin_data_df = load_full_data(fullname)
+    origin_data_df = gen_full_all_basic_signal(origin_data_df)
     origin_data_df['Buy_Signal'] = True
     back_result_df = backtest_strategy_low_profit(origin_data_df)
     origin_data_df = origin_data_df.merge(back_result_df, on=['日期'], how='left')
+    # 将new_index_data_df中的数据合并到origin_data_df中，以日期为key
+    origin_data_df = origin_data_df.merge(new_index_data_df, on=['日期'], how='left')
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
+    origin_data_df['Buy Date'] = pd.to_datetime(origin_data_df['Buy Date'])
     origin_data_df.to_csv(output_filename, index=False)
 
 def process_file_zhibiao(fullname, out_put_file_path):
@@ -1831,12 +1835,13 @@ def gen_all_back():
     """
     file_path = '../daily_data_exclude_new_can_buy/'
     out_put_file_path = '../daily_data_exclude_new_can_buy_with_back'
+    index_data = save_index_data()
+    new_index_data = gen_full_zhishu_basic_signal(index_data)
     with Pool() as pool:
         for root, ds, fs in os.walk(file_path):
             for f in fs:
                 fullname = os.path.join(root, f)
-                pool.apply_async(process_file_all, args=(fullname, out_put_file_path))
-
+                pool.apply_async(process_file_all, args=(fullname, out_put_file_path, new_index_data))
         pool.close()
         pool.join()
 
@@ -1873,7 +1878,8 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
     # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
     # back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
-    back_range_select_op(start_time='2024-01-02', end_time='2024-01-04')
+    # back_range_select_op(start_time='2024-01-05', end_time='2024-01-05')
+    # back_range_select_op(start_time='2024-01-08', end_time='2024-01-08')
     # print(good_data)
 
     # # 读取../back/complex/all_df.csv
@@ -1885,10 +1891,10 @@ if __name__ == '__main__':
     # all_df_back = all_df_back[~all_df_back.index.isin(all_df.index)]
     # all_df_back = all_df_back.reset_index()
 
-    # gen_all_back()
+    gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy/宁波远洋_601022.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
