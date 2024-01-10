@@ -137,7 +137,7 @@ class GeneticAlgorithm:
             print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
+            pool = multiprocessing.Pool(processes=7)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -373,7 +373,7 @@ class GeneticAlgorithm:
                          _ in range(math.ceil(1.2 * self.population_size / per_size))]
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
+            pool = multiprocessing.Pool(processes=7)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -469,7 +469,7 @@ if __name__ == '__main__':
     # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 10000  # 种群大小
+    population_size = 20000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 

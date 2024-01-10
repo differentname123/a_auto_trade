@@ -313,8 +313,8 @@ def save_index_data():
     :param output_path:
     :return:
     """
-    sz_data = ak.stock_zh_index_daily(symbol="sz399001")
-    sh_data = ak.stock_zh_index_daily(symbol="sh000001")
+    sz_data = ak.stock_zh_index_daily_em(symbol="sz399001")
+    sh_data = ak.stock_zh_index_daily_em(symbol="sh000001")
     # 将sz_data和sh_data的列date改为日期
     sz_data.rename(columns={'date': '日期'}, inplace=True)
     sz_data.rename(columns={'open': '深证指数开盘'}, inplace=True)
@@ -337,7 +337,9 @@ def save_index_data():
 if __name__ == '__main__':
     # price_data = get_price('000001', '19700101', '20291017', period='daily')
     # print(price_data)
-    data = ak.stock_zh_index_daily(symbol="sz399001")
+    data = ak.stock_zh_index_daily(symbol="sh000001")
+    print(data)
+    data = ak.stock_zh_index_spot()
     print(data)
     # data = ak.stock_financial_analysis_indicator('600242')
     # data1 = ak.stock_zh_a_st_em()

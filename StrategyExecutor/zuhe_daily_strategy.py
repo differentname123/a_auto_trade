@@ -831,9 +831,10 @@ def gen_full_all_basic_signal(data):
         if name.startswith('gen_basic_daily_buy_signal_'):
             data = func(data)
     data = gen_multiple_daily_buy_signal_yes(data)
+    data = data.fillna(False)
     return data
 
-def gen_full_zhishu_basic_signal(data):
+def gen_full_zhishu_basic_signal(data, is_need_pre=False):
     """
     扫描basic_daily_zhishu_strategy.py文件，生成所有的基础信号,过滤出以gen_basic_daily_buy_signal开头的函数，并应用于data
     :param data:
@@ -843,7 +844,10 @@ def gen_full_zhishu_basic_signal(data):
     for name, func in inspect.getmembers(basic_zhishu_strategy, inspect.isfunction):
         if name.startswith('gen_basic_daily_zhishu_buy_signal_'):
             data = func(data)
-    data = gen_multiple_daily_buy_signal_yes(data)
+    if is_need_pre:
+        data = gen_multiple_daily_buy_signal_yes(data)
+    # 将data在所有的nan值替换为False
+    data = data.fillna(False)
     return data
 
 def gen_full_all_dimension_signal(data):
@@ -1133,7 +1137,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
     使用多进程处理组合
     """
     # 按照一定数量分割list
-    split_size = 30000
+    split_size = 100000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
