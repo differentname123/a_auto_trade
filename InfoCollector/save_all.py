@@ -337,7 +337,7 @@ def save_index_data():
 if __name__ == '__main__':
     # price_data = get_price('000001', '19700101', '20291017', period='daily')
     # print(price_data)
-    data = ak.stock_zh_index_daily(symbol="sh000001")
+    data = ak.stock_zh_index_daily_em(symbol="sh000001")
     print(data)
     data = ak.stock_zh_index_spot()
     print(data)

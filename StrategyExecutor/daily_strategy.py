@@ -977,8 +977,7 @@ def mix(data):
     data_1 = data.copy()
     # data_1 = gen_full_all_basic_signal(data_1)
     gen_signal(data_1,
-"BAR_小于_5_日均线_signal:BAR_5日_小极值_signal:换手率_0.5_到_5_固定区间_signal:实体rate_0.1_到_0.5_固定区间_signal:最高_小于_10_日均线_signal:最高_5日_小极值_signal:最低_5日_小极值_signal:涨跌幅_小于_20_日均线_signal:收盘_小于_20_日均线_signal_yes:BAR_小于_5_日均线_signal_yes:最高_大于昨日_最低_signal_yes:成交额_小于_10_日均线_signal_yes:深证指数开盘_5日_小极值_signal:上证指数最高_2900_到_3000_固定区间_signal:上证指数最高_5日_小极值_signal:深证指数最低_5日_小极值_signal:深证指数收盘_5日_小极值_signal:上证指数开盘_5日_小极值_signal_yes:深证指数最高_小于_5_日均线_signal_yes:深证指数最高_大于昨日_深证指数最低_signal_yes"
-
+"收盘_小于_20_日均线_signal:成交额_小于_10_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:股价_非跌停_signal:开盘_5日_小极值_signal:最高_小于_5_日均线_signal:最高_5日_小极值_signal:涨跌幅_小于_10_日均线_signal:涨跌幅_小于_20_日均线_signal:股价_非跌停_signal_yes:上证指数开盘_小于_5_日均线_signal:上证指数开盘_5日_小极值_signal:深证指数收盘_10日_小极值_signal:深证指数开盘_大于昨日_深证指数最低_signal:上证指数最低_2900_到_3000_固定区间_signal_yes"
 
                .split(':'))
 

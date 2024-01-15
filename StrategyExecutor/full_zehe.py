@@ -847,11 +847,11 @@ def get_good_combinations():
     statistics = read_json('../back/gen/statistics_all.json')
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.019) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.019)}  # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.069) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.069) and '指数' not in k}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
-                       if (v['ratio'] <= 0.02 and v['three_befor_year_count_thread_ratio'] <= 0.05)
+                       if (v['ratio'] <= 0.05 and v['three_befor_year_count_thread_ratio'] <= 0.05)
                        or (v['average_days_held'] <= (1 + v['ratio']) + 0.001)  # 代表两天之内一定会卖出去
-                       or (v['ratio'] == 0 and v['trade_count'] > 70 or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20))
+                       or (v['ratio'] == 0 or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20))
                        # or (v['average_days_held'] <= 1.1 and v['ratio'] <= 0.06)
                        # # or ((v['ratio'] <= 0.07) and v['trade_count'] > 1000 and v['three_befor_year_count_thread_ratio'] < v['ratio'])
                        # or ((v['ratio'] <= 0.06) and v['trade_count'] > 1000)
@@ -1034,7 +1034,7 @@ def get_newest_stock():
     """
     # 开始计时
     start_time = time.time()
-    get_good_combinations()
+    # get_good_combinations()
     # 获取当前时间，保留到日
     target_date = datetime.now()
     good_statistics = read_json('../final_zuhe/good_statistics.json')
@@ -1711,7 +1711,7 @@ def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
     start_time = datetime.strptime(start_time, '%Y-%m-%d')
     end_time = datetime.strptime(end_time, '%Y-%m-%d')
     # 开始计时
-    get_good_combinations()
+    # get_good_combinations()
     good_statistics = read_json('../final_zuhe/good_statistics.json')
     good_keys = list(good_statistics.keys())
     index_data = save_index_data()
@@ -1856,7 +1856,7 @@ def process_file_all(fullname, out_put_file_path, new_index_data_df):
     back_result_df = backtest_strategy_low_profit(origin_data_df)
     origin_data_df = origin_data_df.merge(back_result_df, on=['日期'], how='left')
     # 将new_index_data_df中的数据合并到origin_data_df中，以日期为key
-    origin_data_df = origin_data_df.merge(new_index_data_df, on=['日期'], how='left')
+    # origin_data_df = origin_data_df.merge(new_index_data_df, on=['日期'], how='left')
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
     origin_data_df['Buy Date'] = pd.to_datetime(origin_data_df['Buy Date'])
     origin_data_df.to_csv(output_filename, index=False)
@@ -1906,13 +1906,14 @@ def gen_all_zhibiao():
 
 
 if __name__ == '__main__':
-    # file_path = '../final_zuhe/statistics_target_key.json'
-    # # file_path = '../back/gen/statistics_all.json'
+    # # file_path = '../final_zuhe/statistics_target_key.json'
+    # file_path = '../back/gen/statistics_all.json'
     # compute_more_than_one_day_held(file_path)
     # compute_all_round_value(file_path)
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
+    get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-09')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
@@ -1920,7 +1921,8 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
     # back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
     # back_range_select_op(start_time='2024-01-02', end_time='2024-01-05')
-    # back_range_select_op(start_time='2024-01-08', end_time='2024-01-09')
+    # back_range_select_op(start_time='2024-01-08', end_time='2024-01-12')
+    # back_range_select_op(start_time='2024-01-15', end_time='2024-01-15')
     # print(good_data)
 
     # 读取../back/complex/all_df.csv
@@ -1937,9 +1939,9 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
-    # strategy('../daily_data_exclude_new_can_buy_with_back/辽河油田_000817.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new_can_buy_with_back/东方电子_000682.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # # statistics = read_json('../back/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json') # 大小 2126501
