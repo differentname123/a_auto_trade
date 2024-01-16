@@ -1848,6 +1848,20 @@ def save_and_analyse_all_data_mul(target_date):
                 logging.error(f"Error occurred: {e}")
     end = time.time()
     print("总耗时：{}".format(end - start))
+    exist_codes = []
+    total_count = 0
+    total_price = 0
+    with open(output_file_path, 'r') as lines:
+        for line in lines:
+            try:
+                stock_no, price = line.strip().split(',')
+                price = float(price)
+                if stock_no not in exist_codes:
+                    total_price += price
+                    total_count += 1
+            except Exception as e:
+                print(e)
+    print("总数：{}，总价：{}".format(total_count, total_price))
 
 def process_file_all(fullname, out_put_file_path, new_index_data_df):
     origin_data_df = load_full_data(fullname)
@@ -1858,6 +1872,12 @@ def process_file_all(fullname, out_put_file_path, new_index_data_df):
     # 将new_index_data_df中的数据合并到origin_data_df中，以日期为key
     # origin_data_df = origin_data_df.merge(new_index_data_df, on=['日期'], how='left')
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
+    # 找出origin_data_df中全为
+    false_columns = origin_data_df.columns[(origin_data_df == False).all()]
+    false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(fullname)))
+    #将false_columns写入文件
+    with open(false_columns_output_filename, 'w') as f:
+        f.write('\n'.join(false_columns.tolist()))
     origin_data_df['Buy Date'] = pd.to_datetime(origin_data_df['Buy Date'])
     origin_data_df.to_csv(output_filename, index=False)
 
@@ -1913,8 +1933,8 @@ if __name__ == '__main__':
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
-    get_good_combinations()
-    # save_and_analyse_all_data_mul('2024-01-09')
+    # get_good_combinations()
+    # save_and_analyse_all_data_mul('2024-01-16')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
     # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
@@ -1936,7 +1956,7 @@ if __name__ == '__main__':
 
 
 
-    # gen_all_back()
+    gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)

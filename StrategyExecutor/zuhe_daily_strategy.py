@@ -31,6 +31,13 @@ from StrategyExecutor.MyTT import *
 from StrategyExecutor.basic_daily_strategy import *
 from StrategyExecutor.common import load_data
 
+def filter_combinations_good(zero_combinations_set, good_keys):
+    """
+    过滤已存在和无效的组合
+    """
+    final_combinations_set = good_keys
+    return [comb for comb in final_combinations_set if
+            not any(frozenset(comb) >= zc for zc in zero_combinations_set)], zero_combinations_set
 
 def gen_combination(value_columns):
     """
@@ -461,7 +468,20 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
         # file_name.parent.mkdir(parents=True, exist_ok=True)
         recent_result_df_dict = read_json(recent_file_name)
         if is_skip:
+            # 获取full_name的父目录
+            out_put_file_path = os.path.dirname(full_name)
+            false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(full_name)))
+            false_columns = set()
+            if os.path.exists(false_columns_output_filename):
+                with open(false_columns_output_filename, 'r') as lines:
+                    for line in lines:
+                        # 假设每行是以逗号分隔的元素
+                        elements = line.strip().split(',')
+                        false_columns.add(frozenset(elements))
+
+            final_combinations, zero_combination = filter_combinations_good(false_columns, final_combinations)
             final_combinations, zero_combination = filter_combinations(recent_result_df_dict, final_combinations)
+
 
         recent_result_df_dict = {}
         # 处理每个组合
@@ -1807,8 +1827,8 @@ def statistics_zuhe_gen_both_single(file_path, target_key='all'):
         result = old_result
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 再写入一份到备份文件
-    file_name_back = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
-    write_json(file_name_back, result)
+    # file_name_back = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    # write_json(file_name_back, result)
     # 先删除原来的statistics.json文件
     if os.path.exists(file_name):
         os.remove(file_name)
