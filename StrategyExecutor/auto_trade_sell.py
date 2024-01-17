@@ -95,14 +95,15 @@ if __name__ == '__main__':
             days_held = 1
 
         price = float(detail_data['市价'])
-        daily_data = get_price(stock_no, '20240101', '20291021', period='daily')
-        if daily_data is not None:
-            # daily_data是dataFrame类型的数据，获取daily_data中最近days_held天的数据，并且计算收盘价的均值
-            daily_data = daily_data.tail(days_held)
-            price = daily_data['收盘'].mean()
-        price = get_sell_price(price)
+        if amount > 0:
+            daily_data = get_price(stock_no, '20240101', '20291021', period='daily')
+            if daily_data is not None:
+                # daily_data是dataFrame类型的数据，获取daily_data中最近days_held天的数据，并且计算收盘价的均值
+                daily_data = daily_data.tail(days_held)
+                price = daily_data['收盘'].mean()
+            price = get_sell_price(price)
 
-        auto.sell(stock_no=stock_no, amount=amount, price=price)
+            auto.sell(stock_no=stock_no, amount=amount, price=price)
 
 
 
