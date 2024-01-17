@@ -851,6 +851,7 @@ def gen_full_all_basic_signal(data):
         if name.startswith('gen_basic_daily_buy_signal_'):
             data = func(data)
     data = gen_multiple_daily_buy_signal_yes(data)
+    # data = clear_other_clo(data)
     data = data.fillna(False)
     return data
 

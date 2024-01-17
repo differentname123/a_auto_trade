@@ -43,6 +43,7 @@ from sympy.physics.quantum.identitysearch import scipy
 import matplotlib
 
 from InfoCollector.save_all import save_all_data_mul, get_price, fix_st, save_index_data
+from StrategyExecutor.basic_daily_strategy import clear_other_clo
 
 matplotlib.use('Agg')
 
@@ -54,6 +55,8 @@ from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filt
     create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
+import warnings
+warnings.filterwarnings('ignore', message='.*DataFrame is highly fragmented.*')
 
 def get_buy_price(close_price):
     """
@@ -851,9 +854,9 @@ def get_good_combinations():
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if (v['ratio'] <= 0.05 and v['three_befor_year_count_thread_ratio'] <= 0.05)
                        or (v['average_days_held'] <= (1 + v['ratio']) + 0.001)  # 代表两天之内一定会卖出去
-                       or (v['ratio'] == 0 or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20))
+                       or (v['ratio'] == 0 or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 30))
                        # or (v['average_days_held'] <= 1.1 and v['ratio'] <= 0.06)
-                       # # or ((v['ratio'] <= 0.07) and v['trade_count'] > 1000 and v['three_befor_year_count_thread_ratio'] < v['ratio'])
+                       # or ((v['ratio'] <= 0.07) and v['trade_count'] > 1000)
                        # or ((v['ratio'] <= 0.06) and v['trade_count'] > 1000)
                        }
 
@@ -897,7 +900,7 @@ def get_good_combinations():
     # # statistics_all.update(statistics_1w)
     # # statistics_all.update(statistics_1w_rate)
 
-    statistics_all.update(good_ratio_keys) # 945
+    statistics_all.update(good_ratio_keys) # 761
     statistics_all = dict(sorted(statistics_all.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     write_json('../final_zuhe/good_statistics.json', statistics_all)
 
@@ -1128,13 +1131,15 @@ def get_target_date_good_stocks_mul_op(file_path, target_date, gen_signal_func, 
     # print(good_stocks)
     total_price = 0
     final_good_stocks = []
+    total_count = 0
     for stock_info in good_stocks:
         price = stock_info['收盘']
         if stock_info['涨跌幅'] >= -(stock_info['Max_rate'] - 1.0 / price) and price >= 3:
             total_price += price
             final_good_stocks.append(stock_info)
+            total_count += 1
 
-    print('总价值：', total_price)
+    print('总数量:{} 总价值：{}'.format(total_count, total_price))
     end_time = time.time()
     print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
     write_json('../final_zuhe/select/select_{}.json'.format(target_date.strftime('%Y-%m-%d')), final_good_stocks)
@@ -1868,13 +1873,14 @@ def process_file_all(fullname, out_put_file_path, new_index_data_df):
     origin_data_df = gen_full_all_basic_signal(origin_data_df)
     origin_data_df['Buy_Signal'] = True
     back_result_df = backtest_strategy_low_profit(origin_data_df)
-    origin_data_df = origin_data_df.merge(back_result_df, on=['日期'], how='left')
+    origin_data_df = origin_data_df.merge(back_result_df, on=['日期', '名称'], how='left')
     # 将new_index_data_df中的数据合并到origin_data_df中，以日期为key
     # origin_data_df = origin_data_df.merge(new_index_data_df, on=['日期'], how='left')
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
     # 找出origin_data_df中全为
     false_columns = origin_data_df.columns[(origin_data_df == False).all()]
     false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(fullname)))
+    # origin_data_df = clear_other_clo(origin_data_df)
     #将false_columns写入文件
     with open(false_columns_output_filename, 'w') as f:
         f.write('\n'.join(false_columns.tolist()))
@@ -1902,6 +1908,7 @@ def gen_all_back():
         for root, ds, fs in os.walk(file_path):
             for f in fs:
                 fullname = os.path.join(root, f)
+                # process_file_all(fullname, out_put_file_path, new_index_data)
                 pool.apply_async(process_file_all, args=(fullname, out_put_file_path, new_index_data))
         pool.close()
         pool.join()
@@ -1934,15 +1941,15 @@ if __name__ == '__main__':
     # filter_good_zuhe()
 
     # get_good_combinations()
-    # save_and_analyse_all_data_mul('2024-01-16')
+    # save_and_analyse_all_data_mul('2024-01-17')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
     # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
     # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
     # back_range_select_op(start_time='2023-12-25', end_time='2023-12-29')
     # back_range_select_op(start_time='2024-01-02', end_time='2024-01-05')
-    # back_range_select_op(start_time='2024-01-08', end_time='2024-01-12')
-    # back_range_select_op(start_time='2024-01-15', end_time='2024-01-15')
+    # back_range_select_op(start_time='2024-01-15', end_time='2024-01-12')
+    # back_range_select_op(start_time='2024-01-16', end_time='2024-01-16')
     # print(good_data)
 
     # 读取../back/complex/all_df.csv
@@ -1961,7 +1968,7 @@ if __name__ == '__main__':
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
-    # strategy('../daily_data_exclude_new_can_buy_with_back/东方电子_000682.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new_can_buy_with_back/冀凯股份_002691.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # # statistics = read_json('../back/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json') # 大小 2126501

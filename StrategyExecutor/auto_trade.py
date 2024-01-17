@@ -65,7 +65,7 @@ if __name__ == '__main__':
     # time.sleep(5)
     auto.bind_client()
     auto.init_buy()
-    amount = 200
+    amount = 100
     exist_codes = []
 
     target_date = datetime.now().strftime('%Y-%m-%d')

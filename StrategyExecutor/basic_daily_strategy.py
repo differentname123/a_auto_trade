@@ -26,6 +26,21 @@ def gen_multiple_daily_buy_signal_yes(data):
     new_data = pd.DataFrame(new_columns)
     return pd.concat([data, new_data], axis=1)
 
+def clear_other_clo(data, need_columns=None):
+    """
+    清楚多余的列
+    :param data:
+    :return:
+    """
+    if need_columns is None:
+        need_columns = ['日期', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率', 'Max_rate', '名称', 'Buy Date', 'Days Held']
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    need_columns.extend(signal_columns)
+    # 获取data中的列和need_columns的交集
+    need_columns = list(set(need_columns).intersection(set(data.columns)))
+    # 找到data中的列比
+    return data[need_columns]
+
 
 def gen_multiple_daily_buy_signal_fix(data, key, value_list):
     """
@@ -107,6 +122,40 @@ def gen_multiple_daily_buy_signal_compare(data, key_list):
                 # 产生key相较于key2的信号
                 column_name = f'{key}_大于昨日_{key2}_signal'
                 data[column_name] = data[key] >= data[key2].shift(1)
+    return data
+
+def gen_multiple_daily_buy_signal_cross(data, key_list1, key_list2):
+    """
+    产生上穿信号
+    :param ma_list:
+    :param data:
+    :return:
+    """
+    for key in key_list1:
+        # 再遍历后面的key_list
+        for key2 in key_list2:
+            if key != key2:
+                # 产生key相较于key2的信号
+                column_name = f'{key}_上穿_{key2}_signal'
+                data[column_name] = (data[key] >= data[key2]) & (data[key].shift(1) < data[key2].shift(1))
+    return data
+
+def gen_multiple_daily_buy_signal_compare_today(data, key_list):
+    """
+    产生公共结构的key相较于昨日的买入信号
+    列如:
+        涨跌幅大于或者小于固定的值1 3 5等，或者是大于或者小于5 10 20平均数的值
+    :param ma_list:
+    :param data:
+    :return:
+    """
+    for key in key_list:
+        # 再遍历后面的key_list
+        for key2 in key_list:
+            if key != key2:
+                # 产生key相较于key2的信号
+                column_name = f'{key}_大于_{key2}_signal'
+                data[column_name] = data[key] >= data[key2]
     return data
 
 def gen_multiple_daily_buy_signal_max_min(data, key, max_min_list):
@@ -294,6 +343,90 @@ def gen_basic_daily_buy_signal_12(data):
     data = gen_multiple_daily_buy_signal_max_min(data, '成交额', [5, 10, 20])
     data['成交_额度_大于昨日两倍_signal'] = data['成交额'] >= data['成交额'].shift(1) * 2
     data['成交_额度_小于昨日一半_signal'] = data['成交额'] <= data['成交额'].shift(1) / 2
+    return data
+
+def gen_basic_daily_buy_signal_13(data):
+    """
+    RSI相关买入信号,另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+    data['RSI'] = talib.RSI(data['收盘'], timeperiod=14)
+    data = gen_multiple_daily_buy_signal_fix(data, 'RSI', [95])
+    data = gen_multiple_daily_buy_signal_ma(data, 'RSI', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'RSI', [5, 10])
+    return data
+
+def gen_basic_daily_buy_signal_14(data):
+    """
+    RSI相关买入信号,另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+    data['VWAP'] = np.cumsum(data['成交量'] * data['收盘']) / np.cumsum(data['成交量'])
+    data = gen_multiple_daily_buy_signal_fix(data, 'VWAP', [6, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'VWAP', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'VWAP', [5, 10])
+    return data
+
+def gen_basic_daily_buy_signal_15(data):
+    """
+    boll相关买入信号,另一个是均线，还有新低或者新高
+    :param data:
+    :return:
+    """
+    data['Bollinger_Upper'], data['Bollinger_Middle'], data['Bollinger_Lower'] = talib.BBANDS(data['收盘'],
+                                                                                              timeperiod=20)
+    data = gen_multiple_daily_buy_signal_cross(data, ['收盘', '最高', '最低'], ['Bollinger_Upper', 'Bollinger_Middle', 'Bollinger_Lower'])
+    return data
+
+def gen_basic_daily_buy_signal_16(data):
+    data['Momentum'] = data['收盘'] - data['收盘'].shift(14)
+    data = gen_multiple_daily_buy_signal_ma(data, 'Momentum', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'Momentum', [5, 10])
+    return data
+
+def gen_basic_daily_buy_signal_17(data):
+    data['Stochastic_Oscillator'], data['Stochastic_Oscillator_other'] = talib.STOCH(data['最高'], data['最低'],
+                                                                                      data['收盘'], fastk_period=14,
+                                                                                      slowk_period=3, slowd_period=3)
+    # 计算Williams %R
+    data['WR10'] = abs(talib.WILLR(data['最高'], data['最低'], data['收盘'], timeperiod=5))
+
+    # 计算ATR
+    data['ATR'] = talib.ATR(data['最高'], data['最低'], data['收盘'], timeperiod=14)
+
+    # 计算ADX
+    data['ADX'] = talib.ADX(data['最高'], data['最低'], data['收盘'], timeperiod=14)
+
+    # 计算CCI
+    data['CCI'] = talib.CCI(data['最高'], data['最低'], data['收盘'], timeperiod=14)
+
+    # 计算Parabolic SAR
+    data['Parabolic_SAR'] = talib.SAR(data['最高'], data['最低'], acceleration=0.02, maximum=0.2)
+
+    # 计算OBV
+    data['OBV'] = talib.OBV(data['收盘'], data['成交量'])
+
+    data = gen_multiple_daily_buy_signal_cross(data, ['Stochastic_Oscillator'], ['Stochastic_Oscillator_other'])
+    data = gen_multiple_daily_buy_signal_ma(data, 'Stochastic_Oscillator', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'Stochastic_Oscillator', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'Stochastic_Oscillator_other', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'Stochastic_Oscillator_other', [5, 10])
+
+
+    data = gen_multiple_daily_buy_signal_ma(data, 'WR10', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'WR10', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'ATR', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'ATR', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'ADX', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'ADX', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'CCI', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'CCI', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'Parabolic_SAR', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'Parabolic_SAR', [5, 10])
+    data = gen_multiple_daily_buy_signal_ma(data, 'OBV', [5, 10])
+    data = gen_multiple_daily_buy_signal_max_min(data, 'OBV', [5, 10])
     return data
 
 def gen_basic_daily_buy_signal_gen(data):
