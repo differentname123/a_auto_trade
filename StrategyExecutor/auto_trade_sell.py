@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import math
 import multiprocessing
 from datetime import datetime
 
@@ -6,6 +7,7 @@ import json
 import os
 import traceback
 
+from InfoCollector.save_all import get_price
 from StrategyExecutor.full_zehe import save_and_analyse_all_data_mul
 from thsauto import ThsAuto
 
@@ -56,6 +58,16 @@ def process_stock_data(file_path, auto, exist_codes, amount):
                 traceback.print_exc()
                 print(line)
 
+def get_sell_price(buy_price):
+    """
+    根据买入价格，返回卖出价格
+    卖出价格为买入价格的1.0025倍，向上保留两位小数
+    :param buy_price:
+    :return:
+    """
+    sell_price = buy_price * 1.0025
+    sell_price = math.ceil(sell_price * 100) / 100
+    return sell_price
 
 if __name__ == '__main__':
     auto = ThsAuto()  # 连接客户端
@@ -71,10 +83,26 @@ if __name__ == '__main__':
     print(data)
     for detail_data in data['data']:
         stock_no = detail_data['证券代码']
-        amount = detail_data['可用余额']
-        price = detail_data['price']
-        auto.sell(stock_no=detail_data['stock_no'], amount=detail_data['amount'], price=detail_data['price'])
-        auto.cancel_all(entrust_no=detail_data['entrust_no'])
+        try:
+            amount = int(detail_data['可用余额'])
+        except Exception:
+            amount = 100
+        days_held = detail_data['持股天数']
+        # 将days_held转换为整数，如果失败那就是1
+        try:
+            days_held = int(days_held)
+        except Exception:
+            days_held = 1
+
+        price = float(detail_data['市价'])
+        daily_data = get_price(stock_no, '20240101', '20291021', period='daily')
+        if daily_data is not None:
+            # daily_data是dataFrame类型的数据，获取daily_data中最近days_held天的数据，并且计算收盘价的均值
+            daily_data = daily_data.tail(days_held)
+            price = daily_data['收盘'].mean()
+        price = get_sell_price(price)
+
+        auto.sell(stock_no=stock_no, amount=amount, price=price)
 
 
 

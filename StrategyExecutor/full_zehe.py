@@ -1942,7 +1942,7 @@ if __name__ == '__main__':
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-17')
-    # get_newest_stock()
+    get_newest_stock()
     # back_range_select_op(start_time='2023-12-04', end_time='2023-12-08')
     # back_range_select_op(start_time='2023-12-11', end_time='2023-12-15')
     # back_range_select_op(start_time='2023-12-18', end_time='2023-12-22')
