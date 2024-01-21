@@ -83,6 +83,8 @@ if __name__ == '__main__':
     print(data)
     for detail_data in data['data']:
         stock_no = detail_data['证券代码']
+        # if stock_no != '603235':
+        #     continue
         try:
             amount = int(detail_data['可用余额'])
         except Exception:
@@ -100,8 +102,12 @@ if __name__ == '__main__':
             if daily_data is not None:
                 # daily_data是dataFrame类型的数据，获取daily_data中最近days_held天的数据，并且计算收盘价的均值
                 daily_data = daily_data.tail(days_held)
+                # # 去除daily_data中最后一个数据
+                # daily_data = daily_data[:-1]
                 price = daily_data['收盘'].mean()
             price = get_sell_price(price)
+            # 将price保留两位小数
+            price = round(price, 3)
 
             auto.sell(stock_no=stock_no, amount=amount, price=price)
 

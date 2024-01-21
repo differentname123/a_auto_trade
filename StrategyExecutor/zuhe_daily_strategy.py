@@ -295,7 +295,7 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
         write_json(file_name, result_df_dict)
 
 
-def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
+def gen_all_signal_processing_good(args, threshold_day=1, is_skip=True):
     """
     Generate all signals based on final_combinations.
     Optimized to reduce file operations and improve efficiency in loops.
@@ -344,17 +344,18 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
             if processed_result:
                 result_df_dict[combination_key] = processed_result
         # aother_result_df_dict.update(result_df_dict)
-
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        # 写入文件
         write_json(file_name, result_df_dict)
         # write_json(aother_file_name, aother_result_df_dict)
         end_time = time.time()
         print(
             f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
+
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        # 写入文件
+        pass
 
 def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
     """
@@ -613,7 +614,8 @@ def create_empty_result():
             'one_befor_year_count': 0,
             'two_befor_year_count': 0,
             'three_befor_year_count_thread': 0,
-            'three_befor_year_count': 0}
+            'three_befor_year_count': 0,
+            'all_date': []}
 
 
 def gen_all_signal_processing(args, threshold_day=1, is_skip=True):
@@ -728,7 +730,8 @@ def process_results_with_year(results_df, threshold_day):
             'two_befor_year_count': 0,
             'three_befor_year_count': 0,
             'three_befor_year_count_thread':0,
-            'total_days_held': 0
+            'total_days_held': 0,
+            'all_date': []
         }
     # 统计'Buy Date'大于三年前的数据
     three_year = datetime.datetime.now() - relativedelta(years=2)
@@ -749,7 +752,10 @@ def process_results_with_year(results_df, threshold_day):
     result_df = result[result['Days Held'] > threshold_day]
     result_shape = result.shape[0]
     three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
-
+    # 先将result['Buy Date']变成字符串类型
+    result['Buy Date'] = result['Buy Date'].astype(str)
+    # 获取results_df的所有日期
+    all_date = result['Buy Date'].tolist()
     return {
         'trade_count': result_shape,
         'total_profit': round(Total_Profit, 4),
@@ -759,7 +765,8 @@ def process_results_with_year(results_df, threshold_day):
         'two_befor_year_count': two_befor_year_count,
         'three_befor_year_count': three_befor_year_count,
         'three_befor_year_count_thread':three_befor_year_count_thread,
-        'total_days_held': int(total_days_held)
+        'total_days_held': int(total_days_held),
+        'all_date': all_date
     }
 
 
@@ -1091,7 +1098,7 @@ def process_combinations_good(result_combination_list, file_path, gen_signal_fun
     回测最终好指标的函数
     """
     # 按照一定数量分割list
-    split_size = 100000
+    split_size = 1000000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
@@ -1447,8 +1454,10 @@ def statistics_zuhe_good(file_path, target_key='all'):
                         result[key]['three_befor_year_count'] += value['three_befor_year_count']
                         result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
                         result[key]['total_days_held'] += value['total_days_held']
+                        result[key]['all_date'].extend(value['all_date'])
                     else:
                         result[key] = value
+
     else:
         sublist_list = read_json('../final_zuhe/sublist.json')
         sublist_set = set()
@@ -1476,14 +1485,22 @@ def statistics_zuhe_good(file_path, target_key='all'):
                                         result[key]['three_befor_year_count_thread'] = 0
                                     result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
                                     result[key]['total_days_held'] += value['total_days_held']
+                                    result[key]['all_date'].extend(value['all_date'])
                                 else:
                                     result[key] = value
+                                # 将result[key]['all_date']去重
+                                result[key]['all_date'] = list(set(result[key]['all_date']))
                             except Exception as e:
                                 pass
                 except Exception as e:
                     pass
     # 再计算result每一个key的平均值
     for key, value in result.items():
+        try:
+            value['all_date'] = list(set(value['all_date']))
+        except Exception as e:
+            print(value)
+            raise
         if value['trade_count'] != 0:
             if 'total_cost' not in value:
                 value['average_1w_profit'] = 0
@@ -1496,6 +1513,11 @@ def statistics_zuhe_good(file_path, target_key='all'):
             value['ratio'] = value['size_of_result_df'] / value['trade_count']
             value['average_days_held'] = value['total_days_held'] / value['trade_count']
             value['average_profit'] = value['total_profit'] / value['trade_count']
+            value['date_count'] = len(value['all_date'])
+            value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
+            # 找到value['all_date']中的起始和结束时间
+            value['start_date'] = min(value['all_date'])
+            value['end_date'] = max(value['all_date'])
 
             # 将value['ratio']保留4位小数
             value['ratio'] = round(value['ratio'], 4)
@@ -1522,6 +1544,12 @@ def statistics_zuhe_good(file_path, target_key='all'):
             value['two_befor_year_rate'] = 0
             value['three_befor_year_rate'] = 0
             value['three_befor_year_count_thread_ratio'] =1
+            value['date_count'] = 0
+            value['date_ratio'] = 0
+            # 找到value['all_date']中的起始和结束时间
+            value['start_date'] = "1970"
+            value['end_date'] = "2100"
+        value['all_date'] = []
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
     # 将result写入file_path上一级文件
@@ -1542,8 +1570,10 @@ def statistics_zuhe_good(file_path, target_key='all'):
     statistics_all.update(result)
     statistics_all_backup = '../back/gen/statistics_all_backup.json'
     if os.path.exists(statistics_all_backup):
-        os.remove(statistics_all_backup)
-    write_json(statistics_all_backup, statistics_all)
+        old_data = read_json(statistics_all_backup)
+        if len(old_data) < len(statistics_all):
+            os.remove(statistics_all_backup)
+            write_json(statistics_all_backup, statistics_all)
 
     # 将statistics_all.json写入文件
     write_json('../back/gen/statistics_all.json', statistics_all)

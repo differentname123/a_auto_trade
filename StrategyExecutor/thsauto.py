@@ -485,35 +485,6 @@ class ThsAuto:
             hot_key(['enter'])
             return {'code': 0, 'status': 'success', 'msg': u'撤单成功'}
 
-        data = None
-        retry = 0
-        while not data and retry < retry_time:
-            retry += 1
-            time.sleep(sleep_time)
-            data = get_clipboard_data()
-        if data:
-            entrusts = parse_table(data)
-            find = None
-            for i, entrust in enumerate(entrusts):
-                if str(entrust['合同编号']) == str(entrust_no):
-                    find = i
-                    break
-            if find is None:
-                return {'code': 1, 'status': 'failed', 'msg': u'没找到指定订单'}
-            left, top, right, bottom = win32gui.GetWindowRect(ctrl)
-            x = 50 + left
-            y = 30 + 16 * find + top
-            win32api.SetCursorPos((x, y))
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(sleep_time)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(sleep_time)
-            hot_key(['enter'])
-            return {'code': 0, 'status': 'succeed'}
-        return {'code': 1, 'status': 'failed'}
-
     def cancel(self, entrust_no):
         self.switch_to_normal()
         hot_key(['F3'])

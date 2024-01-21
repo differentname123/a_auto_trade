@@ -48,7 +48,10 @@ def process_stock_data(file_path, auto, exist_codes, amount):
         for line in file.readlines():
             try:
                 stock_no, price = line.strip().split(',')
+                # 将price转换为float类型并且保留两位小数
                 price = float(price)
+                # 将price保留两位小数
+                price = round(price, 2)
                 if stock_no not in exist_codes:
                     exist_codes.append(stock_no)
                     result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)

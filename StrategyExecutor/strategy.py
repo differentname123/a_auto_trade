@@ -249,6 +249,7 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
     # 将three_year只保留到年份，不要月和日
     two_befor_year = two_year.year
     one_befor_year = datetime.datetime.now().year
+    all_date = []
     try:
         all_df = pd.concat(all_dfs, ignore_index=True)
         result_df = all_df[all_df['Days Held'] > threshold_day]
@@ -261,6 +262,11 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
         # 将all_df保存到文件中，尽量一个数据都在同一行
         all_df.to_csv(os.path.join(output_file_path, 'all_df.csv'), index=False)
+        # # 将all_df['Buy Date']转为字符串
+        # all_df['Buy Date'] = all_df['Buy Date'].astype(str)
+        all_date = all_df['Buy Date'].tolist()
+        # 将all_date变成set
+        all_date = set(all_date)
     except Exception as e:
         print(e)
 
@@ -290,6 +296,12 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"three_befor_year_count_thread_ratio: {three_befor_year_count_thread / three_befor_year_count if three_befor_year_count > 0 else 0}\n")
         f.write(f"two_befor_year_rate: {two_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
+
+
+        f.write(f"date_count: {len(all_date)}\n")
+        f.write(f"date_ratio: {round(len(all_date) / trade_count, 4)}\n")
+        f.write(f"start_date: {min(all_date)}\n")
+        f.write(f"end_date: {max(all_date)}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))
@@ -320,6 +332,10 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
         f.write(f"one_befor_year_rate: {one_befor_year_count / trade_count if trade_count > 0 else 0}\n")
         f.write(f"three_befor_year_count_thread: {three_befor_year_count_thread}\n")
         f.write(f"three_befor_year_count_thread_ratio: {three_befor_year_count_thread / three_befor_year_count if three_befor_year_count > 0 else 0}\n")
+        f.write(f"date_count: {len(all_date)}\n")
+        f.write(f"date_ratio: {round(len(all_date) / trade_count, 4)}\n")
+        f.write(f"start_date: {min(all_date)}\n")
+        f.write(f"end_date: {max(all_date)}\n")
         # Save the source code of gen_signal_func
         f.write("Source code for 'gen_signal_func':\n")
         f.write(inspect.getsource(gen_signal_func))

@@ -976,17 +976,18 @@ def mix(data):
 
     data_1 = data.copy()
     # data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1,
-"收盘_小于_20_日均线_signal:成交额_小于_10_日均线_signal:换手率_小于_10_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:股价_非跌停_signal:最高_小于_10_日均线_signal:最低_大于_20_固定区间_signal:涨跌幅_小于_5_日均线_signal:振幅_5_到_10_固定区间_signal:实体rate_大于_5_日均线_signal_yes:最低_5日_小极值_signal_yes:振幅_5日_小极值_signal_yes"               .split(':'))
+    # gen_signal(data_1,
+    #            "收盘_小于_10_日均线_signal:成交额_小于_10_日均线_signal:换手率_0.5_到_5_固定区间_signal:换手率_小于_10_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:实体rate_大于_5_日均线_signal:股价_非跌停_signal:开盘_5日_小极值_signal:最高_5日_小极值_signal:最低_大于_20_日均线_signal:涨跌幅_小于_20_日均线_signal:收盘_10日_小极值_signal_yes:BAR_小于_20_日均线_signal_yes:成交额_小于_10_日均线_signal_yes:成交额_小于_20_日均线_signal_yes:成交额_20日_小极值_signal_yes:开盘_小于_10_日均线_signal_yes:最低_5日_小极值_signal_yes"
+    #
+    #
+    #            .split(':'))
+    data_1['Buy_Signal'] = False
+    target_date = pd.to_datetime('2024-01-16')
+    # 将日期为target_date的Buy_Signal设置为True
+    data_1.loc[data_1['日期'] == target_date, 'Buy_Signal'] = True
 
-    # # 找到日期为1996-05-31的数据
-    # target_date = pd.to_datetime('2023-12-05')
-    # target_data = data_1[data_1['日期'] == target_date]
-    # for comb in comb_list:
-    #     print(comb + ' : ' + str(target_data[comb].values[0]))
     data['Buy_Signal'] = data_1['Buy_Signal']
-    # target_date = pd.to_datetime('2023-12-04')
-    # target_data = data_1[data_1['日期'] == target_date]
+
     return data
 
 def mix_back(data):

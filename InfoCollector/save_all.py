@@ -135,17 +135,18 @@ def find_st_periods_strict(announcements):
     """
     st_periods = []
     st_start = None
+    st_end = None
+    # 先将announcement['post_publish_time']变成时间格式然后announcements按照时间排序
+    announcements = sorted(announcements, key=lambda x: datetime.strptime(x['post_publish_time'], '%Y-%m-%d %H:%M:%S'))
 
-    for announcement in sorted(announcements, key=lambda x: x['post_publish_time']):
+    for announcement in announcements:
         title = announcement['post_title']
         date = datetime.strptime(announcement['post_publish_time'], '%Y-%m-%d %H:%M:%S')
-
         # Mark the start of an ST period
-        if ('ST' in title or ('实施' in title and '风险警示' in title)) and not st_start:
+        if ('ST' in title or ('风险警示' in title)) and not st_start and st_end != date:
             st_start = date
-
         # Mark the end of an ST period
-        elif ('撤销' in title and st_start and '警示' in title) and '申请' not in title and '继续' not in title and '实施' not in title:
+        elif ('撤' in title and st_start) and '申请' not in title and '继续' not in title and '实施' not in title:
             st_end = date
             st_start = datetime(st_start.year, st_start.month, st_start.day)
             # end保留到日
