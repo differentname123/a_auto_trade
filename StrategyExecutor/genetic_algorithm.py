@@ -473,7 +473,7 @@ if __name__ == '__main__':
     # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 10000  # 种群大小
+    population_size = 5000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 

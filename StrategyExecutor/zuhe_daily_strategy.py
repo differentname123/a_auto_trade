@@ -295,7 +295,7 @@ def gen_all_signal(data, final_combinations, backtest_func=backtest_strategy_low
         write_json(file_name, result_df_dict)
 
 
-def gen_all_signal_processing_good(args, threshold_day=1, is_skip=True):
+def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
     """
     Generate all signals based on final_combinations.
     Optimized to reduce file operations and improve efficiency in loops.
@@ -306,10 +306,12 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=True):
         full_name, final_combinations, gen_signal_func, backtest_func = args
 
         data = load_data(full_name)
-
+        # 获取full_name这个路径的文件名，去掉后缀，再去掉_后面的内容，得到名称
+        mingcheng = os.path.basename(full_name).split('.')[0].split('_')[0]
+        # 如果data长度小于100，不生成信号
         # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
-        file_name = Path('../final_zuhe/zuhe') / f"{data['名称'].iloc[0]}.json"
+        file_name = Path('../final_zuhe/zuhe') / f"{mingcheng}.json"
         # aother_file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
@@ -366,10 +368,10 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
     try:
         zero_combination = set()  # Using a set for faster lookups
         full_name, final_combinations, gen_signal_func, backtest_func = args
-
+        mingcheng = full_name.split('/')[-1].split('.')[0].split('_')[0]
         data = load_data(full_name)
         data = gen_signal_func(data)
-        file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
+        file_name = Path('../back/gen/zuhe') / f"{mingcheng}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         file_name.parent.mkdir(parents=True, exist_ok=True)
 

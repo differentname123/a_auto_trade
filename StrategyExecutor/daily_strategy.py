@@ -765,45 +765,77 @@ def gen_daily_buy_signal_25(data):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate']) & (XGG | (XG & (LB > 2.2) & (close > MA5 * 1.02) & (close < MA5 * 1.15)))
     return data
 
+
 def gen_daily_buy_signal_26(data):
-    """
-    超级短线选股策略
-    timestamp: 20231203205742
-    trade_count: 24977
-    total_profit: 189286.75811711114
-    total_cost: 33135064.24188291
-    size of result_df: 1799
-    ratio: 0.07202626416302998
-    average days_held: 1.2541538215157946
-    average profit: 7.5784424917768805
-    average 1w profit: 57.12581594390018
-    :param data:
-    :return:
-    """
+    # 超级短线选股策略
+    # 计算过去20天最高价的最大值，并延迟一天
     X_2 = data['最高'].rolling(window=20).max().shift(1)
+
+    # 计算过去10天最低价的最小值，并延迟一天
     X_3 = data['最低'].rolling(window=10).min().shift(1)
+
+    # 检查当天最低价是否高于X_3
     X_4 = data['最低'] > X_3
+
+    # 检查当天最高价是否低于X_2
     X_5 = data['最高'] < X_2
+
+    # 检查索引（可能是日期）是否大于30
     X_6 = data.index.to_series().apply(lambda x: x > 30)
-    X_7 = np.maximum(np.maximum(data['最高'] - data['最低'], abs(data['收盘'].shift(1) - data['最高'])), abs(data['收盘'].shift(1) - data['最低']))
+
+    # 计算当天的价格范围，包括当天的最高价与最低价之差，以及与前一天收盘价的最高和最低差值
+    X_7 = np.maximum(np.maximum(data['最高'] - data['最低'], abs(data['收盘'].shift(1) - data['最高'])),
+                     abs(data['收盘'].shift(1) - data['最低']))
+
+    # 计算X_7的14天移动平均
     X_8 = X_7.rolling(window=14).mean()
+
+    # 计算当天最高价和最低价的平均值
     X_9 = ((data['最高'] + data['最低']) / 2).rolling(window=1).mean()
+
+    # 计算X_7的2天平均
     X_10 = X_7.rolling(window=2).mean()
+
+    # X_9和X_10的和
     X_11 = X_9 + X_10
+
+    # X_9和X_10的差
     X_12 = X_9 - X_10
+
+    # 检查当天收盘价是否低于过去3天中X_12的最大值
     X_13 = data['收盘'] < X_12.rolling(window=3).max()
-    X_14 = (data['收盘'] < data['收盘'].shift(1)) & (data['收盘'] < data['开盘']) & (data['收盘'] != data['最低']) & (data['收盘'] > data['收盘'].rolling(window=18).mean())
+
+    # 检查当天收盘价是否低于前一天收盘价，是否低于开盘价，是否不是当天最低价，但高于过去18天收盘价的平均值
+    X_14 = (data['收盘'] < data['收盘'].shift(1)) & (data['收盘'] < data['开盘']) & (data['收盘'] != data['最低']) & (
+                data['收盘'] > data['收盘'].rolling(window=18).mean())
+
+    # 检查20天收盘价平均值是否呈上升趋势
     X_15 = data['收盘'].rolling(window=20).mean() > data['收盘'].rolling(window=20).mean().shift(1)
+
+    # 检查当天收盘价是否低于过去3天最低价的最小值
     X_16 = data['收盘'] < data['最低'].rolling(window=3).min().shift(1)
+
+    # 检查X_8和X_7是否都呈上升趋势
     X_17 = (X_8 > X_8.shift(1)) & (X_7 > X_7.shift(1))
+
+    # 计算当天收盘价在当天价格范围内的相对位置
     X_18 = (data['收盘'] - data['最低']) / (data['最高'] - data['最低'])
+
+    # 检查X_18是否小于0.3
     X_19 = X_18 < 0.3
+
+    # 计算当天最高价在当天价格范围内的相对位置
     X_20 = (data['最高'] - data['开盘']) / (data['最高'] - data['最低'])
+
+    # 检查X_20是否小于0.4
     X_21 = X_20 < 0.4
 
+    # 综合所有条件，更新Buy_Signal列
     data['Buy_Signal'] &= X_14 & X_15 & X_16 & X_17 & X_19 & X_13 & X_4 & X_5 & X_6
 
+    # 返回修改后的DataFrame
     return data
+
 
 def gen_daily_buy_signal_27(data):
     """
@@ -977,12 +1009,14 @@ def mix(data):
     data_1 = data.copy()
     # data_1 = gen_full_all_basic_signal(data_1)
     # gen_signal(data_1,
-    #            "收盘_小于_10_日均线_signal:成交额_小于_10_日均线_signal:换手率_0.5_到_5_固定区间_signal:换手率_小于_10_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:实体rate_大于_5_日均线_signal:股价_非跌停_signal:开盘_5日_小极值_signal:最高_5日_小极值_signal:最低_大于_20_日均线_signal:涨跌幅_小于_20_日均线_signal:收盘_10日_小极值_signal_yes:BAR_小于_20_日均线_signal_yes:成交额_小于_10_日均线_signal_yes:成交额_小于_20_日均线_signal_yes:成交额_20日_小极值_signal_yes:开盘_小于_10_日均线_signal_yes:最低_5日_小极值_signal_yes"
+    #            "收盘_小于_20_日均线_signal:收盘_5日_小极值_signal:收盘_10日_小极值_signal:成交额_小于_5_日均线_signal:实体rate_0.1_到_0.5_固定区间_signal:股价_非跌停_signal:开盘_10日_小极值_signal:最高_小于_5_日均线_signal:最低_小于_5_日均线_signal:最低_5日_小极值_signal:涨跌幅_小于_10_日均线_signal:最高_大于昨日_收盘_signal_yes:成交额_20日_小极值_signal_yes:实体rate_大于_20_日均线_signal_yes:最低_小于_5_日均线_signal_yes:最低_小于_20_日均线_signal_yes:振幅_大于_5_日均线_signal_yes"
+    #
+    #
     #
     #
     #            .split(':'))
     data_1['Buy_Signal'] = False
-    target_date = pd.to_datetime('2024-01-16')
+    target_date = pd.to_datetime('2024-01-19')
     # 将日期为target_date的Buy_Signal设置为True
     data_1.loc[data_1['日期'] == target_date, 'Buy_Signal'] = True
 

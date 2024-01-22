@@ -842,21 +842,31 @@ def find_st_periods_strict(announcements):
 
     return st_periods
 
+def get_good_statistic(date):
+    bad_statistics = {}
+    bad_output_file_path = '../final_zuhe/back/' + date + 'bad_back.json'
+    statistics = read_json(bad_output_file_path)
+    for k, v in statistics.items():
+        bad_statistics.update(v['satisfied_combinations'])
+    return bad_statistics
 
 def get_good_combinations():
     """
     获取表现好的组合
     :return:
     """
+    date = '2024-01-17'
     statistics = read_json('../final_zuhe/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json')
-    # statistics = read_json('../final_zuhe/good_statistics_0.1.json')
+    # statistics = read_json('../final_zuhe/good_statistics.json')
+    bad_statistics = get_good_statistic(date)
+    bad_statistics = {}
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.1) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.1) and '指数' not in k and v['date_count'] > 0 and v['trade_count'] > 10000}  # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.1) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.1) and '指数' not in k and v['date_count'] > 50 and v['trade_count'] > 0 and k not in bad_statistics.keys()}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if False
-                       or (v['ratio'] <= 0.1 and v['three_befor_year_count_thread_ratio'] <= 0.1)
+                       or (v['ratio'] <= 0.08 and v['average_days_held'] <= 1.1 and v['average_1w_profit'] > 20)
                        # or (v['ratio'] <= 0.05 and (v['three_befor_year_count_thread_ratio'] <= 0.05) and v['three_befor_year_count'] > 0 and v['trade_count'] > 500)
                        # or (v['ratio'] == 0 and v['trade_count'] > 20)
                        # or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20)
@@ -936,21 +946,21 @@ def process_file_op(file_path, target_date, good_keys, good_statistics, gen_sign
     if target_data.empty:
         return None
     satisfied_combinations = dict()
-    for good_key in final_combinations:
-        good_key_str = ':'.join(good_key)
-        signal_data = gen_signal(target_data, good_key)
-        if signal_data['Buy_Signal'].values[0]:
-            satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+    # for good_key in final_combinations:
+    #     good_key_str = ':'.join(good_key)
+    #     signal_data = gen_signal(target_data, good_key)
+    #     if signal_data['Buy_Signal'].values[0]:
+    #         satisfied_combinations[good_key_str] = good_statistics[good_key_str]
 
-    # stock_data = origin_data.copy()
-    # good_key = "超级短线_26"
-    # signal_data = gen_daily_buy_signal_26(stock_data)
-    # target_data = signal_data[signal_data['日期'] == pd.to_datetime(target_date)]
-    # if target_data['Buy_Signal'].values[0]:
-    #     satisfied_combinations[good_key] = {'ratio': 0.0721, 'three_befor_year_count_thread_ratio': 0.0755,
-    #                                         'three_befor_year_rate': 0.244, 'than_1_average_days_held': 4.4,
-    #                                         'average_1w_profit': 56.929, 'average_days_held': 1.2556,
-    #                                         'three_befor_year_count': 6117, 'trade_count': 25057, '1w_rate': 0.0}
+    stock_data = origin_data.copy()
+    good_key = "超级短线_26"
+    signal_data = gen_daily_buy_signal_26(stock_data)
+    target_data = signal_data[signal_data['日期'] == pd.to_datetime(target_date)]
+    if target_data['Buy_Signal'].values[0]:
+        satisfied_combinations[good_key] = {'ratio': 0.0721, 'three_befor_year_count_thread_ratio': 0.0755,
+                                            'three_befor_year_rate': 0.244, 'than_1_average_days_held': 4.4,
+                                            'average_1w_profit': 56.929, 'average_days_held': 1.2556,
+                                            'three_befor_year_count': 6117, 'trade_count': 25057, '1w_rate': 0.0}
 
     if satisfied_combinations:
         return {'stock_name': os.path.basename(file_path).split('.')[0],
@@ -1300,6 +1310,34 @@ def find_threshold_close(data, index, step, max_rate, gen_signal_func, search_di
 
     return threshold_close
 
+def find_threshold_close_target_date(data, index, step, max_rate, gen_signal_func, search_direction, now_status):
+    """ 寻找阈值收盘价 """
+    original_close = data.at[index, '收盘']
+    previous_close = data.at[index - 1, '收盘'] if index > 0 else None
+    temp_close = original_close
+    threshold_close = None
+    data['Buy_Signal'] = True
+    if previous_close is None:
+        return threshold_close
+    try:
+        while 0 < temp_close <= original_close + max_rate * previous_close / 100:
+            sub_data = data[max(0, index - 100):index + 1].copy()
+            updated_change_rate = adjust_price_data(sub_data, index, temp_close, previous_close)
+
+            if abs(updated_change_rate) > max_rate:
+                break
+
+            if now_status != gen_signal_func(sub_data).loc[sub_data['日期'] == sub_data.at[index, '日期'], 'Buy_Signal'].iloc[0]:
+                threshold_close = temp_close
+                break
+
+            temp_close += step * search_direction
+    except Exception as e:
+        traceback.print_exc()
+        print(data)
+
+    return threshold_close
+
 
 def get_threshold_close(data, gen_signal_func=gen_daily_buy_signal_26, step=0.01):
     """
@@ -1328,6 +1366,36 @@ def get_threshold_close(data, gen_signal_func=gen_daily_buy_signal_26, step=0.01
         buy_data.at[index, 'threshold_close_down'] = threshold_close_down
 
     return buy_data
+
+def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_signal_26, step=0.01):
+    """
+    获取data生成买入信号的收盘价阈值
+    :param data: DataFrame, 包含股票数据
+    :param gen_signal_func: 用于生成买入信号的函数
+    :param step: 调整步长，默认为0.01
+    :return: buy_data DataFrame，包含阈值收盘价
+    """
+    signal_data = gen_signal_func(data)
+    target_data = signal_data[signal_data['日期'] == date]
+
+
+
+    if target_data.empty:
+        return target_data
+    index = target_data.index[0]
+    now_status = target_data['Buy_Signal'].values[0]
+    # 向上和向下寻找阈值
+    Max_rate = target_data['Max_rate'].values[0]
+    # 将Max_rate转换为int
+    Max_rate = int(Max_rate)
+    threshold_close_up = find_threshold_close_target_date(data, index, step, Max_rate, gen_signal_func, 1, now_status)
+    threshold_close_down = find_threshold_close_target_date(data, index, -step, Max_rate, gen_signal_func, 1, now_status)
+
+    # 记录阈值收盘价
+    target_data.at[index, 'threshold_close_up'] = threshold_close_up
+    target_data.at[index, 'threshold_close_down'] = threshold_close_down
+
+    return target_data
 
 
 def parse_row(row):
@@ -1790,7 +1858,7 @@ def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
         all_df.to_csv(out_put_file_path, index=False)
         return all_df
 
-def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, gen_signal_func=gen_full_all_basic_signal):
+def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
     """
     拉取并且分析股票数据
     :param stock_data:
@@ -1800,8 +1868,7 @@ def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys
 
     code = stock_data['代码']
     name = stock_data['名称'].replace('*', '')
-    if code not in exclude_code:
-        # code = '002962'
+    if code not in exclude_code or need_skip:
         # 开始计时
         start = time.time()
         price_data = get_price(code, '20230101', '20291021', period='daily')
@@ -1830,16 +1897,27 @@ def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys
             if target_data['涨跌幅'].values[0] <= -(target_data['Max_rate'].values[0] - 1.0 / price) or price < 3:
                 return None
             satisfied_combinations = dict()
-            for good_key in final_combinations:
-                good_key_str = ':'.join(good_key)
-                signal_data = gen_signal(target_data, good_key)
-                if signal_data['Buy_Signal'].values[0]:
-                    satisfied_combinations[good_key_str] = good_statistics[good_key_str]
-                    end = time.time()
-                    # 将code增量写入output_file_path，注意这个文件可能会被多个线程同时写入
-                    with open(output_file_path, 'a') as f:
-                        f.write(code + ',' + str(get_buy_price(price)) + '\n')
-                    print("{}耗时：{}".format(name, end - start))
+            # for good_key in final_combinations:
+            #     good_key_str = ':'.join(good_key)
+            #     signal_data = gen_signal(target_data, good_key)
+            #     if signal_data['Buy_Signal'].values[0]:
+            #         satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+            #         end = time.time()
+            #         # 将code增量写入output_file_path，注意这个文件可能会被多个线程同时写入
+            #         with open(output_file_path, 'a') as f:
+            #             f.write(code + ',' + str(get_buy_price(price)) + '\n')
+            #         print("{}耗时：{}".format(name, end - start))
+
+            stock_data = origin_data.copy()
+            stock_data['Buy_Signal'] = True
+            stock_data = gen_daily_buy_signal_26(stock_data)
+            signal_data = stock_data[stock_data['日期'] == pd.to_datetime(target_date)]
+            if signal_data['Buy_Signal'].values[0]:
+                end = time.time()
+                # 将code增量写入output_file_path，注意这个文件可能会被多个线程同时写入
+                with open(output_file_path, 'a') as f:
+                    f.write(code + ',' + str(get_buy_price(price)) + '\n')
+                print("{}耗时：{}".format(name, end - start))
 
 def save_and_analyse_all_data_mul(target_date):
     """
@@ -1853,6 +1931,9 @@ def save_and_analyse_all_data_mul(target_date):
     stock_data_df = ak.stock_zh_a_spot_em()
     all_code_set = set(stock_data_df['代码'].tolist())
     output_file_path = '../final_zuhe/select/select_{}.txt'.format(target_date)
+    # 如果output_file_path存在，先删除
+    if os.path.exists(output_file_path):
+        os.remove(output_file_path)
 
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
@@ -1870,7 +1951,7 @@ def save_and_analyse_all_data_mul(target_date):
 
     index_data = gen_full_zhishu_basic_signal(index_data, True)
 
-    # save_and_analyse_stock_data(stock_data_df.iloc[0], new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data)
+    # save_and_analyse_stock_data(stock_data_df.iloc[0], new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=True)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
         futures = [executor.submit(save_and_analyse_stock_data, stock_data, new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data) for _, stock_data in stock_data_df.iterrows()]
@@ -1959,25 +2040,94 @@ def gen_all_zhibiao():
 
 
 
+def process_file_target_date(fullname, date, gen_daily_buy_signal_26):
+    """
+    处理单个文件
+    """
+    data = load_data(fullname)
+    buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
+    if not buy_data.empty:
+        if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+            print(buy_data)
+            return buy_data
+    return None
+
+def get_target_thread(date='2024-01-22'):
+    """
+    获取指定时间满足好指标的每个股票的阈值
+    :return:
+    """
+    file_path = '../daily_data_exclude_new_can_buy/'
+    all_files = []
+
+    # 获取所有文件路径
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            all_files.append(fullname)
+
+    # 创建进程池
+    pool = multiprocessing.Pool(multiprocessing.cpu_count())
+
+    # 处理每个文件
+    results = [pool.apply_async(process_file_target_date, args=(f, date, gen_daily_buy_signal_26)) for f in all_files]
+
+    # 收集结果
+    all_data = [res.get() for res in results if res.get() is not None]
+
+    # 关闭进程池
+    pool.close()
+    pool.join()
+    # 将结果写入文件
+    output_filename = os.path.join('../final_zuhe/select/', '{}_target_thread.csv'.format(date))
+    pd.concat(all_data).to_csv(output_filename, index=False)
+    return all_data
+
+
+def get_target_date(date='2024-01-17'):
+    """
+    获取指定时间满足好指标的每个股票的阈值
+    :return:
+    """
+    all_data = []
+    file_path = '../daily_data_exclude_new_can_buy/'
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = load_data(fullname)
+            buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
+            if not buy_data.empty:
+                # 如果buy_data的第一行数据的threshold_close_up不为Nan，说明满足条件
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+                    all_data.append(buy_data)
+                    print(buy_data)
+    return all_data
 
 if __name__ == '__main__':
-    # # file_path = '../final_zuhe/statistics_target_key.json'
-    # file_path = '../back/gen/statistics_all.json'
+    # file_path = '../final_zuhe/statistics_target_key.json'
+    # # file_path = '../back/gen/statistics_all.json'
     # compute_more_than_one_day_held(file_path)
     # compute_all_round_value(file_path)
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
     # get_good_combinations()
-    # save_and_analyse_all_data_mul('2024-01-18')
+    # save_and_analyse_all_data_mul('2024-01-22')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
-    back_range_select_op(start_time='2024-01-01', end_time='2024-01-18')
-    # back_range_select_op(start_time='2024-01-15', end_time='2024-01-18')
+    # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
+    # back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
+    back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
-
-
+    # date = '2024-01-17'
+    # fullname = '../daily_data_exclude_new_can_buy/蓝天燃气_605368.txt'
+    # data = load_data(fullname)
+    # data.at[718, '收盘'] = 11.52
+    # buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
+    # 11.51 11.42
+    # buy_data = get_target_thread()
+    # print(buy_data)
 
 
     # 读取../back/complex/all_df.csv
@@ -1992,9 +2142,9 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
-    # strategy('../daily_data_exclude_new_can_buy_with_back/恒银科技_603106.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # # statistics = read_json('../back/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json') # 大小 2126501
