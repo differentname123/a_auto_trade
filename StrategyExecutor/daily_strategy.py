@@ -796,9 +796,6 @@ def gen_daily_buy_signal_26(data):
     # 计算X_7的2天平均
     X_10 = X_7.rolling(window=2).mean()
 
-    # X_9和X_10的和
-    X_11 = X_9 + X_10
-
     # X_9和X_10的差
     X_12 = X_9 - X_10
 
@@ -823,12 +820,6 @@ def gen_daily_buy_signal_26(data):
 
     # 检查X_18是否小于0.3
     X_19 = X_18 < 0.3
-
-    # 计算当天最高价在当天价格范围内的相对位置
-    X_20 = (data['最高'] - data['开盘']) / (data['最高'] - data['最低'])
-
-    # 检查X_20是否小于0.4
-    X_21 = X_20 < 0.4
 
     # 综合所有条件，更新Buy_Signal列
     data['Buy_Signal'] &= X_14 & X_15 & X_16 & X_17 & X_19 & X_13 & X_4 & X_5 & X_6

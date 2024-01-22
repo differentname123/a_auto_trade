@@ -162,6 +162,84 @@ def backtest_strategy_low_profit(data):
 
     return results_df
 
+def backtest_strategy_low_profit_target_data_specia(data, date, price):
+    """
+    每个买入信号都入手，然后找到相应的交易日
+    为data进行回测，买入条件为当有Buy_Signal时，卖出条件为大于买入价的0.02或者以开盘价卖出
+    ，返回买入卖出的时间，价格，收益，持有时间
+    :param data:
+    :return:
+    """
+
+    results = []  # 存储回测结果
+    name = data['名称'].iloc[0]
+    symbol = data['代码'].iloc[0]
+    total_profit = 0
+    i = 0
+    while i < len(data):
+        # 进行时间判断
+        if data['日期'].iloc[i] == date:
+            high_list = []
+            # 遍历i 后面的三个数据
+            for xx in range(1, 4):
+                j = i + xx
+                if i + xx < len(data):
+                    high_price = data['最高'].iloc[j]
+                    high_price_ratio = 100 * (high_price - data['收盘'].iloc[j - 1]) / data['收盘'].iloc[j - 1]
+                    high_list.append((data['涨跌幅'].iloc[j], high_price_ratio))
+                else:
+                    high_list.append((0, 0))
+
+            buy_price = price
+            buy_date = data['日期'].iloc[i]
+            buy_index = i
+            total_shares = 100  # 假设初始买入100股
+
+            # 找到满足卖出条件的日期
+            j = i + 1
+            while j < len(data):
+                if data['最高'].iloc[j] >= get_sell_price(buy_price):
+                    break  # 找到了满足卖出条件的日期，跳出循环
+
+                # 如果第二天未达到卖出价条件，再买入100股并重新计算买入成本
+
+                additional_shares = 100
+                total_shares += additional_shares
+                new_buy_price = data['收盘'].iloc[j]  # 第二天的收盘价作为新的买入价
+                buy_price = (buy_price * (
+                        total_shares - additional_shares) + new_buy_price * additional_shares) / total_shares
+                data.at[i, '数量'] = total_shares  # 记录买入数量
+
+                j += 1
+
+            # 如果找到了满足卖出条件的日期
+            if j < len(data):
+                sell_price = get_sell_price(buy_price)
+                if data['开盘'].iloc[j] > sell_price:
+                    sell_price = data['开盘'].iloc[j]
+                # if data['最高'].iloc[j] < sell_price:
+                #     sell_price = data['收盘'].iloc[j]
+            else:
+                # 如果没有找到，强制在最后一天卖出
+                j = len(data) - 1
+                sell_price = data['收盘'].iloc[j]
+
+            sell_date = data['日期'].iloc[j]
+            profit = (sell_price - buy_price) * total_shares  # 每次卖出100股
+            total_profit += profit
+            total_cost = buy_price * total_shares
+            days_held = j - buy_index
+            results.append([name, symbol, buy_date, buy_price, sell_date, sell_price, profit, total_profit, total_cost,
+                            days_held, high_list, i])
+
+        i += 1
+
+    results_df = pd.DataFrame(results,
+                              columns=['名称', '代码', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
+                                       'Total_Profit', 'total_cost',
+                                       'Days Held', 'high_list', 'Buy_Index'])
+
+    return results_df
 
 def backtest_strategy_low_profit_target_data(data, date):
     """
@@ -1763,6 +1841,61 @@ def back_select(file_path):
     else:
         return None
 
+def back_select_target_date(file_path):
+    """
+    回测选中的文件
+    :param file_path:
+    :return:
+    """
+    all_df_list = []
+    data = pd.read_csv(file_path, dtype={'代码': str})
+    # 解析出时间
+    date = file_path.split('/')[-1].split('.')[0].split('_')[0]
+    output_file_path = '../final_zuhe/back/' + date + 'target_back.csv'
+    bad_output_file_path = '../final_zuhe/back/' + date + 'target_bad_back.json'
+    bad_dict = dict()
+    bad_count = 0
+    date = datetime.strptime(date, '%Y-%m-%d')
+    # 遍历data
+    for index, row in data.iterrows():
+        # 如果row['threshold_close_down']是nan那么就跳过
+        if np.isnan(row['threshold_close_down']):
+            continue
+        stock_name = "{}_{}".format(row['名称'], row['代码'])
+        price = row['threshold_close_down']
+        date = row['日期']
+        data_file_path = '../daily_data_exclude_new_can_buy/' + stock_name + '.txt'
+        daily_data = load_data(data_file_path)
+        daily_data = daily_data[daily_data['日期'] >= pd.Timestamp(date)]
+        daily_data.reset_index(drop=True, inplace=True)
+
+        result_df = backtest_strategy_low_profit_target_data_specia(daily_data, pd.Timestamp(date), price)
+        # 如果result_df中的Days Held大于1或者Profit小于0那么就将其添加到bad_dict中
+        if result_df['Days Held'].values[0] > 1 or result_df['Profit'].values[0] < 0:
+            bad_dict[stock_name] = str(row)
+            bad_count += 1
+        # 将result_df添加到all_df中
+        all_df_list.append(result_df)
+        # print(result_df)
+    # 将bad_dict写入文件
+    write_json(bad_output_file_path, bad_dict)
+    if len(all_df_list) > 0:
+        all_df = pd.concat(all_df_list, ignore_index=True)
+        trade_count = all_df.shape[0]
+        total_cost = all_df['total_cost'].sum()
+        total_profit = all_df['Profit'].sum()
+        average_1w_profit = total_profit * 10000 / total_cost
+        all_df['this_pici_average_1w_profit'] = average_1w_profit
+        ratio = bad_count / trade_count
+        all_df['this_pici_ratio'] = ratio
+
+        all_df['grouth_rate'] = 100 * all_df['Profit'] / all_df['total_cost']
+
+        all_df.to_csv(output_file_path, index=False)
+        print("date:{}, trade_count:{},bad_count:{},bad_ratio:{}, 1w_profit:{}".format(date, trade_count, bad_count, ratio, average_1w_profit))
+        return all_df
+    else:
+        return None
 
 def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
     """
@@ -2081,6 +2214,7 @@ def get_target_thread(date='2024-01-22'):
     # 将结果写入文件
     output_filename = os.path.join('../final_zuhe/select/', '{}_target_thread.csv'.format(date))
     pd.concat(all_data).to_csv(output_filename, index=False)
+    back_select_target_date(output_filename)
     return all_data
 
 
@@ -2117,16 +2251,12 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
     # back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
-    back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
+    # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
-    # date = '2024-01-17'
-    # fullname = '../daily_data_exclude_new_can_buy/蓝天燃气_605368.txt'
-    # data = load_data(fullname)
-    # data.at[718, '收盘'] = 11.52
-    # buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
-    # 11.51 11.42
-    # buy_data = get_target_thread()
+    # back_select_target_date('../final_zuhe/select/2024-01-17_target_thread.csv')
+    date = '2024-01-15'
+    buy_data = get_target_thread(date)
     # print(buy_data)
 
 
