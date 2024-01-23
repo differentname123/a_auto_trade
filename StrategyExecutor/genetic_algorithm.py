@@ -15,7 +15,9 @@ import os
 import random
 import sys
 import time
+from timeit import timeit
 
+import pandas as pd
 from pandas import DataFrame
 
 from StrategyExecutor.common import load_data, backtest_strategy_low_profit
@@ -33,6 +35,48 @@ def _generate_gene(min_ones, max_ones, gene_length, judge_gene):
     if judge_gene(gene_str):
         return gene_str
     return None
+
+def generate_offspring_op(args):
+    # 开始计时
+    start_time = time.time()
+    per_size, _select, _crossover, _mutate = args
+    offspring = []
+    for i in range(per_size):
+        parent1, parent2 = _select()
+        child1, child2 = _crossover(parent1, parent2)
+        mutate_child1 = _mutate(child1)
+        mutate_child2 = _mutate(child2)
+        offspring.append(mutate_child1)
+        offspring.append(mutate_child2)
+    # 结束计时
+    end_time = time.time()
+    print('生成{}个后代，耗时：{}秒'.format(per_size, end_time - start_time))
+    return offspring
+
+def load_all_statistics():
+    """
+    读取所有组合的统计信息
+    :return:
+    """
+    all_statistics = read_json('../back/gen/statistics_all.json')
+
+    existed_combinations = set(all_statistics.keys())
+    # 找出所有低于1000次交易的组合
+    low_trade_count_combinations = set()
+    for combination in existed_combinations:
+        if all_statistics[combination]['trade_count'] <= 1000:
+            low_trade_count_combinations.add(combination)
+
+    statistics = read_json('../back/statistics_target_key.json')
+    statistics_keys = set(statistics.keys())
+    statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] <= 1000}
+    statistics_new_keys = set(statistics_new.keys())
+    existed_combinations = existed_combinations | statistics_keys
+    low_trade_count_combinations = low_trade_count_combinations | statistics_new_keys
+    low_trade_count_combinations_set_list = [set(low_trade_count_combination.split(':')) for low_trade_count_combination in
+                                                  low_trade_count_combinations]
+    low_trade_count_combinations = set()
+    return existed_combinations
 
 class GeneticAlgorithm:
     def __init__(self, population_size, crossover_rate, mutation_rate, signal_columns):
@@ -95,7 +139,7 @@ class GeneticAlgorithm:
         if len(statistics) == 0:
             return self._initialize_population_mul()
         else:
-            return self._initialize_population_mul_load()
+            return self._initialize_population_mul_load_op()
 
     def generate_offspring(self, args):
         # 开始计时
@@ -112,6 +156,59 @@ class GeneticAlgorithm:
                 offspring.append(mutate_child2)
 
         return offspring
+
+    def _initialize_population_mul_load_op(self):
+        """
+        读取最近的组合信息来进行初始化
+        :return:
+        """
+        existed_combinations = load_all_statistics()
+        # 开始计时
+        start_time = time.time()
+        new_population = set()
+        statistics = read_json('../back/gen/statistics_target_key.json')
+        self.population = [self.cover_to_individual(combination) for combination in statistics.keys()]
+        self.gen_combination_to_fitness()
+        while len(new_population) < self.population_size:
+            # 准备传递给 generate_offspring 的参数
+            per_size = 2000
+            # 开始计时
+            start_time = time.time()
+            args_list = [(per_size, self._select, self._crossover, self._mutate ) for
+                         _ in range(math.ceil(1.2 * self.population_size / per_size))]
+            # 结束计时
+            end_time = time.time()
+            print('准备参数耗时：', end_time - start_time)
+
+            # 使用多进程
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            results = pool.map(generate_offspring_op, args_list)
+            pool.close()
+            pool.join()
+
+            for offspring in results:
+                new_population.update(offspring)
+            print('new_population:', len(new_population))
+
+        self.population = list(new_population)
+        self.population = [individual for individual in self.population if '1' in individual]
+        # 结束计时
+        end_time = time.time()
+        print('mul_gen生成耗时：', end_time - start_time)
+        self.combinations = [self.cover_to_combination(individual) for individual in self.population]
+        # 将self.combinations变成set
+        self.combinations = set([':'.join(combination) for combination in self.combinations])
+        # 找出在集合self.combinations但是不在集合self.existed_combinations中的组合
+        self.combinations = self.combinations - existed_combinations
+        print('mul_com生成耗时：', end_time - start_time)
+        # 将self.combinations变成population的格式
+        self.population = [self.cover_to_individual(combination) for combination in self.combinations]
+
+
+        # 结束计时
+        end_time = time.time()
+        print('mul_load生成新种群耗时：', end_time - start_time)
+        return self.population
 
     def _initialize_population_mul_load(self):
         """
@@ -137,7 +234,7 @@ class GeneticAlgorithm:
             print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
+            pool = multiprocessing.Pool(processes=7)
             results = pool.map(self.generate_offspring, args_list)
             pool.close()
             pool.join()
@@ -289,10 +386,9 @@ class GeneticAlgorithm:
 
         # self.combinations = ['收盘_5日_小极值_signal:换手率_小于_10_日均线_signal:股价_非跌停_signal:开盘_小于_5_固定区间_signal:开盘_小于_10_日均线_signal:涨跌幅_小于_20_日均线_signal:收盘_5日_小极值_signal_yes:换手率_大于_5_日均线_signal_yes:实体rate_5日_大极值signal_yes:开盘_小于_20_日均线_signal_yes:振幅_小于_5_日均线_signal_yes'.split(':')]
         self.combinations = [self.cover_to_combination(individual) for individual in self.population]
-        back_layer_all_op_gen_single('../daily_data_exclude_new_can_buy_with_back', self.combinations, gen_signal_func=gen_full_all_basic_signal,
+        back_layer_all_op_gen_single('../daily_all_100', self.combinations, gen_signal_func=gen_full_all_basic_signal,
                               backtest_func=backtest_strategy_low_profit)
         self.gen_combination_to_fitness()
-        self.load_all_statistics()
 
     def gen_combination_to_fitness(self):
         """
@@ -361,6 +457,7 @@ class GeneticAlgorithm:
         # 运行一代
         new_population = set()
         self.get_fitness()
+        existed_combinations = load_all_statistics()
         best_info = self.get_best_individual()
         try:
             if best_info[1][1]['trade_count'] < 100:
@@ -370,24 +467,39 @@ class GeneticAlgorithm:
         # 增量写入文件
         with open('../back/gen/best.txt', 'a') as f:
             f.write(str(best_info) + '\n')
-        per_size = 200
+        per_size = 2000
         while len(new_population) < self.population_size:
             # 准备传递给 generate_offspring 的参数
-            args_list = [(per_size, ) for
+            # 开始计时
+            start_time = time.time()
+            args_list = [(per_size, self._select, self._crossover, self._mutate ) for
                          _ in range(math.ceil(1.2 * self.population_size / per_size))]
+            # 结束计时
+            end_time = time.time()
+            print('准备参数耗时：', end_time - start_time)
 
             # 使用多进程
-            pool = multiprocessing.Pool(processes=8)
-            results = pool.map(self.generate_offspring, args_list)
+            pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+            results = pool.map(generate_offspring_op, args_list)
             pool.close()
             pool.join()
-
             for offspring in results:
                 new_population.update(offspring)
             print('new_population:', len(new_population))
 
         self.population = list(new_population)
         self.population = [individual for individual in self.population if '1' in individual]
+        # 结束计时
+        end_time = time.time()
+        print('mul_gen生成耗时：', end_time - start_time)
+        self.combinations = [self.cover_to_combination(individual) for individual in self.population]
+        # 将self.combinations变成set
+        self.combinations = set([':'.join(combination) for combination in self.combinations])
+        # 找出在集合self.combinations但是不在集合self.existed_combinations中的组合
+        self.combinations = self.combinations - existed_combinations
+        print('mul_com生成耗时：', end_time - start_time)
+        # 将self.combinations变成population的格式
+        self.population = [self.cover_to_individual(combination) for combination in self.combinations]
 
         # 结束计时
         end_time = time.time()
@@ -473,7 +585,7 @@ if __name__ == '__main__':
     # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 10000  # 种群大小
+    population_size = 1000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 

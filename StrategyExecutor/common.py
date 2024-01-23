@@ -98,6 +98,37 @@ def load_data(file_path):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
+def load_data(file_path):
+    data = pd.read_csv(file_path, low_memory=False)
+    name, code = parse_filename(file_path)
+    if '时间' in data.columns:
+        data = data.rename(columns={'时间': '日期'})
+    data['日期'] = pd.to_datetime(data['日期'])
+    data['名称'] = name
+    data['代码'] = code
+    data['数量'] = 0
+    data.sort_values(by='日期', ascending=True, inplace=True)
+    # 过滤掉收盘价小于等于0的数据
+    data = data[data['收盘'] > 0]
+
+    # 查找并移除第一个日期，如果与其他日期不连续超过30天
+    date_diff = data['日期'].diff(-1).abs()
+    filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
+
+    # 过滤时间大于2024年的数据
+    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2018-01-01')]
+
+    # 如果有大于30天的断层
+    if not filtered_diff.empty:
+        cutoff_index = filtered_diff.idxmax()
+        if cutoff_index and cutoff_index != 0:
+            data = data.loc[cutoff_index + 1:]  # 跳过第一个数据点
+
+    # 重置索引
+    data.reset_index(drop=True, inplace=True)
+    data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
+    return data
 
 def T_indicators(data):
     """

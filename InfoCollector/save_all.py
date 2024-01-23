@@ -26,7 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from StrategyExecutor.common import timeit
-
+pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 
 def read_json(file_path):
     try:
@@ -176,6 +176,63 @@ def save_stock_data(stock_data, exclude_code):
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")
+
+def fix_min_data(price_data):
+    """
+    完善分钟级别数据(字段重命名,添加新字段)
+    :param price_data: DataFrame with price data
+    :return: DataFrame with additional calculated data
+    """
+    # 重命名字段
+    price_data.rename(columns={'时间': '日期', '开盘': '分钟_开盘', '收盘': '分钟_收盘', '最高': '分钟_最高', '最低': '分钟_最低',
+                                '成交量': '分钟_成交量',
+                               '成交额': '分钟_成交额', '换手率': '分钟_换手率'}, inplace=True)
+
+    # 将日期列转换为datetime类型，保留具体时间
+    price_data['日期'] = pd.to_datetime(price_data['日期'])
+
+    # 提取日期作为一个新列，用于后续的分组
+    price_data['日期_仅日期'] = price_data['日期'].dt.date
+
+    # 计算到目前为止的统计数据
+    price_data['开盘'] = price_data.groupby('日期_仅日期')['分钟_开盘'].transform('first')
+    price_data['收盘'] = price_data['分钟_收盘']
+    price_data['最高'] = price_data.groupby('日期_仅日期')['分钟_最高'].cummax()
+    price_data['最低'] = price_data.groupby('日期_仅日期')['分钟_最低'].cummin()
+    price_data['成交量'] = price_data.groupby('日期_仅日期')['分钟_成交量'].cumsum()
+    price_data['成交额'] = price_data.groupby('日期_仅日期')['分钟_成交额'].cumsum()
+    price_data['换手率'] = price_data.groupby('日期_仅日期')['分钟_换手率'].cumsum()
+
+    # 计算后续数据的统计数据
+    reverse_grouped = price_data.iloc[::-1]  # 反转DataFrame以计算后续数据
+    reverse_grouped['后续最高'] = reverse_grouped.groupby('日期_仅日期')['分钟_最高'].cummax()
+    reverse_grouped['后续最低'] = reverse_grouped.groupby('日期_仅日期')['分钟_最低'].cummin()
+
+    # 将反转后的统计数据再次反转回来，并合并到原始DataFrame
+    reverse_grouped = reverse_grouped.iloc[::-1]
+    price_data['后续最高'] = reverse_grouped['后续最高']
+    price_data['后续最低'] = reverse_grouped['后续最低']
+
+    # 删除临时列
+    price_data.drop(columns=['日期_仅日期'], inplace=True)
+    price_data['Max_rate'] = 10
+
+    return price_data
+
+
+def save_stock_data_min(stock_data, exclude_code):
+    name = stock_data['名称'].replace('*', '')
+    code = stock_data['代码']
+    if code not in exclude_code:
+        price_data = get_price(code, '19700101', '20291021', period='5')
+        filename = '../min_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
+        # price_data不为空才保存
+        if not price_data.empty:
+            price_data = fix_min_data(price_data)
+            price_data = fix_st(price_data, '../announcements/{}.json'.format(code))
+            price_data.to_csv(filename, index=False)
+            # Logging the save operation with the timestamp
+            logging.info(f"Saved data for {name} ({code}) to {filename}")
 def write_json(file_path, data):
     try:
         if os.path.exists(file_path):
@@ -286,7 +343,7 @@ def save_all_data():
                 logging.error(f"Error occurred: {e}")
 
 @timeit
-def save_all_data_mul():
+def save_all_data_mul(save_fun=save_stock_data):
     stock_data_df = ak.stock_zh_a_spot_em()
     all_code_set = set(stock_data_df['代码'].tolist())
 
@@ -298,7 +355,7 @@ def save_all_data_mul():
     new_exclude_code_set.update(exclude_code_set)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-        futures = [executor.submit(save_stock_data, stock_data, new_exclude_code_set) for _, stock_data in stock_data_df.iterrows()]
+        futures = [executor.submit(save_fun, stock_data, new_exclude_code_set) for _, stock_data in stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
@@ -336,12 +393,15 @@ def save_index_data():
     return index_data
 
 if __name__ == '__main__':
-    # price_data = get_price('000001', '19700101', '20291017', period='daily')
+    # price_data = get_price('601226', '20230101', '20290124', period='5')
     # print(price_data)
-    data = ak.stock_zh_index_daily_em(symbol="sh000001")
-    print(data)
-    data = ak.stock_zh_index_spot()
-    print(data)
+    #
+    # stock_zh_b_minute_df = ak.stock_zh_b_minute(symbol='sh900901', period='1', adjust="qfq")
+    # print(stock_zh_b_minute_df)
+    # data = ak.stock_zh_index_daily_em(symbol="sh000001")
+    # print(data)
+    # data = ak.stock_zh_index_spot()
+    # print(data)
     # data = ak.stock_financial_analysis_indicator('600242')
     # data1 = ak.stock_zh_a_st_em()
     # data2 = ak.stock_notice_report(symbol='全部', date="20231106")
@@ -350,4 +410,4 @@ if __name__ == '__main__':
     # get_all_notice()
     # fix_announcements()
     # fetch_announcements('002740')
-
+    save_all_data_mul(save_fun=save_stock_data_min)

@@ -462,15 +462,15 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
         zero_combination = set()  # Using a set for faster lookups
         full_name, final_combinations, gen_signal_func, backtest_func = args
 
-        data = load_data(full_name)
+        data = pd.read_csv(full_name, low_memory=False)
         # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
         # file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         # file_name.parent.mkdir(parents=True, exist_ok=True)
-        recent_result_df_dict = read_json(recent_file_name)
         if is_skip:
+            recent_result_df_dict = read_json(recent_file_name)
             # 获取full_name的父目录
             out_put_file_path = os.path.dirname(full_name)
             false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(full_name)))
@@ -495,7 +495,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
             # 如果Buy_Signal全为False，则不进行回测
             if not signal_data['Buy_Signal'].any():
                 # result_df_dict[combination_key] = create_empty_result()
-                # recent_result_df_dict[combination_key] = create_empty_result()
+                recent_result_df_dict[combination_key] = create_empty_result()
                 continue
 
             # origin_results_df = backtest_func(signal_data)

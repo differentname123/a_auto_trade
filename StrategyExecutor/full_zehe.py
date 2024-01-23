@@ -342,7 +342,7 @@ def parse_filename(file_path):
 
 
 def load_data(file_path):
-    data = pd.read_csv(file_path)
+    data = pd.read_csv(file_path, low_memory=False)
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
         data = data.rename(columns={'时间': '日期'})
@@ -357,6 +357,10 @@ def load_data(file_path):
     # 查找并移除第一个日期，如果与其他日期不连续超过30天
     date_diff = data['日期'].diff(-1).abs()
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
+
+    # 过滤时间大于2024年的数据
+    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
     if not filtered_diff.empty:
@@ -1462,6 +1466,9 @@ def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_si
         return target_data
     index = target_data.index[0]
     now_status = target_data['Buy_Signal'].values[0]
+    if now_status == True:
+        target_data.at[index, 'threshold_close_up'] = target_data['收盘'].values[0]
+        target_data.at[index, 'threshold_close_down'] = target_data['收盘'].values[0]
     # 向上和向下寻找阈值
     Max_rate = target_data['Max_rate'].values[0]
     # 将Max_rate转换为int
@@ -2185,6 +2192,38 @@ def process_file_target_date(fullname, date, gen_daily_buy_signal_26):
             return buy_data
     return None
 
+def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
+    """
+    处理单个文件
+    """
+    buy_data_list = []
+    fullname, min_fullname = file_path
+    data = load_data(fullname)
+    min_data = load_data(min_fullname)
+    # 将min_data中的日期转换为datetime类型
+    min_data['日期'] = pd.to_datetime(min_data['日期'])
+    # 找到min_data中日期大于date且小于date+1的数据
+    min_data = min_data[(min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
+    target_data = data[data['日期'] == date]
+    # 获取target_data的index
+    target_data_index = target_data.index
+    # 遍历min_data
+    for index, row in min_data.iterrows():
+        # 将row的开盘,收盘,最高,最低,成交量,成交额赋值给data中target_data_index的行
+        data.loc[target_data_index, '开盘'] = row['开盘']
+        data.loc[target_data_index, '收盘'] = row['收盘']
+        data.loc[target_data_index, '最高'] = row['最高']
+        data.loc[target_data_index, '最低'] = row['最低']
+        data.loc[target_data_index, '成交量'] = row['成交量']
+        data.loc[target_data_index, '成交额'] = row['成交额']
+        buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
+        if not buy_data.empty:
+            if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['threshold_close_up'] > row['后续最低'])  or (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
+                print(row['日期'])
+                print(buy_data)
+                buy_data_list.append(buy_data)
+    return buy_data_list
+
 def get_target_thread(date='2024-01-22'):
     """
     获取指定时间满足好指标的每个股票的阈值
@@ -2217,6 +2256,40 @@ def get_target_thread(date='2024-01-22'):
     back_select_target_date(output_filename)
     return all_data
 
+def get_target_thread_min(date='2024-01-22'):
+    """
+    获取指定时间满足好指标的每个股票的阈值
+    :return:
+    """
+    file_path = '../daily_data_exclude_new_can_buy/'
+    min_file_path = '../min_daily_data_exclude_new_can_buy/'
+    all_files = []
+
+    # 获取所有文件路径
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            min_fullname = os.path.join(min_file_path, f)
+            if os.path.exists(min_fullname):
+                all_files.append([fullname, min_fullname])
+
+    # 创建进程池
+    pool = multiprocessing.Pool(multiprocessing.cpu_count())
+
+    # 处理每个文件
+    results = [pool.apply_async(process_file_target_date_min, args=(f, date, gen_daily_buy_signal_26)) for f in all_files]
+
+    # 收集结果
+    all_data = [res.get() for res in results if res.get() is not None]
+
+    # 关闭进程池
+    pool.close()
+    pool.join()
+    # 将结果写入文件
+    output_filename = os.path.join('../final_zuhe/select/', '{}_target_thread.csv'.format(date))
+    pd.concat(all_data).to_csv(output_filename, index=False)
+    back_select_target_date(output_filename)
+    return all_data
 
 def get_target_date(date='2024-01-17'):
     """
@@ -2237,6 +2310,53 @@ def get_target_date(date='2024-01-17'):
                     print(buy_data)
     return all_data
 
+
+def load_file_chunk(file_chunk):
+    """
+    加载文件块的数据
+    """
+    chunk_data = [load_data(fname) for fname in file_chunk]
+    return pd.concat(chunk_data)
+
+def load_all_data():
+    """
+    加载所有数据
+    """
+    start_time = time.time()
+    file_path = '../daily_data_exclude_new_can_buy_with_back'
+
+    # 获取所有文件名
+    all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
+
+    # 使用多进程分块加载数据
+    cpu_count = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(processes=cpu_count)
+    file_chunks = [all_files[i::cpu_count] for i in range(cpu_count)]
+    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    pool.close()
+    pool.join()
+
+    # 合并数据
+    all_data_df = pd.concat(chunk_dfs)
+    merge_time = time.time()
+    print('合并耗时：', merge_time - start_time)
+
+    # 转换日期格式
+    all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
+
+    # 将数据均匀分成100份并写入文件
+    num_splits = 100
+    folder_path = '../daily_all_100'
+    os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
+    split_size = math.ceil(len(all_data_df) / num_splits)
+
+    for i in range(num_splits):
+        split_data = all_data_df.iloc[i * split_size:(i + 1) * split_size]
+        split_data.to_csv(os.path.join(folder_path, f'{i + 1}.txt'), index=False)
+
+    end_time = time.time()
+    print('总耗时：', end_time - start_time)
+
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
     # # file_path = '../back/gen/statistics_all.json'
@@ -2254,9 +2374,25 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
+    # load_all_data()
+    #
+    # statistics = read_json('../back/gen/statistics_target_key.json')
+    # sublist_list = read_json('../back/gen/sublist.json')
+    # sublist_set = set()
+    # for sublist in sublist_list:
+    #     temp_key = ':'.join(sublist)
+    #     sublist_set.add(temp_key)
+    # statistics_keys = set(statistics.keys())
+    # # 找出在sublist_set中，但是不在statistics中的key
+    # for key in sublist_set:
+    #     if key not in statistics_keys:
+    #         print(key)
+
+    # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/蓝天燃气_605368.txt', '../min_data_exclude_new_can_buy/蓝天燃气_605368.txt'], '2024-01-17', gen_daily_buy_signal_26)
+    # print(data)
     # back_select_target_date('../final_zuhe/select/2024-01-17_target_thread.csv')
-    date = '2024-01-15'
-    buy_data = get_target_thread(date)
+    # date = '2024-01-22'
+    # buy_data = get_target_thread_min(date)
     # print(buy_data)
 
 
@@ -2272,7 +2408,7 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
