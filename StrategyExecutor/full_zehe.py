@@ -359,7 +359,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -2205,6 +2205,8 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     # 找到min_data中日期大于date且小于date+1的数据
     min_data = min_data[(min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
     target_data = data[data['日期'] == date]
+    # # 将min_data按照日期逆序排列
+    # min_data = min_data.sort_values(by='日期', ascending=False)
     # 获取target_data的index
     target_data_index = target_data.index
     # 遍历min_data
@@ -2219,10 +2221,13 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
         buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
         if not buy_data.empty:
             if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['threshold_close_up'] > row['后续最低'])  or (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
-                print(row['日期'])
+                buy_data.at[buy_data.index[0], '日期'] = row['日期']
                 print(buy_data)
                 buy_data_list.append(buy_data)
-    return buy_data_list
+    # 如果buy_data_list不为空,则将buy_data_list中的数据合并
+    if buy_data_list:
+        return pd.concat(buy_data_list)
+    return None
 
 def get_target_thread(date='2024-01-22'):
     """
@@ -2262,7 +2267,7 @@ def get_target_thread_min(date='2024-01-22'):
     :return:
     """
     file_path = '../daily_data_exclude_new_can_buy/'
-    min_file_path = '../min_daily_data_exclude_new_can_buy/'
+    min_file_path = '../min_data_exclude_new_can_buy/'
     all_files = []
 
     # 获取所有文件路径
@@ -2375,24 +2380,13 @@ if __name__ == '__main__':
     # print(good_data)
 
     # load_all_data()
-    #
-    # statistics = read_json('../back/gen/statistics_target_key.json')
-    # sublist_list = read_json('../back/gen/sublist.json')
-    # sublist_set = set()
-    # for sublist in sublist_list:
-    #     temp_key = ':'.join(sublist)
-    #     sublist_set.add(temp_key)
-    # statistics_keys = set(statistics.keys())
-    # # 找出在sublist_set中，但是不在statistics中的key
-    # for key in sublist_set:
-    #     if key not in statistics_keys:
-    #         print(key)
 
-    # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/蓝天燃气_605368.txt', '../min_data_exclude_new_can_buy/蓝天燃气_605368.txt'], '2024-01-17', gen_daily_buy_signal_26)
+    # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/中际联合_605305.txt', '../min_data_exclude_new_can_buy/中际联合_605305.txt'], '2024-01-17', gen_daily_buy_signal_26)
     # print(data)
     # back_select_target_date('../final_zuhe/select/2024-01-17_target_thread.csv')
-    # date = '2024-01-22'
-    # buy_data = get_target_thread_min(date)
+    date = '2024-01-16'
+    # buy_data = get_target_thread(date)
+    buy_data = get_target_thread_min(date)
     # print(buy_data)
 
 
@@ -2408,7 +2402,7 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
