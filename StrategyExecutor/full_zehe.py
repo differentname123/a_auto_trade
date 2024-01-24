@@ -211,14 +211,16 @@ def backtest_strategy_low_profit_target_data_specia(data, date, price):
                 data.at[i, '数量'] = total_shares  # 记录买入数量
 
                 j += 1
+                if j - i > 1:
+                    break
 
             # 如果找到了满足卖出条件的日期
             if j < len(data):
                 sell_price = get_sell_price(buy_price)
                 if data['开盘'].iloc[j] > sell_price:
                     sell_price = data['开盘'].iloc[j]
-                # if data['最高'].iloc[j] < sell_price:
-                #     sell_price = data['收盘'].iloc[j]
+                if data['最高'].iloc[j] < sell_price:
+                    sell_price = data['收盘'].iloc[j]
             else:
                 # 如果没有找到，强制在最后一天卖出
                 j = len(data) - 1
@@ -1457,6 +1459,7 @@ def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_si
     :param step: 调整步长，默认为0.01
     :return: buy_data DataFrame，包含阈值收盘价
     """
+    data['Buy_Signal'] = True
     signal_data = gen_signal_func(data)
     target_data = signal_data[signal_data['日期'] == date]
 
@@ -1871,6 +1874,8 @@ def back_select_target_date(file_path):
         stock_name = "{}_{}".format(row['名称'], row['代码'])
         price = row['threshold_close_down']
         date = row['日期']
+        # 将date转换成datetime,格式为'%Y-%m-%d'
+        date = date.split(' ')[0]
         data_file_path = '../daily_data_exclude_new_can_buy/' + stock_name + '.txt'
         daily_data = load_data(data_file_path)
         daily_data = daily_data[daily_data['日期'] >= pd.Timestamp(date)]
@@ -1930,6 +1935,50 @@ def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
     if len(all_back_result) > 0:
         all_df = pd.concat(all_back_result, ignore_index=True)
         all_df.to_csv('../final_zuhe/back/back.csv', index=False)
+        return all_df
+
+def back_range_select_real_time(start_time='2023-12-04', end_time='2023-12-17'):
+    """
+    回测一段时间内选中的文件
+    :param start_time:
+    :param end_time:
+    :return:
+    """
+
+    out_put_file_path = '../final_zuhe/back/' + start_time + '_' + end_time + 'real_time_back.csv'
+    start_time = datetime.strptime(start_time, '%Y-%m-%d')
+    end_time = datetime.strptime(end_time, '%Y-%m-%d')
+    date_list = []
+    basic_data = load_data('../daily_data_exclude_new_can_buy/东方电子_000682.txt')
+    # basic_data是dataFrame格式数据,获取basic_data中的所有日期
+    all_date_list = basic_data['日期'].tolist()
+
+    all_back_result = []
+    while start_time <= end_time:
+        # 如果start_time不在date_list中那么就跳过
+        if start_time not in all_date_list:
+            start_time += timedelta(days=1)
+            continue
+        date_list.append(start_time)
+        start_time += timedelta(days=1)
+    for date in date_list:
+        buy_data = get_target_thread_min(date)
+        if buy_data is not None:
+            all_back_result.append(buy_data)
+    if len(all_back_result) > 0:
+        # 合并所有的back_result
+        all_df = pd.concat(all_back_result, ignore_index=True)
+        trade_count = all_df.shape[0]
+        total_cost = all_df['total_cost'].sum()
+        total_profit = all_df['Profit'].sum()
+        average_1w_profit = total_profit * 10000 / total_cost
+        all_df['this_pici_average_1w_profit'] = average_1w_profit
+
+        result_df = all_df[all_df['Days Held'] > 1]
+        result_df_size = result_df.shape[0]
+        ratio = result_df_size / trade_count
+        all_df['this_pici_ratio'] = ratio
+        all_df.to_csv(out_put_file_path, index=False)
         return all_df
 
 def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
@@ -1998,6 +2047,44 @@ def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
         all_df.to_csv(out_put_file_path, index=False)
         return all_df
 
+def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
+    """
+    拉取并且分析股票数据
+    :param stock_data:
+    :param exclude_code:
+    :return:
+    """
+
+    code = stock_data['代码']
+    name = stock_data['名称'].replace('*', '')
+    if code not in exclude_code or need_skip:
+        # code = '603985'
+        # 开始计时
+        start = time.time()
+        price_data = get_price(code, '20230101', '20291021', period='daily')
+
+        # price_data不为空才保存
+        if not price_data.empty:
+            origin_data = fix_st(price_data, '../announcements/{}.json'.format(code))
+            stock_data = origin_data.copy()
+
+            if stock_data is None:
+                return None
+            buy_data = get_threshold_close_target_date(target_date, stock_data)
+            if not buy_data.empty:
+                price = 10000
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+                    print(buy_data)
+                    if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])):
+                        price = buy_data.iloc[0]['threshold_close_up']
+                    if (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+                        if price > buy_data.iloc[0]['threshold_close_down']:
+                            price = buy_data.iloc[0]['threshold_close_down']
+                    with open(output_file_path, 'a') as f:
+                        f.write(code + ',' + str(get_buy_price(price)) + '\n')
+        end = time.time()
+        print("{}耗时：{}".format(name, end - start))
+
 def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
     """
     拉取并且分析股票数据
@@ -2058,6 +2145,64 @@ def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys
                 with open(output_file_path, 'a') as f:
                     f.write(code + ',' + str(get_buy_price(price)) + '\n')
                 print("{}耗时：{}".format(name, end - start))
+
+def save_and_analyse_all_data_mul_real_time(target_date):
+    """
+    多线程拉取最新数据并且分析出结果
+    :return:
+    """
+    # 开始计时
+    start = time.time()
+    good_statistics = read_json('../final_zuhe/good_statistics.json')
+    good_keys = list(good_statistics.keys())
+    stock_data_df = ak.stock_zh_a_spot_em()
+    all_code_set = set(stock_data_df['代码'].tolist())
+    output_file_path = '../final_zuhe/select/select_{}_real_time.txt'.format(target_date)
+    # 如果output_file_path存在，先删除
+    if os.path.exists(output_file_path):
+        os.remove(output_file_path)
+
+    exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
+    exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+
+    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    new_exclude_code_set = all_code_set - need_code_set
+    new_exclude_code_set.update(exclude_code_set)
+    index_data = save_index_data()
+    # 只保留index_data中的日期大于2023年的数据
+    index_data = index_data[index_data['日期'] > pd.to_datetime('20230101')]
+    # index_data是dataFrame类型的数据,如果index_data中不存在日期为target_date的数据，新增一行数据
+    if index_data[index_data['日期'] == pd.to_datetime(target_date)].empty:
+        new_row = pd.DataFrame({'日期': [pd.to_datetime(target_date)]})
+        index_data = pd.concat([index_data, new_row], ignore_index=True)
+
+    index_data = gen_full_zhishu_basic_signal(index_data, True)
+
+    # save_and_analyse_stock_data_real_time(stock_data_df.iloc[0], new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=True)
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
+        futures = [executor.submit(save_and_analyse_stock_data_real_time, stock_data, new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data) for _, stock_data in stock_data_df.iterrows()]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Error occurred: {e}")
+    end = time.time()
+    print("总耗时：{}".format(end - start))
+    exist_codes = []
+    total_count = 0
+    total_price = 0
+    with open(output_file_path, 'r') as lines:
+        for line in lines:
+            try:
+                stock_no, price = line.strip().split(',')
+                price = float(price)
+                if stock_no not in exist_codes:
+                    total_price += price
+                    total_count += 1
+            except Exception as e:
+                print(e)
+    print("总数：{}，总价：{}".format(total_count, total_price))
 
 def save_and_analyse_all_data_mul(target_date):
     """
@@ -2196,6 +2341,7 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     """
     处理单个文件
     """
+    start_time = time.time()
     buy_data_list = []
     fullname, min_fullname = file_path
     data = load_data(fullname)
@@ -2218,7 +2364,9 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
         data.loc[target_data_index, '最低'] = row['最低']
         data.loc[target_data_index, '成交量'] = row['成交量']
         data.loc[target_data_index, '成交额'] = row['成交额']
-        buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
+        # 计算step , step = 开盘/1000 ,保留小数点后两位,向上取整
+        step = math.ceil(row['开盘'] / 1000 * 100) / 100
+        buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26, step=step)
         if not buy_data.empty:
             if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['threshold_close_up'] > row['后续最低'])  or (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
                 buy_data.at[buy_data.index[0], '日期'] = row['日期']
@@ -2227,6 +2375,8 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     # 如果buy_data_list不为空,则将buy_data_list中的数据合并
     if buy_data_list:
         return pd.concat(buy_data_list)
+    end_time = time.time()
+    print('处理{}耗时:{}'.format(fullname, end_time - start_time))
     return None
 
 def get_target_thread(date='2024-01-22'):
@@ -2269,7 +2419,7 @@ def get_target_thread_min(date='2024-01-22'):
     file_path = '../daily_data_exclude_new_can_buy/'
     min_file_path = '../min_data_exclude_new_can_buy/'
     all_files = []
-
+    start_time = time.time()
     # 获取所有文件路径
     for root, ds, fs in os.walk(file_path):
         for f in fs:
@@ -2290,11 +2440,22 @@ def get_target_thread_min(date='2024-01-22'):
     # 关闭进程池
     pool.close()
     pool.join()
+    if all_data is not None:
+        all_df = pd.concat(all_data)
+    else:
+        return None
     # 将结果写入文件
-    output_filename = os.path.join('../final_zuhe/select/', '{}_target_thread.csv'.format(date))
-    pd.concat(all_data).to_csv(output_filename, index=False)
+    # 将date转换成str
+    date = str(date)
+    output_filename = os.path.join('../final_zuhe/select/', '{}_target_thread.csv'.format(date.split(' ')[0]))
+    all_df.to_csv(output_filename, index=False)
+    total_count = len(all_df)
+    total_price = all_df['收盘'].sum()
+    print('总数量:{} 总价值：{}w'.format(total_count, round(total_price / 100, 2)))
+    end_time = time.time()
+    print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
     back_select_target_date(output_filename)
-    return all_data
+    return all_df
 
 def get_target_date(date='2024-01-17'):
     """
@@ -2372,6 +2533,7 @@ if __name__ == '__main__':
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
+    # save_and_analyse_all_data_mul_real_time('2024-01-24')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
@@ -2383,10 +2545,11 @@ if __name__ == '__main__':
 
     # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/中际联合_605305.txt', '../min_data_exclude_new_can_buy/中际联合_605305.txt'], '2024-01-17', gen_daily_buy_signal_26)
     # print(data)
-    # back_select_target_date('../final_zuhe/select/2024-01-17_target_thread.csv')
-    date = '2024-01-16'
+    back_select_target_date('../final_zuhe/select/2024-01-03_target_thread.csv')
+    # date = '2024-01-17'
     # buy_data = get_target_thread(date)
-    buy_data = get_target_thread_min(date)
+    # buy_data = get_target_thread_min(date)
+    # back_range_select_real_time(start_time='2024-01-01', end_time='2024-01-23')
     # print(buy_data)
 
 
