@@ -453,7 +453,7 @@ def gen_all_signal_processing_with_back_data(args, threshold_day=1, is_skip=True
             f"{file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
-def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=True):
+def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=False):
     """
     会将本次结果单独存储一份
     """
@@ -493,10 +493,10 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
             signal_data = gen_signal(data, combination)
 
             # 如果Buy_Signal全为False，则不进行回测
-            if not signal_data['Buy_Signal'].any():
-                # result_df_dict[combination_key] = create_empty_result()
-                recent_result_df_dict[combination_key] = create_empty_result()
-                continue
+            # if not signal_data['Buy_Signal'].any():
+            #     # result_df_dict[combination_key] = create_empty_result()
+            #     recent_result_df_dict[combination_key] = create_empty_result()
+            #     continue
 
             # origin_results_df = backtest_func(signal_data)
             results_df = signal_data[signal_data['Buy_Signal'] == True]
@@ -504,7 +504,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
             #     print('diff:')
             #     print(origin_results_df)
             #     print(results_df)
-            processed_result = process_results_with_year(results_df, threshold_day)
+            processed_result = process_results_with_every_period(results_df, threshold_day)
 
             if processed_result:
                 recent_result_df_dict[combination_key] = processed_result
@@ -519,7 +519,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Tru
         # 写入文件
         end_time = time.time()
         print(
-            f"{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+            f"{recent_file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
 def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
@@ -712,7 +712,118 @@ def write_json(file_path, data):
     except Exception as e:
         print(f"Error writing {file_path} exception: {e}")
 
+def process_results_with_every_year(results_df, threshold_day, dimension='year'):
+    """
+    统计每一年的回测情况
+    :param results_df:
+    :param threshold_day:
+    :return:
+    """
+    result = results_df.sort_values(by='Days Held', ascending=True)
+    if result.empty:
+        print("不应该啊")
+        return {
+            'trade_count': 0,
+            'total_profit': 0,
+            'total_cost': 0,
+            'size_of_result_df': 0,
+            'one_befor_year_count': 0,
+            'two_befor_year_count': 0,
+            'three_befor_year_count': 0,
+            'three_befor_year_count_thread':0,
+            'total_days_held': 0,
+            'all_date': []
+        }
+    # 将'Days Held'转换为时间格式
+    result['Buy Date'] = pd.to_datetime(result['Buy Date'])
+    # 统计'Buy Date'大于三年前的数据
+    three_year = datetime.datetime.now() - relativedelta(years=2)
+    # 将three_year只保留到年份，不要月和日
+    three_befor_year = three_year.year
+    two_year = datetime.datetime.now() - relativedelta(years=1)
+    # 将three_year只保留到年份，不要月和日
+    two_befor_year = two_year.year
+    one_befor_year = datetime.datetime.now().year
+    # 统计result中'Buy Date'大于three_year的个数
+    three_befor_year_count = result[result['Buy Date'].dt.year >= three_befor_year].shape[0]
+    two_befor_year_count = result[result['Buy Date'].dt.year >= two_befor_year].shape[0]
+    one_befor_year_count = result[result['Buy Date'].dt.year >= one_befor_year].shape[0]
+    total_days_held = result['Days Held'].sum()
+    total_cost = result['total_cost'].sum()
+    # Total_Profit=所有Profit的和
+    Total_Profit = result['Profit'].sum()
+    result_df = result[result['Days Held'] > threshold_day]
+    result_shape = result.shape[0]
+    three_befor_year_count_thread = result_df[result_df['Buy Date'].dt.year >= three_befor_year].shape[0]
+    # 先将result['Buy Date']变成字符串类型
+    result['Buy Date'] = result['Buy Date'].astype(str)
+    # 获取results_df的所有日期
+    all_date = result['Buy Date'].tolist()
+    return {
+        'trade_count': result_shape,
+        'total_profit': round(Total_Profit, 4),
+        'total_cost': round(total_cost, 4),
+        'size_of_result_df': result_df.shape[0],
+        'one_befor_year_count': one_befor_year_count,
+        'two_befor_year_count': two_befor_year_count,
+        'three_befor_year_count': three_befor_year_count,
+        'three_befor_year_count_thread':three_befor_year_count_thread,
+        'total_days_held': int(total_days_held),
+        'all_date': all_date
+    }
 
+def process_results_with_every_period(results_df, threshold_day, dimension='year'):
+    """
+    :param results_df: DataFrame containing the results data
+    :param threshold_day: Threshold for filtering based on 'Days Held'
+    :param dimension: Dimension to group by ('year', 'month', or 'day')
+    :return: Dictionary containing aggregated statistics
+    """
+    result = results_df.sort_values(by='Days Held', ascending=True)
+    if result.empty:
+        return {'all': {
+            'trade_count': 0,
+            'total_profit': 0,
+            'total_cost': 0,
+            'size_of_result_df': 0,
+            'total_days_held': 0,
+            'all_date': []
+        }}
+    result['Buy Date'] = pd.to_datetime(result['Buy Date'])
+    # Group by the specified dimension
+    if dimension == 'year':
+        grouper = pd.Grouper(key='Buy Date', freq='Y')
+    elif dimension == 'month':
+        grouper = pd.Grouper(key='Buy Date', freq='M')
+    else:  # 'day'
+        grouper = pd.Grouper(key='Buy Date', freq='D')
+
+    grouped_result = result.groupby(grouper)
+
+    # Aggregate data and format as per the required output
+    aggregated_data = {}
+    for name, group in grouped_result:
+        key = name.strftime('%Y') if dimension == 'year' else name.strftime('%Y-%m') if dimension == 'month' else name.strftime('%Y-%m-%d')
+        aggregated_data[key] = {
+            'trade_count': int(group.shape[0]),
+            'total_profit': float(round(group['Profit'].sum(), 4)),
+            'total_cost': float(round(group['total_cost'].sum(), 4)),
+            'size_of_result_df': int(group[group['Days Held'] > threshold_day].shape[0]),
+            'total_days_held': int(group['Days Held'].sum()),
+            'all_date': group['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
+        }
+
+    # Add overall statistics
+    aggregated_data['all'] = {
+        'trade_count': int(result.shape[0]),
+        'total_profit': float(round(result['Profit'].sum(), 4)),
+        'total_cost': float(round(result['total_cost'].sum(), 4)),
+        'size_of_result_df': int(result[result['Days Held'] > threshold_day].shape[0]),
+        'total_days_held': int(result['Days Held'].sum()),
+        'all_date': result['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
+    }
+
+    return aggregated_data
 def process_results_with_year(results_df, threshold_day):
     """
     增加最近三年内的信号个数
@@ -1167,7 +1278,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
     使用多进程处理组合
     """
     # 按照一定数量分割list
-    split_size = 100000
+    split_size = 200000
     result_combination_lists = [result_combination_list[i:i + split_size] for i in
                                 range(0, len(result_combination_list), split_size)]
     total_len = 0
@@ -1191,7 +1302,7 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../back/gen/sublist.json', sublist_json)
 
-        statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
+        statistics_zuhe_gen_both_single_every_period('../back/gen/single')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def process_combinations_gen(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
@@ -1767,6 +1878,104 @@ def statistics_zuhe_gen_with_back_data(file_path, target_key='all'):
 
 
     return result
+
+def statistics_zuhe_gen_both_single_every_period(file_path):
+    """
+    读取file_path下的所有.json文件，将有相同key的数据进行合并
+    统计的是单次新增，然后将结果加入之前的all.json文件中
+    :param file_path:
+    :return:
+    """
+    result = {}
+    # 加载待统计的指标
+    sublist_list = read_json('../back/gen/sublist.json')
+    sublist_set = set()
+    for sublist in sublist_list:
+        temp_key = ':'.join(sublist)
+        sublist_set.add(temp_key)
+    count = 0
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = read_json(fullname)
+            for key, value in data.items():
+                if key in result:
+                    for key1, value1 in value.items():
+                        if key1 in result[key]:
+                            for key2, value2 in value1.items():
+                                if key2 == 'all_date':
+                                    result[key][key1][key2].extend(value2)
+                                    continue
+
+                                if key2 in result[key][key1]:
+                                    result[key][key1][key2] += value2
+                                else:
+                                    result[key][key1][key2] = value2
+                        else:
+                            result[key][key1] = value1
+                else:
+                    result[key] = value
+            count += 1
+    # 将result写入文件'../back/gen/result.json'
+    # write_json('../back/gen/result.json', result)
+    # 再计算result每一个key的平均值
+    for key1, value1 in result.items():
+        for key, value in value1.items():
+            if value['trade_count'] != 0:
+                value['all_date'] = list(set(value['all_date']))
+                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
+                value['ratio'] = value['size_of_result_df'] / value['trade_count']
+                value['average_days_held'] = value['total_days_held'] / value['trade_count']
+                value['average_profit'] = value['total_profit'] / value['trade_count']
+                value['date_count'] = len(value['all_date'])
+                value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
+                value['start_date'] = min(value['all_date'])
+                value['end_date'] = max(value['all_date'])
+                # 将value['ratio']保留4位小数
+                value['ratio'] = round(value['ratio'], 4)
+                value['average_profit'] = round(value['average_profit'], 4)
+                value['average_days_held'] = round(value['average_days_held'], 4)
+                value['total_profit'] = round(value['total_profit'], 4)
+            else:
+                value['ratio'] = 1
+                value['average_profit'] = 0
+                value['average_1w_profit'] = 0
+                value['average_days_held'] = 0
+                value['total_profit'] = 0
+                value['date_count'] = 0
+                value['date_ratio'] = 0
+                # 找到value['all_date']中的起始和结束时间
+                value['start_date'] = "1970"
+                value['end_date'] = "2100"
+            value['all_date'] = []
+    # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
+    # 写入target_key.json
+    target_key_result = result
+    target_key = 'target_key'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+
+    # 先删除原来的statistics.json文件
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, target_key_result)
+
+
+    # 将result写入file_path上一级文件
+    target_key = 'all'
+    file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
+    # 读取file_name
+    if os.path.exists(file_name):
+        old_result = read_json(file_name)
+        old_result.update(target_key_result)
+        result = old_result
+    if os.path.exists(file_name):
+        os.remove(file_name)
+    write_json(file_name, result)
+
+
+    return result
+
 
 @timeit
 def statistics_zuhe_gen_both_single(file_path, target_key='all'):

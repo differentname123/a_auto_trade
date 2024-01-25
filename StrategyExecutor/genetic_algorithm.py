@@ -64,8 +64,12 @@ def load_all_statistics():
     # 找出所有低于1000次交易的组合
     low_trade_count_combinations = set()
     for combination in existed_combinations:
-        if all_statistics[combination]['trade_count'] <= 1000:
-            low_trade_count_combinations.add(combination)
+        if 'trade_count' in all_statistics[combination]:
+            if all_statistics[combination]['trade_count'] <= 1000:
+                low_trade_count_combinations.add(combination)
+        else:
+            if all_statistics[combination]['all']['trade_count'] <= 1000:
+                low_trade_count_combinations.add(combination)
 
     statistics = read_json('../back/statistics_target_key.json')
     statistics_keys = set(statistics.keys())
@@ -311,6 +315,8 @@ class GeneticAlgorithm:
         :return:
         """
         trade_count_threshold = 1000
+        if 'all' in individual:
+            individual = individual['all']
         # 适应度函数：计算该组合的得分
         if 'average_1w_profit' not in individual:
             individual["average_1w_profit"] = 0
@@ -585,7 +591,7 @@ if __name__ == '__main__':
     # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
     # 示例参数
-    population_size = 50000  # 种群大小
+    population_size = 1000  # 种群大小
     crossover_rate = 0.7  # 交叉率
     mutation_rate = 0.001  # 变异率
 

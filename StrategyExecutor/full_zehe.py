@@ -52,7 +52,8 @@ from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_da
     select_stocks, mix_back
 from StrategyExecutor.strategy import back_all_stock, strategy
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
-    create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal
+    create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal, process_results_with_every_year, \
+    process_results_with_every_period, statistics_zuhe_gen_both_single_every_period
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 import warnings
@@ -939,18 +940,18 @@ def get_good_combinations():
     获取表现好的组合
     :return:
     """
-    date = '2024-01-17'
-    statistics = read_json('../final_zuhe/statistics_target_key.json')
-    # statistics = read_json('../back/gen/statistics_all.json')
+    # date = '2024-01-17'
+    # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    statistics = read_json('../back/gen/statistics_all.json')
     # statistics = read_json('../final_zuhe/good_statistics.json')
-    bad_statistics = get_good_statistic(date)
+    # bad_statistics = get_good_statistic(date)
     bad_statistics = {}
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.1) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.1) and '指数' not in k and v['date_count'] > 50 and v['trade_count'] > 0 and k not in bad_statistics.keys()}  # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.1) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.1) and '指数' not in k and v['trade_count'] > 1000}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if False
-                       or (v['ratio'] <= 0.08 and v['average_days_held'] <= 1.1 and v['average_1w_profit'] > 20)
+                       or (v['ratio'] <= 0.07)
                        # or (v['ratio'] <= 0.05 and (v['three_befor_year_count_thread_ratio'] <= 0.05) and v['three_befor_year_count'] > 0 and v['trade_count'] > 500)
                        # or (v['ratio'] == 0 and v['trade_count'] > 20)
                        # or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20)
@@ -1868,11 +1869,8 @@ def back_select_target_date(file_path):
     date = datetime.strptime(date, '%Y-%m-%d')
     # 遍历data
     for index, row in data.iterrows():
-        # 如果row['threshold_close_down']是nan那么就跳过
-        if np.isnan(row['threshold_close_down']):
-            continue
         stock_name = "{}_{}".format(row['名称'], row['代码'])
-        price = row['threshold_close_down']
+        price = row['price']
         date = row['日期']
         # 将date转换成datetime,格式为'%Y-%m-%d'
         date = date.split(' ')[0]
@@ -2071,19 +2069,21 @@ def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date,
             if stock_data is None:
                 return None
             buy_data = get_threshold_close_target_date(target_date, stock_data)
+            current_time = time.strftime('%Y-%m-%d %H:%M', time.localtime(time.time()))
             if not buy_data.empty:
-                price = 10000
-                if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
-                    print(buy_data)
-                    if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])):
-                        price = buy_data.iloc[0]['threshold_close_up']
-                    if (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
-                        if price > buy_data.iloc[0]['threshold_close_down']:
-                            price = buy_data.iloc[0]['threshold_close_down']
+                if buy_data.iloc[0]['Buy_Signal']:
+                    price = buy_data.iloc[0]['收盘']
                     with open(output_file_path, 'a') as f:
-                        f.write(code + ',' + str(get_buy_price(price)) + '\n')
+                        f.write(code + ',' + str(price) + '\n')
+                    # 获取当前时间,精确到分钟
+                    print('time:{} data:{}'.format(current_time, buy_data))
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+                    price = buy_data.iloc[0]['threshold_close_down']
+                    with open(output_file_path, 'a') as f:
+                        f.write(code + ',' + str(price) + '\n')
+                    print('time:{} data:{}'.format(current_time, buy_data))
         end = time.time()
-        print("{}耗时：{}".format(name, end - start))
+        # print("{}耗时：{}".format(name, end - start))
 
 def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
     """
@@ -2159,8 +2159,8 @@ def save_and_analyse_all_data_mul_real_time(target_date):
     all_code_set = set(stock_data_df['代码'].tolist())
     output_file_path = '../final_zuhe/select/select_{}_real_time.txt'.format(target_date)
     # 如果output_file_path存在，先删除
-    if os.path.exists(output_file_path):
-        os.remove(output_file_path)
+    # if os.path.exists(output_file_path):
+    #     os.remove(output_file_path)
 
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
@@ -2192,17 +2192,18 @@ def save_and_analyse_all_data_mul_real_time(target_date):
     exist_codes = []
     total_count = 0
     total_price = 0
-    with open(output_file_path, 'r') as lines:
-        for line in lines:
-            try:
-                stock_no, price = line.strip().split(',')
-                price = float(price)
-                if stock_no not in exist_codes:
-                    total_price += price
-                    total_count += 1
-            except Exception as e:
-                print(e)
-    print("总数：{}，总价：{}".format(total_count, total_price))
+    if os.path.exists(output_file_path):
+        with open(output_file_path, 'r') as lines:
+            for line in lines:
+                try:
+                    stock_no, price = line.strip().split(',')
+                    price = float(price)
+                    if stock_no not in exist_codes:
+                        total_price += price
+                        total_count += 1
+                except Exception as e:
+                    print(e)
+        print("总数：{}，总价：{}".format(total_count, total_price))
 
 def save_and_analyse_all_data_mul(target_date):
     """
@@ -2368,10 +2369,32 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
         step = math.ceil(row['开盘'] / 1000 * 100) / 100
         buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26, step=step)
         if not buy_data.empty:
-            if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['threshold_close_up'] > row['后续最低'])  or (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
-                buy_data.at[buy_data.index[0], '日期'] = row['日期']
+            buy_data.at[buy_data.index[0], '日期'] = row['日期']
+            if buy_data.iloc[0]['Buy_Signal']:
+                # 复制一份buy_data
+                buy_data = buy_data.copy()
+                buy_data.at[buy_data.index[0], 'price'] = row['收盘']
                 print(buy_data)
                 buy_data_list.append(buy_data)
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
+                    # 复制一份buy_data
+                    buy_data = buy_data.copy()
+                    buy_data.at[buy_data.index[0], 'price'] = buy_data.iloc[0]['threshold_close_down']
+                    print(buy_data)
+                    buy_data_list.append(buy_data)
+            else:
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
+                    # 复制一份buy_data
+                    buy_data = buy_data.copy()
+                    buy_data.at[buy_data.index[0], 'price'] = buy_data.iloc[0]['threshold_close_down']
+                    print(buy_data)
+                    buy_data_list.append(buy_data)
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['收盘'] > row['后续最低']):
+                    # 复制一份buy_data
+                    buy_data = buy_data.copy()
+                    buy_data.at[buy_data.index[0], 'price'] = row['收盘']
+                    print(buy_data)
+                    buy_data_list.append(buy_data)
     # 如果buy_data_list不为空,则将buy_data_list中的数据合并
     if buy_data_list:
         return pd.concat(buy_data_list)
@@ -2511,7 +2534,7 @@ def load_all_data():
     all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
 
     # 将数据均匀分成100份并写入文件
-    num_splits = 100
+    num_splits = 94
     folder_path = '../daily_all_100'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
@@ -2533,7 +2556,7 @@ if __name__ == '__main__':
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
-    # save_and_analyse_all_data_mul_real_time('2024-01-24')
+    # save_and_analyse_all_data_mul_real_time('2024-01-25')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
@@ -2545,12 +2568,14 @@ if __name__ == '__main__':
 
     # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/中际联合_605305.txt', '../min_data_exclude_new_can_buy/中际联合_605305.txt'], '2024-01-17', gen_daily_buy_signal_26)
     # print(data)
-    back_select_target_date('../final_zuhe/select/2024-01-03_target_thread.csv')
-    # date = '2024-01-17'
+    # back_select_target_date('../final_zuhe/select/2024-01-03_target_thread.csv')
+    # date = '2024-01-25'
     # buy_data = get_target_thread(date)
     # buy_data = get_target_thread_min(date)
-    # back_range_select_real_time(start_time='2024-01-01', end_time='2024-01-23')
+    # back_range_select_real_time(start_time='2024-01-11', end_time='2024-01-23')
     # print(buy_data)
+
+    statistics_zuhe_gen_both_single_every_period('../back/gen/single')
 
 
     # 读取../back/complex/all_df.csv
