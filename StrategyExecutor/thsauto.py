@@ -15,7 +15,7 @@ from PIL import Image,ImageGrab
 import ddddocr
 
 import pytesseract
-DdddOcr = ddddocr.DdddOcr()
+DdddOcr = ddddocr.DdddOcr(show_ad=False)
 
 from const import VK_CODE, BALANCE_CONTROL_ID_GROUP
 

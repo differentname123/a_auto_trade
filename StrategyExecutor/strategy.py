@@ -345,7 +345,10 @@ def back_all_stock(file_path, output_file_path, threshold_day=1, gen_signal_func
             all_df.to_string(f)
         if result_df is not None:
             result_df.to_string(f)
-
+    data = process_results_with_every_period(all_df, 1)
+    for k, v in data.items():
+        v['ratio'] = v['size_of_result_df'] / v['trade_count'] if v['trade_count'] > 0 else 0
+    print(data)
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Function executed in: {elapsed_time:.2f} seconds")

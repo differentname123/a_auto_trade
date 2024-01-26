@@ -999,15 +999,15 @@ def mix(data):
 
     data_1 = data.copy()
     # data_1 = gen_full_all_basic_signal(data_1)
-    gen_signal(data_1,
-               "收盘_小于_20_日均线_signal:成交额_小于_20_日均线_signal:换手率_小于_20_日均线_signal:换手率_20日_小极值_signal:实体rate_0.1_到_0.5_固定区间_signal:股价_非跌停_signal:日期_老股_100_signal:开盘_小于_10_日均线_signal:开盘_5日_小极值_signal:开盘_20日_小极值_signal:最高_小于_5_日均线_signal:最高_小于_10_日均线_signal:涨跌幅_小于_5_日均线_signal:涨跌幅_小于_10_日均线_signal:最低_大于昨日_收盘_signal_yes:成交额_小于_5_日均线_signal_yes:股价_非跌停_signal_yes:日期_老股_100_signal_yes:振幅_2_到_5_固定区间_signal_yes"
-
-
-               .split(':'))
-    # data_1['Buy_Signal'] = False
-    # target_date = pd.to_datetime('2024-01-22')
-    # # 将日期为target_date的Buy_Signal设置为True
-    # data_1.loc[data_1['日期'] == target_date, 'Buy_Signal'] = True
+    # gen_signal(data_1,
+    #            "收盘_小于_20_日均线_signal:成交额_小于_20_日均线_signal:换手率_小于_20_日均线_signal:换手率_20日_小极值_signal:实体rate_0.1_到_0.5_固定区间_signal:股价_非跌停_signal:日期_老股_100_signal:开盘_小于_10_日均线_signal:开盘_5日_小极值_signal:开盘_20日_小极值_signal:最高_小于_5_日均线_signal:最高_小于_10_日均线_signal:涨跌幅_小于_5_日均线_signal:涨跌幅_小于_10_日均线_signal:最低_大于昨日_收盘_signal_yes:成交额_小于_5_日均线_signal_yes:股价_非跌停_signal_yes:日期_老股_100_signal_yes:振幅_2_到_5_固定区间_signal_yes"
+    #
+    #
+    #            .split(':'))
+    data_1['Buy_Signal'] = False
+    target_date = pd.to_datetime('2024-01-19')
+    # 将日期为target_date的Buy_Signal设置为True
+    data_1.loc[data_1['日期'] == target_date, 'Buy_Signal'] = True
 
     data['Buy_Signal'] = data_1['Buy_Signal']
 

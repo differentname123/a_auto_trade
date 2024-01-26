@@ -305,7 +305,7 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
         zero_combination = set()  # Using a set for faster lookups
         full_name, final_combinations, gen_signal_func, backtest_func = args
 
-        data = load_data(full_name)
+        data = pd.read_csv(full_name, low_memory=False)
         # 获取full_name这个路径的文件名，去掉后缀，再去掉_后面的内容，得到名称
         mingcheng = os.path.basename(full_name).split('.')[0].split('_')[0]
         # 如果data长度小于100，不生成信号
@@ -334,14 +334,9 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
             combination_key = ':'.join(combination)
             signal_data = gen_signal(data, combination)
 
-            # 如果Buy_Signal全为False，则不进行回测
-            if not signal_data['Buy_Signal'].any():
-                result_df_dict[combination_key] = create_empty_result()
-                continue
-
             # results_df = backtest_func(signal_data)
             results_df = signal_data[signal_data['Buy_Signal'] == True]
-            processed_result = process_results_with_year(results_df, threshold_day)
+            processed_result = process_results_with_every_period(results_df, threshold_day)
 
             if processed_result:
                 result_df_dict[combination_key] = processed_result
@@ -465,8 +460,9 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
         data = pd.read_csv(full_name, low_memory=False)
         # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
+        mingcheng = full_name.split('/')[-1].split('.')[0].split('_')[0]
         # file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
-        recent_file_name = Path('../back/gen/single') / f"{data['名称'].iloc[0]}.json"
+        recent_file_name = Path('../back/gen/single') / f"{mingcheng}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
         # file_name.parent.mkdir(parents=True, exist_ok=True)
         if is_skip:
@@ -518,8 +514,10 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
     finally:
         # 写入文件
         end_time = time.time()
+        # 获取当前时间,保留到分钟
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         print(
-            f"{recent_file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+            f"{now}_{recent_file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
 def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
@@ -810,7 +808,7 @@ def process_results_with_every_period(results_df, threshold_day, dimension='year
             'total_cost': float(round(group['total_cost'].sum(), 4)),
             'size_of_result_df': int(group[group['Days Held'] > threshold_day].shape[0]),
             'total_days_held': int(group['Days Held'].sum()),
-            'all_date': group['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
+            # 'all_date': group['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
         }
 
     # Add overall statistics
@@ -820,7 +818,7 @@ def process_results_with_every_period(results_df, threshold_day, dimension='year
         'total_cost': float(round(result['total_cost'].sum(), 4)),
         'size_of_result_df': int(result[result['Days Held'] > threshold_day].shape[0]),
         'total_days_held': int(result['Days Held'].sum()),
-        'all_date': result['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
+        # 'all_date': result['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
     }
 
     return aggregated_data
@@ -1238,7 +1236,7 @@ def process_combinations_good(result_combination_list, file_path, gen_signal_fun
         sublist_json = deduplicate_2d_list(sublist_json)
         write_json('../final_zuhe/sublist.json', sublist_json)
 
-        statistics_zuhe_good('../final_zuhe/zuhe', target_key=target_key)
+        statistics_zuhe_good('../final_zuhe/zuhe')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def process_combinations_with_back_data(result_combination_list, task_with_back_data, gen_signal_func, backtest_func, target_key):
@@ -1544,127 +1542,69 @@ def back_sigle_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
 
 
 @timeit
-def statistics_zuhe_good(file_path, target_key='all'):
+def statistics_zuhe_good(file_path):
     """
     读取file_path下的所有.json文件，将有相同key的数据进行合并
     :param file_path:
     :return:
     """
     result = {}
-    if target_key == 'all':
-        for root, ds, fs in os.walk(file_path):
-            for f in fs:
-                fullname = os.path.join(root, f)
-                data = read_json(fullname)
-                for key, value in data.items():
-                    if key in result:
-                        result[key]['trade_count'] += value['trade_count']
-                        result[key]['total_profit'] += value['total_profit']
-                        result[key]['total_cost'] += value['total_cost']
-                        result[key]['size_of_result_df'] += value['size_of_result_df']
-                        result[key]['one_befor_year_count'] += value['one_befor_year_count']
-                        result[key]['two_befor_year_count'] += value['two_befor_year_count']
-                        result[key]['three_befor_year_count'] += value['three_befor_year_count']
-                        result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
-                        result[key]['total_days_held'] += value['total_days_held']
-                        result[key]['all_date'].extend(value['all_date'])
-                    else:
-                        result[key] = value
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            data = read_json(fullname)
+            for key, value in data.items():
+                if key in result:
+                    for key1, value1 in value.items():
+                        if key1 in result[key]:
+                            for key2, value2 in value1.items():
+                                if key2 == 'all_date':
+                                    result[key][key1][key2].extend(value2)
+                                    # 去重
+                                    result[key][key1][key2] = list(set(result[key][key1][key2]))
+                                    continue
 
-    else:
-        sublist_list = read_json('../final_zuhe/sublist.json')
-        sublist_set = set()
-        for sublist in sublist_list:
-            temp_key = ':'.join(sublist)
-            sublist_set.add(temp_key)
-
-        for root, ds, fs in os.walk(file_path):
-            for f in fs:
-                fullname = os.path.join(root, f)
-                data = read_json(fullname)
-                try:
-                    for key, value in data.items():
-                        if key in sublist_set:
-                            try:
-                                if key in result:
-                                    result[key]['trade_count'] += value['trade_count']
-                                    result[key]['total_profit'] += value['total_profit']
-                                    result[key]['total_cost'] += value['total_cost']
-                                    result[key]['size_of_result_df'] += value['size_of_result_df']
-                                    result[key]['one_befor_year_count'] += value['one_befor_year_count']
-                                    result[key]['two_befor_year_count'] += value['two_befor_year_count']
-                                    result[key]['three_befor_year_count'] += value['three_befor_year_count']
-                                    if 'three_befor_year_count_thread' not in result[key]:
-                                        result[key]['three_befor_year_count_thread'] = 0
-                                    result[key]['three_befor_year_count_thread'] += value['three_befor_year_count_thread']
-                                    result[key]['total_days_held'] += value['total_days_held']
-                                    result[key]['all_date'].extend(value['all_date'])
+                                if key2 in result[key][key1]:
+                                    result[key][key1][key2] += value2
                                 else:
-                                    result[key] = value
-                                # 将result[key]['all_date']去重
-                                result[key]['all_date'] = list(set(result[key]['all_date']))
-                            except Exception as e:
-                                pass
-                except Exception as e:
-                    pass
-    # 再计算result每一个key的平均值
-    for key, value in result.items():
-        try:
-            value['all_date'] = list(set(value['all_date']))
-        except Exception as e:
-            print(value)
-            raise
-        if value['trade_count'] != 0:
-            if 'total_cost' not in value:
-                value['average_1w_profit'] = 0
-                value['three_befor_year_count'] = 0
-                value['two_befor_year_count'] = 0
-                value['one_befor_year_count'] = 0
-                value['three_befor_year_count_thread'] = 0
-            else:
-                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
-            value['ratio'] = value['size_of_result_df'] / value['trade_count']
-            value['average_days_held'] = value['total_days_held'] / value['trade_count']
-            value['average_profit'] = value['total_profit'] / value['trade_count']
-            value['date_count'] = len(value['all_date'])
-            value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
-            # 找到value['all_date']中的起始和结束时间
-            value['start_date'] = min(value['all_date'])
-            value['end_date'] = max(value['all_date'])
+                                    result[key][key1][key2] = value2
+                        else:
+                            result[key][key1] = value1
+                else:
+                    result[key] = value
 
-            # 将value['ratio']保留4位小数
-            value['ratio'] = round(value['ratio'], 4)
-            value['average_profit'] = round(value['average_profit'], 4)
-            value['average_days_held'] = round(value['average_days_held'], 4)
-            value['total_profit'] = round(value['total_profit'], 4)
-            value['one_befor_year_rate'] = round(value['one_befor_year_count'] / value['trade_count'], 4)
-            value['two_befor_year_rate'] = round(value['two_befor_year_count'] / value['trade_count'], 4)
-            value['three_befor_year_rate'] = round(value['three_befor_year_count'] / value['trade_count'], 4)
-            if value['three_befor_year_count'] != 0:
-                value['three_befor_year_count_thread_ratio'] = round(value['three_befor_year_count_thread'] / value['three_befor_year_count'], 4)
+    for key1, value1 in result.items():
+        for key, value in value1.items():
+            if value['trade_count'] != 0:
+                # value['all_date'] = list(set(value['all_date']))
+                value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
+                value['ratio'] = value['size_of_result_df'] / value['trade_count']
+                value['average_days_held'] = value['total_days_held'] / value['trade_count']
+                value['average_profit'] = value['total_profit'] / value['trade_count']
+                # value['date_count'] = len(value['all_date'])
+                # value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
+                # value['start_date'] = min(value['all_date'])
+                # value['end_date'] = max(value['all_date'])
+                # 将value['ratio']保留4位小数
+                value['ratio'] = round(value['ratio'], 4)
+                value['average_profit'] = round(value['average_profit'], 4)
+                value['average_days_held'] = round(value['average_days_held'], 4)
+                value['total_profit'] = round(value['total_profit'], 4)
             else:
-                value['three_befor_year_count_thread_ratio'] = 1
-        else:
-            value['ratio'] = 1
-            value['average_profit'] = 0
-            value['average_1w_profit'] = 0
-            value['average_days_held'] = 0
-            value['total_profit'] = 0
-            value['one_befor_year_count'] = 0
-            value['two_befor_year_count'] = 0
-            value['three_befor_year_count'] = 0
-            value['one_befor_year_rate'] = 0
-            value['two_befor_year_rate'] = 0
-            value['three_befor_year_rate'] = 0
-            value['three_befor_year_count_thread_ratio'] =1
-            value['date_count'] = 0
-            value['date_ratio'] = 0
-            # 找到value['all_date']中的起始和结束时间
-            value['start_date'] = "1970"
-            value['end_date'] = "2100"
-        value['all_date'] = []
+                value['ratio'] = 1
+                value['average_profit'] = 0
+                value['average_1w_profit'] = 0
+                value['average_days_held'] = 0
+                value['total_profit'] = 0
+                value['date_count'] = 0
+                value['date_ratio'] = 0
+                # 找到value['all_date']中的起始和结束时间
+                value['start_date'] = "1970"
+                value['end_date'] = "2100"
+            value['all_date'] = []
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
-    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
+    target_key = 'target_key'
     # 将result写入file_path上一级文件
     file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
     # 写入一份备份文件
@@ -1673,7 +1613,7 @@ def statistics_zuhe_good(file_path, target_key='all'):
         os.remove(file_name_backup)
     write_json(file_name_backup, result)
     # 先删除原来的statistics.json文件
-    result = dict(sorted(result.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    result = dict(sorted(result.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
     if os.path.exists(file_name):
         os.remove(file_name)
     write_json(file_name, result)
@@ -1887,13 +1827,6 @@ def statistics_zuhe_gen_both_single_every_period(file_path):
     :return:
     """
     result = {}
-    # 加载待统计的指标
-    sublist_list = read_json('../back/gen/sublist.json')
-    sublist_set = set()
-    for sublist in sublist_list:
-        temp_key = ':'.join(sublist)
-        sublist_set.add(temp_key)
-    count = 0
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             fullname = os.path.join(root, f)
@@ -1903,9 +1836,11 @@ def statistics_zuhe_gen_both_single_every_period(file_path):
                     for key1, value1 in value.items():
                         if key1 in result[key]:
                             for key2, value2 in value1.items():
-                                if key2 == 'all_date':
-                                    result[key][key1][key2].extend(value2)
-                                    continue
+                                # if key2 == 'all_date':
+                                #     result[key][key1][key2].extend(value2)
+                                #     # 去重
+                                #     result[key][key1][key2] = list(set(result[key][key1][key2]))
+                                #     continue
 
                                 if key2 in result[key][key1]:
                                     result[key][key1][key2] += value2
@@ -1915,22 +1850,19 @@ def statistics_zuhe_gen_both_single_every_period(file_path):
                             result[key][key1] = value1
                 else:
                     result[key] = value
-            count += 1
-    # 将result写入文件'../back/gen/result.json'
-    # write_json('../back/gen/result.json', result)
-    # 再计算result每一个key的平均值
+
     for key1, value1 in result.items():
         for key, value in value1.items():
             if value['trade_count'] != 0:
-                value['all_date'] = list(set(value['all_date']))
+                # value['all_date'] = list(set(value['all_date']))
                 value['average_1w_profit'] = round(10000 * value['total_profit'] / value['total_cost'], 4)
                 value['ratio'] = value['size_of_result_df'] / value['trade_count']
                 value['average_days_held'] = value['total_days_held'] / value['trade_count']
                 value['average_profit'] = value['total_profit'] / value['trade_count']
-                value['date_count'] = len(value['all_date'])
-                value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
-                value['start_date'] = min(value['all_date'])
-                value['end_date'] = max(value['all_date'])
+                # value['date_count'] = len(value['all_date'])
+                # value['date_ratio'] = round(value['date_count'] / value['trade_count'], 4)
+                # value['start_date'] = min(value['all_date'])
+                # value['end_date'] = max(value['all_date'])
                 # 将value['ratio']保留4位小数
                 value['ratio'] = round(value['ratio'], 4)
                 value['average_profit'] = round(value['average_profit'], 4)

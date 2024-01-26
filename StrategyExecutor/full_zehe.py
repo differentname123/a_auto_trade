@@ -53,7 +53,7 @@ from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_da
 from StrategyExecutor.strategy import back_all_stock, strategy
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
     create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal, process_results_with_every_year, \
-    process_results_with_every_period, statistics_zuhe_gen_both_single_every_period
+    process_results_with_every_period, statistics_zuhe_gen_both_single_every_period, statistics_zuhe_good
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 import warnings
@@ -293,6 +293,8 @@ def backtest_strategy_low_profit_target_data(data, date):
                 data.at[i, '数量'] = total_shares  # 记录买入数量
 
                 j += 1
+                # if j - i > 1:
+                #     break
 
             # 如果找到了满足卖出条件的日期
             if j < len(data):
@@ -362,7 +364,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -935,6 +937,18 @@ def get_good_statistic(date):
         bad_statistics.update(v['satisfied_combinations'])
     return bad_statistics
 
+def judge_json(json_data):
+    if 'all' in json_data.keys():
+        if json_data['all']['trade_count'] > 10000:
+            for k, v in json_data.items():
+                if v['ratio'] > 0.09:
+                    return False
+        else:
+            return False
+    else:
+        return False
+    return True
+
 def get_good_combinations():
     """
     获取表现好的组合
@@ -942,16 +956,16 @@ def get_good_combinations():
     """
     # date = '2024-01-17'
     # statistics = read_json('../final_zuhe/statistics_target_key.json')
-    statistics = read_json('../back/gen/statistics_all.json')
-    # statistics = read_json('../final_zuhe/good_statistics.json')
+    # statistics = read_json('../back/gen/statistics_all.json')
+    statistics = read_json('../final_zuhe/good_statistics.json')
     # bad_statistics = get_good_statistic(date)
     bad_statistics = {}
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
-    statistics_new = {k: v for k, v in statistics.items() if (v['three_befor_year_count'] >= 1) and ((v['size_of_result_df'] + 1) / (v['trade_count'] + 1) <= 0.1) and ((v['three_befor_year_count_thread'] + 1) / (v['three_befor_year_count'] + 1) <= 0.1) and '指数' not in k and v['trade_count'] > 1000}  # 100交易次数以上 13859
+    statistics_new = {k: v for k, v in statistics.items() if '指数' not in k and judge_json(v)}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
                        if False
-                       or (v['ratio'] <= 0.07)
+                       or (v['all']['ratio'] <= 0.07)
                        # or (v['ratio'] <= 0.05 and (v['three_befor_year_count_thread_ratio'] <= 0.05) and v['three_befor_year_count'] > 0 and v['trade_count'] > 500)
                        # or (v['ratio'] == 0 and v['trade_count'] > 20)
                        # or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20)
@@ -1000,7 +1014,7 @@ def get_good_combinations():
     # # statistics_all.update(statistics_1w_rate)
 
     statistics_all.update(good_ratio_keys) # 761
-    statistics_all = dict(sorted(statistics_all.items(), key=lambda x: (-x[1]['ratio'], x[1]['trade_count']), reverse=True))
+    statistics_all = dict(sorted(statistics_all.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
     write_json('../final_zuhe/good_statistics.json', statistics_all)
 
 def filter_combinations_good(zero_combinations_set, good_keys):
@@ -1031,11 +1045,11 @@ def process_file_op(file_path, target_date, good_keys, good_statistics, gen_sign
     if target_data.empty:
         return None
     satisfied_combinations = dict()
-    # for good_key in final_combinations:
-    #     good_key_str = ':'.join(good_key)
-    #     signal_data = gen_signal(target_data, good_key)
-    #     if signal_data['Buy_Signal'].values[0]:
-    #         satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+    for good_key in final_combinations:
+        good_key_str = ':'.join(good_key)
+        signal_data = gen_signal(target_data, good_key)
+        if signal_data['Buy_Signal'].values[0]:
+            satisfied_combinations[good_key_str] = good_statistics[good_key_str]
 
     stock_data = origin_data.copy()
     good_key = "超级短线_26"
@@ -1099,12 +1113,13 @@ def sort_good_stocks_op(good_stocks):
     for stock in good_stocks:
         scores = []
         for values in stock['satisfied_combinations'].values():
-            three_befor_year_rate = values['three_befor_year_rate']
-            three_befor_year_count_thread_ratio = values['three_befor_year_count_thread_ratio']
-            ratio = values['ratio']
+            if 'all' in values:
+                ratio = values['all']['ratio']
+            else:
+                ratio = values['ratio']
 
             # Calculate the custom score for each combination
-            score = three_befor_year_rate * three_befor_year_count_thread_ratio + (1 - three_befor_year_rate) * ratio
+            score = ratio
             scores.append(score)
 
         # Find the minimum score for each stock
@@ -2534,7 +2549,7 @@ def load_all_data():
     all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
 
     # 将数据均匀分成100份并写入文件
-    num_splits = 94
+    num_splits = 96
     folder_path = '../daily_all_100'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
@@ -2556,26 +2571,28 @@ if __name__ == '__main__':
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
-    # save_and_analyse_all_data_mul_real_time('2024-01-25')
+    # save_and_analyse_all_data_mul_real_time('2024-01-26')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
-    # back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
+    back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
     # load_all_data()
 
+    # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
+
     # data = process_file_target_date_min(['../daily_data_exclude_new_can_buy/中际联合_605305.txt', '../min_data_exclude_new_can_buy/中际联合_605305.txt'], '2024-01-17', gen_daily_buy_signal_26)
     # print(data)
     # back_select_target_date('../final_zuhe/select/2024-01-03_target_thread.csv')
-    # date = '2024-01-25'
+    # date = '2024-01-26'
     # buy_data = get_target_thread(date)
     # buy_data = get_target_thread_min(date)
     # back_range_select_real_time(start_time='2024-01-11', end_time='2024-01-23')
     # print(buy_data)
 
-    statistics_zuhe_gen_both_single_every_period('../back/gen/single')
+    # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
 
 
     # 读取../back/complex/all_df.csv
@@ -2590,7 +2607,7 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy_with_back/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
