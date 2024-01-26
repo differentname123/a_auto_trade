@@ -364,7 +364,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -2575,7 +2575,7 @@ if __name__ == '__main__':
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
-    back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
+    back_range_select_op(start_time='2024-01-19', end_time='2024-01-19')
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 

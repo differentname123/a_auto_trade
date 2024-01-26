@@ -363,7 +363,7 @@ def gen_all_signal_processing_gen(args, threshold_day=1, is_skip=True):
     try:
         zero_combination = set()  # Using a set for faster lookups
         full_name, final_combinations, gen_signal_func, backtest_func = args
-        mingcheng = full_name.split('/')[-1].split('.')[0].split('_')[0]
+        mingcheng = os.path.basename(full_name).split('.')[0].split('_')[0]
         data = load_data(full_name)
         data = gen_signal_func(data)
         file_name = Path('../back/gen/zuhe') / f"{mingcheng}.json"
@@ -460,7 +460,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
         data = pd.read_csv(full_name, low_memory=False)
         # data = gen_signal_func(data)
         data['Buy Date'] = pd.to_datetime(data['Buy Date'])
-        mingcheng = full_name.split('/')[-1].split('.')[0].split('_')[0]
+        mingcheng = os.path.basename(full_name).split('.')[0].split('_')[0]
         # file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
         recent_file_name = Path('../back/gen/single') / f"{mingcheng}.json"
         # file_name = Path('../back/zuhe') / f"C夏厦.json"
@@ -517,7 +517,7 @@ def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=Fal
         # 获取当前时间,保留到分钟
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         print(
-            f"{now}_{recent_file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+            f"{now}_{recent_file_name}_{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
 
 
 def gen_all_signal_processing_op(args, threshold_day=1, is_skip=True):
