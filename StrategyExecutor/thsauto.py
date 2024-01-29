@@ -19,7 +19,7 @@ DdddOcr = ddddocr.DdddOcr(show_ad=False)
 
 from const import VK_CODE, BALANCE_CONTROL_ID_GROUP
 
-sleep_time = 0.07
+sleep_time = 0.1
 short_sleep_time = 0.05
 refresh_sleep_time = 0.5
 retry_time = 5
@@ -201,6 +201,25 @@ class ThsAuto:
             self.switch_to_normal()
             hot_key(['F1'])
             hot_key(['F6'])
+            self.refresh()
+            hwnd = self.get_right_hwnd()
+            ctrl = win32gui.GetDlgItem(hwnd, 0x417)
+
+            self.copy_table(ctrl)
+
+            data = get_clipboard_data()
+            if data:  # 如果获取到数据，则返回成功的结果
+                return {
+                    'code': 0, 'status': 'succeed',
+                    'data': parse_table(data),
+                }
+            time.sleep(sleep_time)  # 如果没有获取到数据，等待一段时间然后重试
+
+        return {'code': 1, 'status': 'failed'}  # 如果所有重试都失败，则返回失败的结果
+
+    def get_real_time_history(self):
+        for retry in range(retry_time):  # 外层重试循环
+            self.switch_to_normal()
             self.refresh()
             hwnd = self.get_right_hwnd()
             ctrl = win32gui.GetDlgItem(hwnd, 0x417)

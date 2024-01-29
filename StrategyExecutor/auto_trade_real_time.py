@@ -52,8 +52,9 @@ def process_stock_data(file_path, auto, exist_codes, amount):
                 price = float(price)
                 # 将price保留两位小数
                 price = round(price, 2)
-                if stock_no not in exist_codes:
-                    exist_codes.append(stock_no)
+                stock_key = "{}_{}".format(stock_no, price)
+                if stock_key not in exist_codes:
+                    exist_codes.append(stock_key)
                     result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
             except Exception:
                 traceback.print_exc()

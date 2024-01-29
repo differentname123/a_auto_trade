@@ -336,7 +336,7 @@ def gen_all_signal_processing_good(args, threshold_day=1, is_skip=False):
 
             # results_df = backtest_func(signal_data)
             results_df = signal_data[signal_data['Buy_Signal'] == True]
-            processed_result = process_results_with_every_period(results_df, threshold_day)
+            processed_result = process_results_with_every_period(results_df, threshold_day, dimension='month')
 
             if processed_result:
                 result_df_dict[combination_key] = processed_result
@@ -446,6 +446,79 @@ def gen_all_signal_processing_with_back_data(args, threshold_day=1, is_skip=True
         end_time = time.time()
         print(
             f"{file_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+
+
+def gen_all_signal_processing_gen_single_file_bad(args, threshold_day=1, is_skip=False):
+    """
+    会将本次结果单独存储一份
+    """
+    start_time = time.time()
+    try:
+        zero_combination = set()  # Using a set for faster lookups
+        full_name, final_combinations, gen_signal_func, backtest_func = args
+
+        data = pd.read_csv(full_name, low_memory=False)
+        # data = gen_signal_func(data)
+        data['Buy Date'] = pd.to_datetime(data['Buy Date'])
+        mingcheng = os.path.basename(full_name).split('.')[0].split('_')[0]
+        # file_name = Path('../back/gen/zuhe') / f"{data['名称'].iloc[0]}.json"
+        recent_file_name = Path('../back/bad_gen/single') / f"{mingcheng}.json"
+        # file_name = Path('../back/zuhe') / f"C夏厦.json"
+        # file_name.parent.mkdir(parents=True, exist_ok=True)
+        if is_skip:
+            recent_result_df_dict = read_json(recent_file_name)
+            # 获取full_name的父目录
+            out_put_file_path = os.path.dirname(full_name)
+            false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(full_name)))
+            false_columns = set()
+            if os.path.exists(false_columns_output_filename):
+                with open(false_columns_output_filename, 'r') as lines:
+                    for line in lines:
+                        # 假设每行是以逗号分隔的元素
+                        elements = line.strip().split(',')
+                        false_columns.add(frozenset(elements))
+
+            final_combinations, zero_combination = filter_combinations_good(false_columns, final_combinations)
+            final_combinations, zero_combination = filter_combinations(recent_result_df_dict, final_combinations)
+
+
+        recent_result_df_dict = {}
+        # 处理每个组合
+        for combination in final_combinations:
+            combination_key = ':'.join(combination)
+            signal_data = gen_signal(data, combination)
+
+            # 如果Buy_Signal全为False，则不进行回测
+            # if not signal_data['Buy_Signal'].any():
+            #     # result_df_dict[combination_key] = create_empty_result()
+            #     recent_result_df_dict[combination_key] = create_empty_result()
+            #     continue
+
+            # origin_results_df = backtest_func(signal_data)
+            results_df = signal_data[signal_data['Buy_Signal'] == True]
+            # if results_df.shape[0] != origin_results_df.shape[0]:
+            #     print('diff:')
+            #     print(origin_results_df)
+            #     print(results_df)
+            processed_result = process_results_with_every_period(results_df, threshold_day)
+
+            if processed_result:
+                recent_result_df_dict[combination_key] = processed_result
+        # result_df_dict = read_json(file_name)
+        # result_df_dict.update(recent_result_df_dict)
+        write_json(recent_file_name, recent_result_df_dict)
+        # write_json(file_name, result_df_dict)
+
+    except Exception as e:
+        traceback.print_exc()
+    finally:
+        # 写入文件
+        end_time = time.time()
+        # 获取当前时间,保留到分钟
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+        print(
+            f"{now}_{recent_file_name}_{full_name} 耗时：{end_time - start_time}秒 data长度{data.shape[0]} zero_combination len: {len(zero_combination)} final_combinations len: {len(final_combinations)}")
+
 
 
 def gen_all_signal_processing_gen_single_file(args, threshold_day=1, is_skip=False):
@@ -822,6 +895,7 @@ def process_results_with_every_period(results_df, threshold_day, dimension='year
     }
 
     return aggregated_data
+
 def process_results_with_year(results_df, threshold_day):
     """
     增加最近三年内的信号个数
@@ -1195,6 +1269,15 @@ def back_layer_all_op_gen_single(file_path, result_combination_list, gen_signal_
     if result_combination_list:
         process_combinations_gen_single(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
 
+def back_layer_all_op_gen_single_bad(file_path, result_combination_list, gen_signal_func=gen_full_all_basic_signal,
+                          backtest_func=backtest_strategy_low_profit, target_key='target_key'):
+    """
+    分层进行回测的优化版函数,单独存储一份数据
+    """
+    # 优化5: 使用并行处理
+    if result_combination_list:
+        process_combinations_gen_single_bad(result_combination_list, file_path, gen_signal_func, backtest_func, target_key)
+
 def back_layer_all_with_back_data(task_with_back_data, result_combination_list, gen_signal_func=gen_full_all_basic_signal,
                           backtest_func=backtest_strategy_low_profit, target_key='target_key'):
     """
@@ -1301,6 +1384,38 @@ def process_combinations_gen_single(result_combination_list, file_path, gen_sign
         write_json('../back/gen/sublist.json', sublist_json)
 
         statistics_zuhe_gen_both_single_every_period('../back/gen/single')
+        print(f"Time taken: {end_time - start_time:.2f} seconds")
+
+def process_combinations_gen_single_bad(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
+    """
+    使用多进程处理组合
+    """
+    # 按照一定数量分割list
+    split_size = 200000
+    result_combination_lists = [result_combination_list[i:i + split_size] for i in
+                                range(0, len(result_combination_list), split_size)]
+    total_len = 0
+    sublist_json = []
+    for sublist in result_combination_lists:
+        # 开始计时
+        start_time = time.time()
+        # 读取sublist
+        total_len += len(sublist)
+        # 打印进度
+        print(f"Processing {total_len} files... of {len(result_combination_list)}")
+        tasks = prepare_tasks(sublist, file_path, gen_signal_func, backtest_func)
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+            total_files = len(tasks)
+            for i, _ in enumerate(pool.imap_unordered(gen_all_signal_processing_gen_single_file_bad, tasks), 1):
+                print(f"Processing file {i} of {total_files}...")
+        # 结束计时
+        end_time = time.time()
+        # 将sublist增加到sublist_json,并写入文件
+        sublist_json.extend(sublist)
+        sublist_json = deduplicate_2d_list(sublist_json)
+        write_json('../back/bad_gen/sublist.json', sublist_json)
+
+        statistics_zuhe_gen_both_single_every_period('../back/bad_gen/single')
         print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def process_combinations_gen(result_combination_list, file_path, gen_signal_func, backtest_func, target_key):
@@ -1558,11 +1673,11 @@ def statistics_zuhe_good(file_path):
                     for key1, value1 in value.items():
                         if key1 in result[key]:
                             for key2, value2 in value1.items():
-                                if key2 == 'all_date':
-                                    result[key][key1][key2].extend(value2)
-                                    # 去重
-                                    result[key][key1][key2] = list(set(result[key][key1][key2]))
-                                    continue
+                                # if key2 == 'all_date':
+                                #     result[key][key1][key2].extend(value2)
+                                #     # 去重
+                                #     result[key][key1][key2] = list(set(result[key][key1][key2]))
+                                #     continue
 
                                 if key2 in result[key][key1]:
                                     result[key][key1][key2] += value2
@@ -1608,10 +1723,10 @@ def statistics_zuhe_good(file_path):
     # 将result写入file_path上一级文件
     file_name = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}.json'
     # 写入一份备份文件
-    file_name_backup = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
-    if os.path.exists(file_name_backup):
-        os.remove(file_name_backup)
-    write_json(file_name_backup, result)
+    # file_name_backup = Path(file_path).parent / f'statistics_{target_key.replace(":", "_")}_backup.json'
+    # if os.path.exists(file_name_backup):
+    #     os.remove(file_name_backup)
+    # write_json(file_name_backup, result)
     # 先删除原来的statistics.json文件
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
     if os.path.exists(file_name):
@@ -1621,12 +1736,12 @@ def statistics_zuhe_good(file_path):
     # 读取'../back/gen/statistics_all.json'文件，然后将result中的数据合并到statistics_all.json中
     statistics_all = read_json('../back/gen/statistics_all.json')
     statistics_all.update(result)
-    statistics_all_backup = '../back/gen/statistics_all_backup.json'
-    if os.path.exists(statistics_all_backup):
-        old_data = read_json(statistics_all_backup)
-        if len(old_data) < len(statistics_all):
-            os.remove(statistics_all_backup)
-            write_json(statistics_all_backup, statistics_all)
+    # statistics_all_backup = '../back/gen/statistics_all_backup.json'
+    # if os.path.exists(statistics_all_backup):
+    #     old_data = read_json(statistics_all_backup)
+    #     if len(old_data) < len(statistics_all):
+    #         os.remove(statistics_all_backup)
+    #         write_json(statistics_all_backup, statistics_all)
 
     # 将statistics_all.json写入文件
     write_json('../back/gen/statistics_all.json', statistics_all)
@@ -1874,12 +1989,12 @@ def statistics_zuhe_gen_both_single_every_period(file_path):
                 value['average_1w_profit'] = 0
                 value['average_days_held'] = 0
                 value['total_profit'] = 0
-                value['date_count'] = 0
-                value['date_ratio'] = 0
-                # 找到value['all_date']中的起始和结束时间
-                value['start_date'] = "1970"
-                value['end_date'] = "2100"
-            value['all_date'] = []
+                # value['date_count'] = 0
+                # value['date_ratio'] = 0
+                # # 找到value['all_date']中的起始和结束时间
+                # value['start_date'] = "1970"
+                # value['end_date'] = "2100"
+            # value['all_date'] = []
     # 将resul trade_count降序排序，然后在此基础上再按照ratio升序排序
     result = dict(sorted(result.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
     # 写入target_key.json

@@ -24,7 +24,7 @@ from StrategyExecutor.common import load_data, backtest_strategy_low_profit
 from StrategyExecutor.full_zehe import compute_more_than_one_day_held
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, back_layer_all_op_gen, \
     gen_full_all_basic_signal_gen, statistics_zuhe_gen, read_json, back_layer_all_good, statistics_zuhe_gen_both, \
-    back_layer_all_op_gen_single, statistics_zuhe_gen_both_single, write_json
+    back_layer_all_op_gen_single, statistics_zuhe_gen_both_single, write_json, back_layer_all_op_gen_single_bad
 
 
 def _generate_gene(min_ones, max_ones, gene_length, judge_gene):
@@ -35,6 +35,17 @@ def _generate_gene(min_ones, max_ones, gene_length, judge_gene):
     if judge_gene(gene_str):
         return gene_str
     return None
+
+def judge_json(json_data):
+    if 'all' in json_data.keys():
+        if json_data['all']['trade_count'] < 1000:
+            return True
+        else:
+            return False
+    else:
+        if json_data['trade_count'] < 1000:
+            return True
+    return False
 
 def generate_offspring_op(args):
     # 开始计时
@@ -58,7 +69,7 @@ def load_all_statistics():
     读取所有组合的统计信息
     :return:
     """
-    all_statistics = read_json('../back/gen/statistics_all.json')
+    all_statistics = read_json('../back/bad_gen/statistics_all.json')
     existed_combinations = set(all_statistics.keys())
     return existed_combinations
 
@@ -80,7 +91,7 @@ class GeneticAlgorithm:
         读取所有组合的统计信息
         :return:
         """
-        all_statistics = read_json('../back/gen/statistics_all.json')
+        all_statistics = read_json('../back/bad_gen/statistics_all.json')
 
         self.existed_combinations = set(all_statistics.keys())
         # 找出所有低于1000次交易的组合
@@ -119,7 +130,7 @@ class GeneticAlgorithm:
         return True
 
     def _initialize_population(self):
-        statistics = read_json('../back/gen/statistics_target_key.json')
+        statistics = read_json('../back/bad_gen/statistics_target_key.json')
         if len(statistics) == 0:
             return self._initialize_population_mul()
         else:
@@ -150,7 +161,7 @@ class GeneticAlgorithm:
         # 开始计时
         start_time = time.time()
         new_population = set()
-        statistics = read_json('../back/gen/statistics_target_key.json')
+        statistics = read_json('../back/bad_gen/statistics_target_key.json')
         self.population = [self.cover_to_individual(combination) for combination in statistics.keys()]
         self.gen_combination_to_fitness()
         while len(new_population) < self.population_size:
@@ -203,7 +214,7 @@ class GeneticAlgorithm:
         # 开始计时
         start_time = time.time()
         new_population = set()
-        statistics = read_json('../back/gen/statistics_target_key.json')
+        statistics = read_json('../back/bad_gen/statistics_target_key.json')
         self.population = [self.cover_to_individual(combination) for combination in statistics.keys()]
         self.gen_combination_to_fitness()
         while len(new_population) < self.population_size:
@@ -241,7 +252,6 @@ class GeneticAlgorithm:
         start_time = time.time()
         # 初始化种群，确保每个基因中1的数量在指定范围内
         population = set()
-        self.load_all_statistics()
 
         while len(population) < self.population_size:
             # 使用多进程
@@ -364,15 +374,15 @@ class GeneticAlgorithm:
         获取当前种群的所有适应度
         :return:
         """
-        # # 读取'../back/gen/sublist.json'
-        # self.combinations = read_json('../back/gen/sublist_back.json')
+        # # 读取'../back/bad_gen/sublist.json'
+        # self.combinations = read_json('../back/bad_gen/sublist_back.json')
         # # 将combinations转换为population
         # self.population = [''.join(['1' if self.signal_columns[i] in combination else '0' for i in
         #                             range(len(self.signal_columns))]) for combination in self.combinations]
 
         # self.combinations = ['收盘_5日_小极值_signal:换手率_小于_10_日均线_signal:股价_非跌停_signal:开盘_小于_5_固定区间_signal:开盘_小于_10_日均线_signal:涨跌幅_小于_20_日均线_signal:收盘_5日_小极值_signal_yes:换手率_大于_5_日均线_signal_yes:实体rate_5日_大极值signal_yes:开盘_小于_20_日均线_signal_yes:振幅_小于_5_日均线_signal_yes'.split(':')]
         self.combinations = [self.cover_to_combination(individual) for individual in self.population]
-        back_layer_all_op_gen_single('../daily_all_100', self.combinations, gen_signal_func=gen_full_all_basic_signal,
+        back_layer_all_op_gen_single_bad('../daily_all_100_bad', self.combinations, gen_signal_func=gen_full_all_basic_signal,
                               backtest_func=backtest_strategy_low_profit)
         self.gen_combination_to_fitness()
 
@@ -381,7 +391,7 @@ class GeneticAlgorithm:
         生成种群和相应的适应度关系
         :return:
         """
-        statistics = read_json('../back/gen/statistics_target_key.json')
+        statistics = read_json('../back/bad_gen/statistics_target_key.json')
         self.relation_map = {}
         for individual in self.population:
             key = ':'.join(self.cover_to_combination(individual))
@@ -391,7 +401,7 @@ class GeneticAlgorithm:
                 # 是因为子组合就是0所以就没有统计到
                 self.relation_map[key] = [-1, 0]
 
-        # statistics = read_json('../back/gen/statistics_target_key.json')
+        # statistics = read_json('../back/bad_gen/statistics_target_key.json')
         # for key in statistics.keys():
         #     self.relation_map[key] = [self._fitness(statistics[key]), statistics[key]]
         # # 将适应度排序
@@ -451,7 +461,7 @@ class GeneticAlgorithm:
         except:
             pass
         # 增量写入文件
-        with open('../back/gen/best.txt', 'a') as f:
+        with open('../back/bad_gen/best.txt', 'a') as f:
             f.write(str(best_info) + '\n')
         per_size = 2000
         while len(new_population) < self.population_size:
@@ -533,7 +543,7 @@ def filter_good_zuhe():
     过滤出好的指标，并且全部再跑一次
     :return:
     """
-    statistics = read_json('../back/gen/statistics_all.json')
+    statistics = read_json('../back/bad_gen/statistics_all.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 1)} # 100交易次数以上 13859
     # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
@@ -544,7 +554,7 @@ def filter_good_zuhe():
                        }
     statistics_all = dict()
     statistics_all.update(good_ratio_keys)
-    # compute_more_than_one_day_held('../back/gen/statistics_all.json')
+    # compute_more_than_one_day_held('../back/bad_gen/statistics_all.json')
     old_statistics = read_json('../back/statistics_target_key.json')
     # 所有的指标都应该满足10次以上的交易
     statistics_new_old = {k: v for k, v in old_statistics.items() if v['trade_count'] > 10} # 100交易次数以上 13859
@@ -564,9 +574,9 @@ def filter_good_zuhe():
                           backtest_func=backtest_strategy_low_profit)
 
 if __name__ == '__main__':
-    # statistics_zuhe_gen_both_single('../back/gen/single', target_key='all')
+    # statistics_zuhe_gen_both_single('../back/bad_gen/single', target_key='all')
     # filter_good_zuhe()
-    # statistics_zuhe_gen_both('../back/gen/zuhe', target_key='all')
+    # statistics_zuhe_gen_both('../back/bad_gen/zuhe', target_key='all')
     data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
     # data = gen_full_all_basic_signal(data)
     signal_columns = [column for column in data.columns if 'signal' in column]
@@ -587,4 +597,4 @@ if __name__ == '__main__':
     # # best_individual = ga.get_best_individual()
     # # best_fitness = ga._fitness(best_individual)
     # # print("Best Individual:", best_individual, "Fitness:", best_fitness)
-    # # statistics_zuhe_gen('../back/gen/zuhe', target_key="target_key")
+    # # statistics_zuhe_gen('../back/bad_gen/zuhe', target_key="target_key")

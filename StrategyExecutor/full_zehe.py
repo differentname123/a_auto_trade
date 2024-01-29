@@ -939,9 +939,11 @@ def get_good_statistic(date):
 
 def judge_json(json_data):
     if 'all' in json_data.keys():
-        if json_data['all']['trade_count'] > 10000:
+        if json_data['all']['trade_count'] > 1000:
             for k, v in json_data.items():
-                if v['ratio'] > 0.09:
+                if k != 'all' and '-' in k:
+                    return False
+                if v['ratio'] > 0.1:
                     return False
         else:
             return False
@@ -949,6 +951,15 @@ def judge_json(json_data):
         return False
     return True
 
+# def judge_json(json_data):
+#     if 'all' not in json_data.keys():
+#         if json_data['ratio'] <= 0.01 and json_data['size_of_result_df'] < 10:
+#             return True
+#         else:
+#             return False
+#     else:
+#         return False
+#     return False
 def get_good_combinations():
     """
     获取表现好的组合
@@ -956,16 +967,17 @@ def get_good_combinations():
     """
     # date = '2024-01-17'
     # statistics = read_json('../final_zuhe/statistics_target_key.json')
+    statistics = read_json('../back/bad_gen/statistics_all.json')
     # statistics = read_json('../back/gen/statistics_all.json')
-    statistics = read_json('../final_zuhe/good_statistics.json')
+    # statistics = read_json('../final_zuhe/good_statistics.json')
     # bad_statistics = get_good_statistic(date)
     bad_statistics = {}
     statistics_all = {}
     # # 所有的指标都应该满足10次以上的交易
     statistics_new = {k: v for k, v in statistics.items() if '指数' not in k and judge_json(v)}  # 100交易次数以上 13859
     good_ratio_keys = {k: v for k, v in statistics_new.items()
-                       if False
-                       or (v['all']['ratio'] <= 0.07)
+                       if True
+                       # or (v['all']['ratio'] <= 0.1)
                        # or (v['ratio'] <= 0.05 and (v['three_befor_year_count_thread_ratio'] <= 0.05) and v['three_befor_year_count'] > 0 and v['trade_count'] > 500)
                        # or (v['ratio'] == 0 and v['trade_count'] > 20)
                        # or (v['three_befor_year_count_thread_ratio'] == 0 and v['three_befor_year_count'] > 20)
@@ -1045,11 +1057,11 @@ def process_file_op(file_path, target_date, good_keys, good_statistics, gen_sign
     if target_data.empty:
         return None
     satisfied_combinations = dict()
-    for good_key in final_combinations:
-        good_key_str = ':'.join(good_key)
-        signal_data = gen_signal(target_data, good_key)
-        if signal_data['Buy_Signal'].values[0]:
-            satisfied_combinations[good_key_str] = good_statistics[good_key_str]
+    # for good_key in final_combinations:
+    #     good_key_str = ':'.join(good_key)
+    #     signal_data = gen_signal(target_data, good_key)
+    #     if signal_data['Buy_Signal'].values[0]:
+    #         satisfied_combinations[good_key_str] = good_statistics[good_key_str]
 
     stock_data = origin_data.copy()
     good_key = "超级短线_26"
@@ -2075,7 +2087,7 @@ def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date,
         # 开始计时
         start = time.time()
         price_data = get_price(code, '20230101', '20291021', period='daily')
-
+        price_data['code'] = code
         # price_data不为空才保存
         if not price_data.empty:
             origin_data = fix_st(price_data, '../announcements/{}.json'.format(code))
@@ -2522,6 +2534,52 @@ def load_file_chunk(file_chunk):
     chunk_data = [load_data(fname) for fname in file_chunk]
     return pd.concat(chunk_data)
 
+def get_all_data_perfomance():
+    """
+    加载所有的数据，并且获取每一天的表现情况
+    """
+    start_time = time.time()
+    file_path = '../daily_data_exclude_new_can_buy_with_back'
+
+    # 获取所有文件名
+    all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
+
+    # 使用多进程分块加载数据
+    cpu_count = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(processes=cpu_count)
+    file_chunks = [all_files[i::cpu_count] for i in range(cpu_count)]
+    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    pool.close()
+    pool.join()
+
+    # 合并数据
+    all_data_df = pd.concat(chunk_dfs)
+
+    # 确保 'Buy Date' 列是 datetime 类型
+    all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'], errors='coerce')
+
+    # 检查转换是否成功
+    if all_data_df['Buy Date'].dtype != '<M8[ns]':
+        raise ValueError("Buy Date column could not be converted to datetime")
+
+    merge_time = time.time()
+    print('合并耗时：', merge_time - start_time)
+
+    # 按照'Buy Date'进行分组
+    grouped_data = all_data_df.groupby(all_data_df['Buy Date'].dt.date)
+
+    # 分析每组数据
+    result_dict = {}
+    for date, group in grouped_data:
+        date_str = date.strftime('%Y-%m-%d')  # 将date对象转换为字符串
+        result_dict[date_str] = process_results_with_every_period(group, threshold_day=1)
+
+    # 将结果写入文件
+    output_filename = os.path.join('../final_zuhe/select/', 'all_data_perfomance.json')
+    write_json(output_filename, result_dict)
+
+    return result_dict
+
 def load_all_data():
     """
     加载所有数据
@@ -2561,6 +2619,55 @@ def load_all_data():
     end_time = time.time()
     print('总耗时：', end_time - start_time)
 
+def load_all_data_perfomance():
+    """
+    加载所有数据
+    """
+    start_time = time.time()
+    file_path = '../daily_data_exclude_new_can_buy_with_back'
+
+    # 获取所有文件名
+    all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
+
+    # 使用多进程分块加载数据
+    cpu_count = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(processes=cpu_count)
+    file_chunks = [all_files[i::cpu_count] for i in range(cpu_count)]
+    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    pool.close()
+    pool.join()
+
+    # 合并数据
+    all_data_df = pd.concat(chunk_dfs)
+    merge_time = time.time()
+    print('合并耗时：', merge_time - start_time)
+    output_filename = os.path.join('../final_zuhe/select/', 'all_data_perfomance.json')
+    data = read_json(output_filename)
+    bad_data_list = []
+    for key, value in data.items():
+        if value['all']['ratio'] > 0.2:
+            bad_data_list.append(key)
+    bad_data_df = all_data_df[all_data_df['Buy Date'].isin(bad_data_list)]
+    # 输出bad_data_df长度和all_data_df长度
+    print('bad_data_df长度：', len(bad_data_df))
+    print('all_data_df长度：', len(all_data_df))
+    all_data_df = bad_data_df
+    # 转换日期格式
+    all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
+
+    # 将数据均匀分成100份并写入文件
+    num_splits = 32
+    folder_path = '../daily_all_100_bad'
+    os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
+    split_size = math.ceil(len(all_data_df) / num_splits)
+
+    for i in range(num_splits):
+        split_data = all_data_df.iloc[i * split_size:(i + 1) * split_size]
+        split_data.to_csv(os.path.join(folder_path, f'{i + 1}.txt'), index=False)
+
+    end_time = time.time()
+    print('总耗时：', end_time - start_time)
+
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
     # # file_path = '../back/gen/statistics_all.json'
@@ -2569,17 +2676,25 @@ if __name__ == '__main__':
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
 
-    # get_good_combinations()
+
+    get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
     # save_and_analyse_all_data_mul_real_time('2024-01-26')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
-    back_range_select_op(start_time='2024-01-19', end_time='2024-01-19')
+    # back_range_select_op(start_time='2024-01-17', end_time='2024-01-19')
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
     # load_all_data()
+    # get_all_data_perfomance()
+    load_all_data_perfomance()
+
+    #     for k, v in value.items():
+    #         v['ratio'] = round(v['size_of_result_df'] / v['trade_count'], 4)
+    #         v['average_1w_profit'] = round(v['total_profit'] / v['total_cost'] * 10000, 4)
+    # write_json(output_filename, data)
 
     # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
 

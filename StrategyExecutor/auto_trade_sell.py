@@ -69,6 +69,19 @@ def get_sell_price(buy_price):
     sell_price = math.ceil(sell_price * 100) / 100
     return sell_price
 
+def sell_real_time():
+    data = auto.get_real_time_history()
+    for detail_data in data['data']:
+        print(detail_data)
+        amount = int(detail_data['成交数量'])
+        price = float(detail_data['成交均价'])
+        stock_no = detail_data['证券代码']
+        price = get_sell_price(price)
+        # 将price保留两位小数
+        price = round(price, 3)
+        auto.sell(stock_no=stock_no, amount=amount, price=price)
+
+
 if __name__ == '__main__':
     auto = ThsAuto()  # 连接客户端
     auto.active_mian_window()
@@ -76,6 +89,8 @@ if __name__ == '__main__':
     # run_client()
     # time.sleep(5)
     auto.bind_client()
+    # sell_real_time()
+
     # 撤销所有单
     # auto.cancel_all(entrust_no=None)
     print('持仓')
