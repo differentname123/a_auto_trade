@@ -89,7 +89,7 @@ if __name__ == '__main__':
     # run_client()
     # time.sleep(5)
     auto.bind_client()
-    # sell_real_time()
+    sell_real_time()
 
     # 撤销所有单
     # auto.cancel_all(entrust_no=None)

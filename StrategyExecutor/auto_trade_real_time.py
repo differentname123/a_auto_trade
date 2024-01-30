@@ -42,8 +42,25 @@ def delete_file_if_exists(file_path):
     if os.path.exists(file_path):
         os.remove(file_path)
 
+def get_order_info(file_path):
+    result = {}
+    if not os.path.exists(file_path):
+        return result
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f.readlines():
+            try:
+                stock_no, price = line.strip().split(',')
+                price = float(price)
+                if stock_no not in result:
+                    result[stock_no] = []
+                result[stock_no].append(price)
+            except Exception:
+                traceback.print_exc()
+                print(line)
+    return result
 
-def process_stock_data(file_path, auto, exist_codes, amount):
+def process_stock_data(order_output_file_path, file_path, auto, amount):
+    order_result = get_order_info(order_output_file_path)
     with open(file_path, 'r', encoding='utf-8') as file:
         for line in file.readlines():
             try:
@@ -52,10 +69,16 @@ def process_stock_data(file_path, auto, exist_codes, amount):
                 price = float(price)
                 # 将price保留两位小数
                 price = round(price, 2)
-                stock_key = "{}_{}".format(stock_no, price)
-                if stock_key not in exist_codes:
-                    exist_codes.append(stock_key)
+                if stock_no not in order_result:
+                    # 将stock_no, price写入到order_output_file_path文件中
+                    with open(order_output_file_path, 'a', encoding='utf-8') as f:
+                        f.write('{},{}\n'.format(stock_no, price))
                     result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
+                else:
+                    if price < min(order_result[stock_no]):
+                        with open(order_output_file_path, 'a', encoding='utf-8') as f:
+                            f.write('{},{}\n'.format(stock_no, price))
+                        result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
             except Exception:
                 traceback.print_exc()
                 print(line)
@@ -70,12 +93,12 @@ if __name__ == '__main__':
     auto.bind_client()
     auto.init_buy()
     amount = 100
-    exist_codes = []
 
     while True:
         target_date = datetime.now().strftime('%Y-%m-%d')
         # target_date = '2024-01-04'
         output_file_path = '../final_zuhe/select/select_{}_real_time.txt'.format(target_date)
+        order_output_file_path = '../final_zuhe/select/select_{}_real_time_order.txt'.format(target_date)
 
         delete_file_if_exists(output_file_path)
 
@@ -85,17 +108,14 @@ if __name__ == '__main__':
 
         while process.is_alive():
             if os.path.exists(output_file_path):
-                process_stock_data(output_file_path, auto, exist_codes, amount)
+                process_stock_data(order_output_file_path, output_file_path, auto, amount)
             else:
                 time.sleep(1)
 
         if os.path.exists(output_file_path):
-            process_stock_data(output_file_path, auto, exist_codes, amount)
+            process_stock_data(order_output_file_path, output_file_path, auto, amount)
         else:
             time.sleep(1)
-
-        print(len(exist_codes))
-        print(exist_codes)
 
 
 

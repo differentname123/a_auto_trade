@@ -583,7 +583,7 @@ if __name__ == '__main__':
     # 示例参数
     population_size = 100000  # 种群大小
     crossover_rate = 0.7  # 交叉率
-    mutation_rate = 0.001  # 变异率
+    mutation_rate = 0.01  # 变异率
 
     # 创建遗传算法实例并运行
     ga = GeneticAlgorithm(population_size, crossover_rate, mutation_rate, signal_columns)

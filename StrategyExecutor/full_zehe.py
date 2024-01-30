@@ -364,7 +364,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -2303,6 +2303,8 @@ def process_file_all(fullname, out_put_file_path, new_index_data_df):
     false_columns = origin_data_df.columns[(origin_data_df == False).all()]
     false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(fullname)))
     # origin_data_df = clear_other_clo(origin_data_df)
+    # 过滤掉origin_data_df['涨跌幅']大于(origin_data_df['Max_rate'] 1/origin_data_df['收盘'])的数据
+    origin_data_df = origin_data_df[origin_data_df['涨跌幅'] <= (origin_data_df['Max_rate'] - 1.0/ origin_data_df['收盘'])]
     #将false_columns写入文件
     with open(false_columns_output_filename, 'w') as f:
         f.write('\n'.join(false_columns.tolist()))
@@ -2607,8 +2609,8 @@ def load_all_data():
     all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
 
     # 将数据均匀分成100份并写入文件
-    num_splits = 96
-    folder_path = '../daily_all_100'
+    num_splits = 1
+    folder_path = '../daily_all_2024'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
 
@@ -2625,7 +2627,12 @@ def load_all_data_perfomance():
     """
     start_time = time.time()
     file_path = '../daily_data_exclude_new_can_buy_with_back'
-
+    output_filename = os.path.join('../final_zuhe/select/', 'all_data_perfomance.json')
+    data = read_json(output_filename)
+    bad_data_list = []
+    for key, value in data.items():
+        if value['all']['ratio'] > 0.3:
+            bad_data_list.append(key)
     # 获取所有文件名
     all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
 
@@ -2641,12 +2648,7 @@ def load_all_data_perfomance():
     all_data_df = pd.concat(chunk_dfs)
     merge_time = time.time()
     print('合并耗时：', merge_time - start_time)
-    output_filename = os.path.join('../final_zuhe/select/', 'all_data_perfomance.json')
-    data = read_json(output_filename)
-    bad_data_list = []
-    for key, value in data.items():
-        if value['all']['ratio'] > 0.2:
-            bad_data_list.append(key)
+
     bad_data_df = all_data_df[all_data_df['Buy Date'].isin(bad_data_list)]
     # 输出bad_data_df长度和all_data_df长度
     print('bad_data_df长度：', len(bad_data_df))
@@ -2656,8 +2658,8 @@ def load_all_data_perfomance():
     all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
 
     # 将数据均匀分成100份并写入文件
-    num_splits = 32
-    folder_path = '../daily_all_100_bad'
+    num_splits = 1
+    folder_path = '../daily_all_100_bad_0.3'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
 
@@ -2677,7 +2679,7 @@ if __name__ == '__main__':
     # filter_good_zuhe()
 
 
-    get_good_combinations()
+    # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
     # save_and_analyse_all_data_mul_real_time('2024-01-26')
     # get_newest_stock()
@@ -2718,7 +2720,7 @@ if __name__ == '__main__':
     # # 获取每个日期对应的数据的数量
     # all_date_count = all_df.groupby('日期').size()
     # print(all_date_count)
-
+    # data = pd.read_csv('../daily_data_exclude_new_can_buy_with_back/东方电子_000682.txt', low_memory=False)
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
