@@ -84,38 +84,45 @@ def process_stock_data(order_output_file_path, file_path, auto, amount):
                 print(line)
 
 
+def is_time_between(start_time, end_time, check_time=None):
+    """检查当前时间是否在给定的时间范围内"""
+    check_time = check_time or datetime.now().time()
+    if start_time < end_time:
+        return start_time <= check_time <= end_time
+    else: # 跨过午夜
+        return check_time >= start_time or check_time <= end_time
+
 if __name__ == '__main__':
     auto = ThsAuto()  # 连接客户端
     auto.active_mian_window()
-    # auto.kill_client()
-    # run_client()
-    # time.sleep(5)
     auto.bind_client()
     auto.init_buy()
     amount = 100
 
     while True:
-        target_date = datetime.now().strftime('%Y-%m-%d')
-        # target_date = '2024-01-04'
-        output_file_path = '../final_zuhe/select/select_{}_real_time.txt'.format(target_date)
-        order_output_file_path = '../final_zuhe/select/select_{}_real_time_order.txt'.format(target_date)
+        # 检查当前时间是否在9:30到15:00之间
+        if is_time_between(datetime.strptime("09:30", "%H:%M").time(),datetime.strptime("11:30", "%H:%M").time()) or is_time_between(datetime.strptime("13:00", "%H:%M").time(),datetime.strptime("15:00", "%H:%M").time()):
+            # 在这里执行您的主要逻辑
+            target_date = datetime.now().strftime('%Y-%m-%d')
+            output_file_path = '../final_zuhe/select/select_{}_real_time.txt'.format(target_date)
+            order_output_file_path = '../final_zuhe/select/select_{}_real_time_order.txt'.format(target_date)
 
-        delete_file_if_exists(output_file_path)
+            delete_file_if_exists(output_file_path)
 
-        # 用一个新的进程去执行save_and_analyse_all_data_mul(target_date)
-        process = multiprocessing.Process(target=save_and_analyse_all_data_mul_real_time, args=(target_date,))
-        process.start()
+            process = multiprocessing.Process(target=save_and_analyse_all_data_mul_real_time, args=(target_date,))
+            process.start()
 
-        while process.is_alive():
+            while process.is_alive():
+                if os.path.exists(output_file_path):
+                    process_stock_data(order_output_file_path, output_file_path, auto, amount)
+                else:
+                    time.sleep(1)
+
             if os.path.exists(output_file_path):
                 process_stock_data(order_output_file_path, output_file_path, auto, amount)
-            else:
-                time.sleep(1)
-
-        if os.path.exists(output_file_path):
-            process_stock_data(order_output_file_path, output_file_path, auto, amount)
         else:
-            time.sleep(1)
+            # 如果不在运行时间内，则等待一段时间（例如30秒）后再次检查
+            time.sleep(10)
 
 
 

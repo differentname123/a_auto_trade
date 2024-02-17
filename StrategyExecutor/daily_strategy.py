@@ -907,6 +907,17 @@ def gen_daily_buy_signal_30(data):
     data['Buy_Signal'] = (data['Max_rate'] > 0) & (data['最低'] <= data['收盘'].shift(1) * 0.95 * 0.9) & (data['收盘'] > data['开盘'])& (data['收盘'] > 2)
     return data
 
+def gen_daily_buy_signal_31(data):
+    """
+    昨日涨停，今天收阳
+    :param data:
+    :return:
+    """
+
+    # CROSS(JWZZ, 95) - Indicates where JWZZ crosses above 95
+    data['Buy_Signal'] = (data['Max_rate'] > 0) & (data['涨跌幅'].shift(1) > 0.95 * data['Max_rate']) & (data['收盘'] > data['开盘']) & (data['收盘'].shift(1) < data['开盘']) & (data['涨跌幅'] < 5)
+    return data
+
 def select_stocks(data):
     def SMA(S, N, M=1):  # Chinese style SMA
         return pd.Series(S).ewm(alpha=M / N, adjust=False).mean().values

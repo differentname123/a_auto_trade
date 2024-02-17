@@ -49,7 +49,7 @@ matplotlib.use('Agg')
 
 from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_daily_buy_signal_27, \
     gen_daily_buy_signal_25, gen_daily_buy_signal_28, gen_true, gen_daily_buy_signal_29, gen_daily_buy_signal_30, \
-    select_stocks, mix_back
+    select_stocks, mix_back, gen_daily_buy_signal_31
 from StrategyExecutor.strategy import back_all_stock, strategy
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
     create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal, process_results_with_every_year, \
@@ -364,7 +364,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -2098,12 +2098,12 @@ def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date,
             buy_data = get_threshold_close_target_date(target_date, stock_data)
             current_time = time.strftime('%Y-%m-%d %H:%M', time.localtime(time.time()))
             if not buy_data.empty:
-                if buy_data.iloc[0]['Buy_Signal']:
-                    price = buy_data.iloc[0]['收盘']
-                    with open(output_file_path, 'a') as f:
-                        f.write(code + ',' + str(price) + '\n')
-                    # 获取当前时间,精确到分钟
-                    print('time:{} data:{}'.format(current_time, buy_data))
+                # if buy_data.iloc[0]['Buy_Signal']:
+                #     price = buy_data.iloc[0]['收盘']
+                #     with open(output_file_path, 'a') as f:
+                #         f.write(code + ',' + str(price) + '\n')
+                #     # 获取当前时间,精确到分钟
+                #     print('time:{} data:{}'.format(current_time, buy_data))
                 if (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
                     price = buy_data.iloc[0]['threshold_close_down']
                     with open(output_file_path, 'a') as f:
@@ -2631,7 +2631,7 @@ def load_all_data_perfomance():
     data = read_json(output_filename)
     bad_data_list = []
     for key, value in data.items():
-        if value['all']['ratio'] > 0.3:
+        if value['all']['ratio'] >= 0.0:
             bad_data_list.append(key)
     # 获取所有文件名
     all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
@@ -2659,7 +2659,7 @@ def load_all_data_perfomance():
 
     # 将数据均匀分成100份并写入文件
     num_splits = 1
-    folder_path = '../daily_all_100_bad_0.3'
+    folder_path = '../daily_all_100_bad_0.0'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
 
@@ -2669,6 +2669,26 @@ def load_all_data_perfomance():
 
     end_time = time.time()
     print('总耗时：', end_time - start_time)
+
+def get_common_line():
+    file_path = '../model/selected_features.txt'
+    file_path1 = '../model/selected_features_0.5.txt'
+    file_set = set()
+    file_1_set = set()
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            file_set.add(line.strip())
+    with open(file_path1, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            file_1_set.add(line.strip())
+    # 输出两个文件的数量和交集数量
+    print('file_set长度：', len(file_set))
+    print('file_1_set长度：', len(file_1_set))
+    print('交集长度：', len(file_set & file_1_set))
+    return file_set & file_1_set
+
 
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
@@ -2681,7 +2701,7 @@ if __name__ == '__main__':
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
-    # save_and_analyse_all_data_mul_real_time('2024-01-26')
+    # save_and_analyse_all_data_mul_real_time('2024-02-05')
     # get_newest_stock()
     # back_range_select_op(start_time='2023-10-01', end_time='2023-12-01')
     # back_range_select_op(start_time='2024-01-12', end_time='2024-01-19')
@@ -2691,7 +2711,10 @@ if __name__ == '__main__':
 
     # load_all_data()
     # get_all_data_perfomance()
-    load_all_data_perfomance()
+    # load_all_data_perfomance()
+
+    # common_data = get_common_line()
+    # print(common_data)
 
     #     for k, v in value.items():
     #         v['ratio'] = round(v['size_of_result_df'] / v['trade_count'], 4)
@@ -2706,7 +2729,7 @@ if __name__ == '__main__':
     # date = '2024-01-26'
     # buy_data = get_target_thread(date)
     # buy_data = get_target_thread_min(date)
-    # back_range_select_real_time(start_time='2024-01-11', end_time='2024-01-23')
+    # back_range_select_real_time(start_time='2024-02-05', end_time='2024-02-05')
     # print(buy_data)
 
     # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
@@ -2724,7 +2747,7 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_31, backtest_func=backtest_strategy_low_profit)
 
     # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 

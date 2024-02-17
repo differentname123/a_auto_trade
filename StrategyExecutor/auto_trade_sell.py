@@ -87,7 +87,7 @@ if __name__ == '__main__':
     auto.active_mian_window()
     # auto.kill_client()
     # run_client()
-    # time.sleep(5)
+    time.sleep(1)
     auto.bind_client()
     sell_real_time()
 

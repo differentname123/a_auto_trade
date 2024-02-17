@@ -18,7 +18,7 @@ from joblib import dump, load
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, ParameterGrid
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report, precision_score
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.model_selection import train_test_split, RandomizedSearchCV, cross_val_predict
@@ -29,10 +29,8 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import make_scorer, f1_score
 # origin_data_path = '../daily_all_2024/1.txt'
-origin_data_path = '../daily_all_100_bad_0.3/1.txt'
-# origin_data_path = '../daily_all_100_bad_0.5/1.txt'
+origin_data_path = '../daily_all_100_bad_0.5/1.txt'
 # 获取origin_data_path的上一级目录，不要更上一级目录
-
 origin_data_path_dir = os.path.dirname(origin_data_path)
 origin_data_path_dir = origin_data_path_dir.split('/')[-1]
 # data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
@@ -51,27 +49,26 @@ print(f'true_count: {true_count/len(y)}')
 # 将数据集分为训练集和测试集
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
-# 处理类别不平衡
-X_train = X_train.astype(int)
-X_test = X_test.astype(int)
-smote = SMOTE()
-X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
-X_train = X_train_smote
-y_train = y_train_smote
+# X_train = X_train.astype(int)
+# X_test = X_test.astype(int)
+# # 处理类别不平衡
+# smote = SMOTE()
+# X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
 
-# 创建随机森林分类器
-rf_classifier = RandomForestClassifier(random_state=42, n_jobs=-1)
+# 创建梯度提升机分类器
+gbm_classifier = GradientBoostingClassifier(random_state=42)
 
 # 定义参数网格
 param_grid = {
     'n_estimators': [100, 250, 300, 400, 500, 600],
-    'max_depth': [10, 20, 30, None],
-    'min_samples_split': [2, 3, 4, 5, 6],
-    'min_samples_leaf': [1, 2, 3, 4]
+    'max_depth': [3, 5, 7, 9],
+    'min_samples_split': [2, 3, 4],
+    'min_samples_leaf': [1, 2, 3],
+    'learning_rate': [0.01, 0.1, 0.2]
 }
 
 # 结果文件路径
-results_file = '{}{}classification_reports.json'.format('../model/reports/', origin_data_path_dir)
+results_file = '{}{}GradientBoostingClassifier_reports.json'.format('../model/reports/', origin_data_path_dir)
 
 # 读取现有结果（如果文件存在）
 if os.path.exists(results_file):
@@ -85,6 +82,7 @@ else:
 # 自定义阈值
 threshold_range = np.arange(0.5, 1.05, 0.05)
 count = 0
+
 # 对参数网格进行迭代
 for params in ParameterGrid(param_grid):
     params_key = '_'.join([f'{key}_{value}' for key, value in params.items()])
@@ -94,12 +92,13 @@ for params in ParameterGrid(param_grid):
         print(f'Already processed {params_key}')
         continue  # 如果已处理，则跳过
 
-    one_report = {'params': params, 'params_key': params_key, 'report': []}
     # 设置梯度提升机分类器参数
-    rf_classifier.set_params(**params)
-    # 进行模型训练和预测
-    proba_predictions = cross_val_predict(rf_classifier, X_train, y_train, cv=3, n_jobs=-1, method='predict_proba')
+    gbm_classifier.set_params(**params)
 
+    # 进行模型训练和预测
+    proba_predictions = cross_val_predict(gbm_classifier, X_train, y_train, cv=3, n_jobs=-1, method='predict_proba')
+
+    one_report = {'params': params, 'params_key': params_key, 'report': []}
     for threshold in threshold_range:
         # 应用自定义阈值来确定分类
         custom_predictions = (proba_predictions[:, 1] >= threshold).astype(int)
