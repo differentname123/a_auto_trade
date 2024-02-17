@@ -22,6 +22,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 MODEL_PATH = '../model/all_models'
+MODEL_REPORT_PATH = '../model/all_model_reports'
 
 
 def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
@@ -119,7 +120,7 @@ def get_model_report(model_path, model_name):
     """
     file_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.5/1.txt', '../daily_all_100_bad_0.3/1.txt']
 
-    report_path = os.path.join(model_path, 'a_model_report.json')
+    report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
     result_dict = {}
     # 加载已有报告
     if os.path.exists(report_path):
@@ -138,8 +139,9 @@ def get_model_report(model_path, model_name):
     for file_path in file_path_list:
         # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
         if model_name in result_dict and file_path in result_dict[model_name]:
-            print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
-            continue
+            if result_dict[model_name][file_path] != {}:
+                print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
+                continue
         temp_dict_list = []
         data = pd.read_csv(file_path, low_memory=False)
         signal_columns = [column for column in data.columns if 'signal' in column]
@@ -179,10 +181,17 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.5/1.txt', '../daily_all_100_bad_0.3/1.txt', '../daily_all_100_bad_0.0/1.txt']
+    origin_data_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.0/1.txt']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [1, 2], is_skip=True)
 
+def build_models1():
+    """
+    训练所有模型
+    """
+    origin_data_path_list = ['../daily_all_100_bad_0.3/1.txt', '../daily_all_100_bad_0.5/1.txt']
+    for origin_data_path in origin_data_path_list:
+        train_all_model(origin_data_path, [1, 2], is_skip=True)
 
 def get_all_model_report():
     """
@@ -193,15 +202,20 @@ def get_all_model_report():
         model_list = [model for model in os.listdir(model_path) if model.endswith('.joblib')]
 
         # 使用进程池来并行处理每个模型的报告生成
-        with Pool(1) as p:
+        with Pool(9) as p:
             p.starmap(get_model_report, [(model_path, model_name) for model_name in model_list])
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     p1 = Process(target=build_models)
+    p11 = Process(target=build_models1)
     p2 = Process(target=get_all_model_report)
+
     p1.start()
     p2.start()
+    p11.start()
+
+    p11.join()
     p1.join()
     p2.join()

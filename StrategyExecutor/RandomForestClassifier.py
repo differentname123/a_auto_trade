@@ -19,9 +19,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
-origin_data_path = '../daily_all_2024/1.txt'
+# origin_data_path = '../daily_all_2024/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.5/1.txt'
-# origin_data_path = '../daily_all_100_bad_0.3/1.txt'
+origin_data_path = '../daily_all_100_bad_0.3/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.0/1.txt'
 # data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
 data = pd.read_csv(origin_data_path, low_memory=False)
@@ -77,8 +77,8 @@ model_filename = os.path.join('../model/', model_filename)
 if is_skip and os.path.exists(model_filename):
     # 如果存在，直接加载模型
     rf_classifier = load(model_filename)
-    # X_test = X
-    # y_test = y
+    X_test = X
+    y_test = y
 else:
     # 如果不存在，创建并训练模型
     rf_classifier = RandomForestClassifier(
