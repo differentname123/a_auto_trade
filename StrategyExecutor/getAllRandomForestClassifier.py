@@ -140,6 +140,7 @@ def get_model_report(model_path, model_name):
         # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
         if model_name in result_dict and file_path in result_dict[model_name]:
             if result_dict[model_name][file_path] != {}:
+                new_temp_dict[file_path] = result_dict[model_name][file_path]
                 print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
                 continue
         temp_dict_list = []
@@ -181,7 +182,7 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.0/1.txt']
+    origin_data_path_list = ['../daily_all_100_bad_0.3/1.txt']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [1, 2], is_skip=True)
 
@@ -189,7 +190,7 @@ def build_models1():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../daily_all_100_bad_0.3/1.txt', '../daily_all_100_bad_0.5/1.txt']
+    origin_data_path_list = ['../daily_all_100_bad_0.5/1.txt']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [1, 2], is_skip=True)
 

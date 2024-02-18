@@ -19,9 +19,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
-# origin_data_path = '../daily_all_2024/1.txt'
+origin_data_path = '../daily_all_2024/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.5/1.txt'
-origin_data_path = '../daily_all_100_bad_0.3/1.txt'
+# origin_data_path = '../daily_all_100_bad_0.3/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.0/1.txt'
 # data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
 data = pd.read_csv(origin_data_path, low_memory=False)
@@ -102,44 +102,33 @@ else:
     # 保存模型
     dump(rf_classifier, model_filename)
 
-# 使用模型预测概率
-y_pred_proba = rf_classifier.predict_proba(X_test)
+# 假设阈值设置为0.7，仅考虑预测概率大于此值的树
+threshold = 0.7
 
-# 使用模型进行类别预测而不是概率预测
-y_pred = rf_classifier.predict(X_test)
+# 获取每棵树的预测结果
+tree_preds = np.array([tree.predict_proba(X_test) for tree in rf_classifier.estimators_])
+
+# 初始化高置信度投票计数器
+high_confidence_votes = np.zeros((X_test.shape[0], 2))
+
+# 对每棵树的预测进行迭代，仅当预测概率超过阈值时才计入投票
+for tree_pred in tree_preds:
+    # 对于每个样本，找到概率最高的类别及其概率
+    max_probs = np.max(tree_pred, axis=1)
+    max_class = np.argmax(tree_pred, axis=1)
+
+    # 仅考虑概率大于阈值的预测
+    for i, (prob, cls) in enumerate(zip(max_probs, max_class)):
+        if prob > threshold:
+            high_confidence_votes[i, cls] += 1
+
+# 根据高置信度投票决定最终类别
+y_pred_high_conf = np.argmax(high_confidence_votes, axis=1)
 
 # 计算准确率
-accuracy = accuracy_score(y_test, y_pred)
-print(f'模型准确率: {accuracy}')
+accuracy_high_conf = accuracy_score(y_test, y_pred_high_conf)
+print(f'高置信度模型准确率: {accuracy_high_conf}')
 
 # 获取更详细的分类报告（如精确度、召回率、F1分数）
-report = classification_report(y_test, y_pred)
-print(report)
-
-# 测试集的总样本数
-total_samples = len(y_test)
-
-# 设置阈值的范围，比如从0.5增加到0.9，步长为0.05
-threshold_values = np.arange(0.5, 1, 0.05)
-
-for threshold in threshold_values:
-    # 获取高于阈值的预测结果
-    high_confidence_true = (y_pred_proba[:, 1] > threshold)
-
-    # 计算这些高置信度预测的精确率
-    selected_true = high_confidence_true[y_test]  # 选取实际为 True 的样本
-    precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
-
-    # 高于阈值的预测样本数
-    predicted_true_samples = np.sum(high_confidence_true)
-
-    print(f'阈值: {threshold:.2f}, 高置信度预测为True的精确率: {precision:.2f}, 预测为True的样本数量: {predicted_true_samples}, 总样本数: {total_samples}')
-
-    # # 如果有高于阈值的预测样本，打印对应的原始数据
-    # if predicted_true_samples > 0:
-    #     # 从测试集中选择高于阈值的样本
-    #     selected_samples = X_test[high_confidence_true]
-    #     # 获取selected_samples的索引，找到data中对应的原始数据
-    #     selected_samples = data.iloc[selected_samples.index]
-    #     print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:')
-    #     print(selected_samples)
+report_high_conf = classification_report(y_test, y_pred_high_conf)
+print(report_high_conf)
