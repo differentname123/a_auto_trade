@@ -10,6 +10,7 @@
 """
 import json
 import os
+import time
 from multiprocessing import Process, Pool
 
 from imblearn.over_sampling import SMOTE
@@ -203,8 +204,9 @@ def get_all_model_report():
         model_list = [model for model in os.listdir(model_path) if model.endswith('.joblib')]
 
         # 使用进程池来并行处理每个模型的报告生成
-        with Pool(9) as p:
+        with Pool(2) as p:
             p.starmap(get_model_report, [(model_path, model_name) for model_name in model_list])
+        time.sleep(60)  # 每隔一天重新生成一次报告
 
 
 # 将build_models和get_all_model_report用两个进程同时执行

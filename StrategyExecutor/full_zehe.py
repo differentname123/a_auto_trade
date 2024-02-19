@@ -2749,7 +2749,7 @@ if __name__ == '__main__':
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_31, backtest_func=backtest_strategy_low_profit)
 
-    # strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
 
     # # statistics = read_json('../back/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json') # 大小 2126501
