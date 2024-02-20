@@ -8,6 +8,8 @@
 :description:
 
 """
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import talib
@@ -823,7 +825,43 @@ def gen_daily_buy_signal_26(data):
 
     # 综合所有条件，更新Buy_Signal列
     data['Buy_Signal'] &= X_14 & X_15 & X_16 & X_17 & X_19 & X_13 & X_4 & X_5 & X_6
-
+    # # 计算每个条件中True的个数和False的个数
+    # condition_counts = {
+    #     'X_4_True_Count': X_4.sum(),
+    #     'X_5_True_Count': X_5.sum(),
+    #     'X_6_True_Count': X_6.sum(),
+    #     'X_13_True_Count': X_13.sum(),
+    #     'X_14_True_Count': X_14.sum(),
+    #     'X_15_True_Count': X_15.sum(),
+    #     'X_16_True_Count': X_16.sum(),
+    #     'X_17_True_Count': X_17.sum(),
+    #     'X_19_True_Count': X_19.sum(),
+    # }
+    #
+    # # 获取今天的日期作为文件名
+    # today_str = datetime.now().strftime('%Y-%m-%d')
+    # filename = f"../temp/{today_str}_buy_signal_counts.csv"
+    #
+    # # 创建当前计数的DataFrame
+    # current_counts_df = pd.DataFrame([condition_counts])
+    #
+    # try:
+    #     # 尝试加载今天的数据文件
+    #     existing_data = pd.read_csv(filename)
+    #     # 确保列顺序一致
+    #     current_counts_df = current_counts_df[existing_data.columns]
+    # except FileNotFoundError:
+    #     # 如果文件不存在，直接使用current_counts_df
+    #     existing_data = pd.DataFrame()
+    #
+    # # 如果存在数据，则累加新数据
+    # if not existing_data.empty:
+    #     updated_data = existing_data.add(current_counts_df, fill_value=0)
+    # else:
+    #     updated_data = current_counts_df
+    #
+    # # 保存更新后的数据到文件
+    # updated_data.to_csv(filename, index=False)
     # 返回修改后的DataFrame
     return data
 

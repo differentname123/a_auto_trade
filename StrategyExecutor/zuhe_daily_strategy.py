@@ -1047,6 +1047,71 @@ def gen_full_all_basic_signal(data):
     data = data.fillna(False)
     return data
 
+def gen_26_zhibiao(data):
+    X_2 = data['最高'].rolling(window=20).max().shift(1)
+
+    # 计算过去10天最低价的最小值，并延迟一天
+    X_3 = data['最低'].rolling(window=10).min().shift(1)
+
+    # 检查当天最低价是否高于X_3
+    X_4 = data['最低'] > X_3
+
+    # 检查当天最高价是否低于X_2
+    X_5 = data['最高'] < X_2
+
+    # 检查索引（可能是日期）是否大于30
+    X_6 = data.index.to_series().apply(lambda x: x > 30)
+
+    # 计算当天的价格范围，包括当天的最高价与最低价之差，以及与前一天收盘价的最高和最低差值
+    X_7 = np.maximum(np.maximum(data['最高'] - data['最低'], abs(data['收盘'].shift(1) - data['最高'])),
+                     abs(data['收盘'].shift(1) - data['最低']))
+
+    # 计算X_7的14天移动平均
+    X_8 = X_7.rolling(window=14).mean()
+
+    # 计算当天最高价和最低价的平均值
+    X_9 = ((data['最高'] + data['最低']) / 2).rolling(window=1).mean()
+
+    # 计算X_7的2天平均
+    X_10 = X_7.rolling(window=2).mean()
+
+    # X_9和X_10的差
+    X_12 = X_9 - X_10
+
+    # 检查当天收盘价是否低于过去3天中X_12的最大值
+    X_13 = data['收盘'] < X_12.rolling(window=3).max()
+
+    # 检查当天收盘价是否低于前一天收盘价，是否低于开盘价，是否不是当天最低价，但高于过去18天收盘价的平均值
+    X_14 = (data['收盘'] < data['收盘'].shift(1)) & (data['收盘'] < data['开盘']) & (data['收盘'] != data['最低']) & (
+                data['收盘'] > data['收盘'].rolling(window=18).mean())
+
+    # 检查20天收盘价平均值是否呈上升趋势
+    X_15 = data['收盘'].rolling(window=20).mean() > data['收盘'].rolling(window=20).mean().shift(1)
+
+    # 检查当天收盘价是否低于过去3天最低价的最小值
+    X_16 = data['收盘'] < data['最低'].rolling(window=3).min().shift(1)
+
+    # 检查X_8和X_7是否都呈上升趋势
+    X_17 = (X_8 > X_8.shift(1)) & (X_7 > X_7.shift(1))
+
+    # 计算当天收盘价在当天价格范围内的相对位置
+    X_18 = (data['收盘'] - data['最低']) / (data['最高'] - data['最低'])
+
+    # 检查X_18是否小于0.3
+    X_19 = X_18 < 0.3
+    # 将X_14 & X_15 & X_16 & X_17 & X_19 & X_13 & X_4 & X_5 & X_6分别添加到data
+    data['X_14'] = X_14
+    data['X_15'] = X_15
+    data['X_16'] = X_16
+    data['X_17'] = X_17
+    data['X_19'] = X_19
+    data['X_13'] = X_13
+    data['X_4'] = X_4
+    data['X_5'] = X_5
+    data['X_6'] = X_6
+    return data
+
+
 def gen_full_zhishu_basic_signal(data, is_need_pre=False):
     """
     扫描basic_daily_zhishu_strategy.py文件，生成所有的基础信号,过滤出以gen_basic_daily_buy_signal开头的函数，并应用于data

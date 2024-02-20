@@ -113,6 +113,45 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         model_name_smote = f"smote_{model_name}"
         train_and_dump_model(clf, X_train_smote, y_train_smote, MODEL_PATH, model_name_smote)
 
+def sort_all_report():
+    """
+    将所有数据按照score排序，并输出到一个文件中
+    """
+    file_path = '../model/all_model_reports'
+    all_scores = []  # 用于存储所有的scores和对应的keys
+
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            if f.endswith('.json'):
+                fullname = os.path.join(root, f)
+                with open(fullname, 'r') as file:
+                    result_dict = json.load(file)
+
+                    for key, value in result_dict.items():
+                        score = 1
+                        # 假设value是一个字典，其中包含一个或多个评估指标，包括score
+                        for k, v in value.items():
+                            if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
+                                if v[0]['predicted_true_samples'] < 10:
+                                    score = 0
+                                score *= v[0]['score']  # 累乘score
+                        # score = 0
+                        # # 假设value是一个字典，其中包含一个或多个评估指标，包括score
+                        # for k, v in value.items():
+                        #     if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
+                        #         score += v[0]['score']  # 累乘score
+                        all_scores.append((key, score))
+
+    # 按照score对all_scores进行排序，score高的排在前面
+    sorted_scores = sorted(all_scores, key=lambda x: x[1], reverse=True)
+
+    # 将排序后的结果输出到一个文件中
+    output_filename = '../temp/all_model_reports.json'
+    with open(output_filename, 'w') as outfile:
+        json.dump(sorted_scores, outfile, indent=4)
+
+    print(f'Results are sorted and saved to {output_filename}')
+
 def get_model_report(model_path, model_name):
     """
     为单个模型生成报告，并更新模型报告文件
@@ -185,7 +224,7 @@ def build_models():
     """
     origin_data_path_list = ['../daily_all_100_bad_0.3/1.txt']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, [1, 2], is_skip=True)
+        train_all_model(origin_data_path, [2], is_skip=True)
 
 def build_models1():
     """
@@ -193,7 +232,7 @@ def build_models1():
     """
     origin_data_path_list = ['../daily_all_100_bad_0.5/1.txt']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, [1, 2], is_skip=True)
+        train_all_model(origin_data_path, [2], is_skip=True)
 
 def get_all_model_report():
     """

@@ -53,7 +53,8 @@ from StrategyExecutor.daily_strategy import mix, gen_daily_buy_signal_26, gen_da
 from StrategyExecutor.strategy import back_all_stock, strategy
 from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filter_combinations, filter_combinations_op, \
     create_empty_result, process_results_with_year, gen_full_zhishu_basic_signal, process_results_with_every_year, \
-    process_results_with_every_period, statistics_zuhe_gen_both_single_every_period, statistics_zuhe_good
+    process_results_with_every_period, statistics_zuhe_gen_both_single_every_period, statistics_zuhe_good, \
+    gen_26_zhibiao
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 import warnings
@@ -364,7 +365,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    # data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -2463,6 +2464,10 @@ def get_target_thread(date='2024-01-22'):
     back_select_target_date(output_filename)
     return all_data
 
+def contains_english_letter(s):
+    # 使用正则表达式检查字符串中是否包含英文字母
+    return bool(re.search(r'[a-zA-Z]', s))
+
 def get_target_thread_min(date='2024-01-22'):
     """
     获取指定时间满足好指标的每个股票的阈值
@@ -2476,6 +2481,9 @@ def get_target_thread_min(date='2024-01-22'):
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             fullname = os.path.join(root, f)
+            # 如果f中包含字母，则跳过
+            if contains_english_letter(f.split('.')[0]):
+                continue
             min_fullname = os.path.join(min_file_path, f)
             if os.path.exists(min_fullname):
                 all_files.append([fullname, min_fullname])
@@ -2621,18 +2629,19 @@ def load_all_data():
     end_time = time.time()
     print('总耗时：', end_time - start_time)
 
-def load_all_data_perfomance():
+def load_all_data_performance(ratio_threshold=0.0):
     """
-    加载所有数据
+    加载所有数据，并根据给定的比率阈值筛选数据
     """
     start_time = time.time()
     file_path = '../daily_data_exclude_new_can_buy_with_back'
     output_filename = os.path.join('../final_zuhe/select/', 'all_data_perfomance.json')
-    data = read_json(output_filename)
+    data = read_json(output_filename)  # 假设read_json是一个已定义的函数，用于读取JSON数据
     bad_data_list = []
     for key, value in data.items():
-        if value['all']['ratio'] >= 0.0:
+        if value['all']['ratio'] >= ratio_threshold:
             bad_data_list.append(key)
+
     # 获取所有文件名
     all_files = [os.path.join(root, f) for root, ds, fs in os.walk(file_path) for f in fs]
 
@@ -2640,7 +2649,7 @@ def load_all_data_perfomance():
     cpu_count = multiprocessing.cpu_count()
     pool = multiprocessing.Pool(processes=cpu_count)
     file_chunks = [all_files[i::cpu_count] for i in range(cpu_count)]
-    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    chunk_dfs = pool.map(load_file_chunk, file_chunks)  # 假设load_file_chunk是一个已定义的函数，用于加载文件块
     pool.close()
     pool.join()
 
@@ -2649,17 +2658,15 @@ def load_all_data_perfomance():
     merge_time = time.time()
     print('合并耗时：', merge_time - start_time)
 
-    bad_data_df = all_data_df[all_data_df['Buy Date'].isin(bad_data_list)]
-    # 输出bad_data_df长度和all_data_df长度
+    bad_data_df = all_data_df
     print('bad_data_df长度：', len(bad_data_df))
     print('all_data_df长度：', len(all_data_df))
     all_data_df = bad_data_df
-    # 转换日期格式
     all_data_df['Buy Date'] = pd.to_datetime(all_data_df['Buy Date'])
 
     # 将数据均匀分成100份并写入文件
-    num_splits = 1
-    folder_path = '../daily_all_100_bad_0.0'
+    num_splits = 1  # 假设你想分成100份，根据你的描述进行调整
+    folder_path = f'../train_data/daily_all_{num_splits}_bad_{ratio_threshold}'
     os.makedirs(folder_path, exist_ok=True)  # 创建文件夹（如果不存在）
     split_size = math.ceil(len(all_data_df) / num_splits)
 
@@ -2711,7 +2718,7 @@ if __name__ == '__main__':
 
     # load_all_data()
     # get_all_data_perfomance()
-    # load_all_data_perfomance()
+    load_all_data_performance()
 
     # common_data = get_common_line()
     # print(common_data)
@@ -2729,7 +2736,7 @@ if __name__ == '__main__':
     # date = '2024-01-26'
     # buy_data = get_target_thread(date)
     # buy_data = get_target_thread_min(date)
-    # back_range_select_real_time(start_time='2024-02-05', end_time='2024-02-05')
+    # back_range_select_real_time(start_time='2024-02-20', end_time='2024-02-20')
     # print(buy_data)
 
     # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
@@ -2747,9 +2754,9 @@ if __name__ == '__main__':
     # gen_all_back()
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
-    back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_31, backtest_func=backtest_strategy_low_profit)
-
-    strategy('../daily_data_exclude_new_can_buy_with_back/蓝天燃气_605368.txt', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)
+    # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_31, backtest_func=backtest_strategy_low_profit)
+    #
+    # strategy('../1_min_data_exclude_new_can_buy/蓝天燃气_605368.txt', gen_signal_func=gen_daily_buy_signal_26, backtest_func=backtest_strategy_low_profit)
 
     # # statistics = read_json('../back/statistics_target_key.json')
     # statistics = read_json('../back/gen/statistics_all.json') # 大小 2126501
