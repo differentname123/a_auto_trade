@@ -164,25 +164,32 @@ def get_model_report(model_path, model_name):
     result_dict = {}
     # 加载已有报告
     if os.path.exists(report_path):
-        with open(report_path, 'r') as f:
-            result_dict = json.load(f)
-    print(f"为模型生成报告 {model_name}...")
+        try:
+            with open(report_path, 'r') as f:
+                result_dict = json.load(f)
+        except json.JSONDecodeError:
+            result_dict = {}
+    # print(f"为模型生成报告 {model_name}...")
     thread_ratio = 0.95
     new_temp_dict = {}
 
-
-    model = load(os.path.join(model_path, model_name))
+    try:
+        model = load(os.path.join(model_path, model_name))
+    except FileNotFoundError:
+        print(f"模型 {model_name} 不存在，跳过。")
+        return
     # 提取模型的天数阈值
     thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
     threshold_values = np.arange(0.5, 1, 0.05)
-
+    flag = False
     for file_path in file_path_list:
         # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
         if model_name in result_dict and file_path in result_dict[model_name]:
             if result_dict[model_name][file_path] != {}:
                 new_temp_dict[file_path] = result_dict[model_name][file_path]
-                print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
+                # print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
                 continue
+        flag = True
         temp_dict_list = []
         data = pd.read_csv(file_path, low_memory=False)
         signal_columns = [column for column in data.columns if 'signal' in column]
@@ -194,10 +201,13 @@ def get_model_report(model_path, model_name):
             temp_dict = {}
             high_confidence_true = (y_pred_proba[:, 1] > threshold)
             selected_true = high_confidence_true & y_test
+            selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
+            unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
             precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
             predicted_true_samples = np.sum(high_confidence_true)
 
             temp_dict['threshold'] = float(threshold)  # 确保阈值也是原生类型
+            temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
             temp_dict['precision'] = precision
             temp_dict['predicted_true_samples'] = int(predicted_true_samples)
             temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
@@ -212,9 +222,10 @@ def get_model_report(model_path, model_name):
 
     result_dict[model_name] = new_temp_dict
     # 将结果保存到文件
-    with open(report_path, 'w') as f:
-        json.dump(result_dict, f)
-    print(f"模型报告已生成: {model_name}\n\n")
+    if flag:
+        with open(report_path, 'w') as f:
+            json.dump(result_dict, f)
+        print(f"模型报告已生成: {model_name}\n\n")
 
     return result_dict
 
@@ -234,6 +245,14 @@ def build_models1():
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
 
+def build_models2():
+    """
+    训练所有模型
+    """
+    origin_data_path_list = ['../daily_all_100_bad_0.0/1.txt']
+    for origin_data_path in origin_data_path_list:
+        train_all_model(origin_data_path, [2], is_skip=True)
+
 def get_all_model_report():
     """
     使用多进程获取所有模型的报告。
@@ -243,21 +262,24 @@ def get_all_model_report():
         model_list = [model for model in os.listdir(model_path) if model.endswith('.joblib')]
 
         # 使用进程池来并行处理每个模型的报告生成
-        with Pool(2) as p:
+        with Pool(10) as p:
             p.starmap(get_model_report, [(model_path, model_name) for model_name in model_list])
-        time.sleep(60)  # 每隔一天重新生成一次报告
+        # time.sleep(60)  # 每隔一天重新生成一次报告
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     p1 = Process(target=build_models)
     p11 = Process(target=build_models1)
+    p12 = Process(target=build_models2)
     p2 = Process(target=get_all_model_report)
 
     p1.start()
     p2.start()
     p11.start()
+    p12.start()
 
     p11.join()
     p1.join()
     p2.join()
+    p12.join()

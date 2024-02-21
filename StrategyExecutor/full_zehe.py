@@ -365,7 +365,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2024-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -393,6 +393,7 @@ def load_full_data(file_path):
     data['名称'] = name
     data['代码'] = code
     data['数量'] = 0
+    data = data[data['日期'] > pd.Timestamp('2023-01-01')]
     data.sort_values(by='日期', ascending=True, inplace=True)
     # 重置索引
     data.reset_index(drop=True, inplace=True)
@@ -2696,6 +2697,51 @@ def get_common_line():
     print('交集长度：', len(file_set & file_1_set))
     return file_set & file_1_set
 
+def get_RF_real_time_price(origin_data, target_date):
+    """
+    获取能够满足模型的价格数据
+    :return:
+    """
+    result_list = []
+    # 将origin_data按照日期转换为时间序列
+    origin_data['日期'] = pd.to_datetime(origin_data['日期'])
+    temp_origin_data = origin_data[(origin_data['日期'] < pd.to_datetime(target_date))]
+    target_data = origin_data[(origin_data['日期'] == pd.to_datetime(target_date))]
+    # 截取temp_origin_data的后100条数据
+    temp_origin_data = temp_origin_data.iloc[-100:]
+    if target_data.empty:
+        return None
+    # 获取temp_origin_data的最后一行数据的日期
+    last_price = temp_origin_data.iloc[-1]['收盘']
+    max_rate = temp_origin_data.iloc[-1]['Max_rate']
+    highest_price = round(last_price * (100 + max_rate) / 100, 2)
+    lowest_price = round(last_price * (100 - max_rate) / 100, 2)
+    # 计算步长step，step = (highest_price - lowest_price) / 1000，向上取整保留两位小数
+    step = math.ceil((highest_price - lowest_price) / 10) / 100
+
+
+    # 遍历last_price到highest_price和lowest_price之间的数据，步长最小为0.01，并且数据个数最多为1000个
+    price_list = np.arange(lowest_price, highest_price, step)
+    for price in price_list:
+        temp_origin_data_copy = temp_origin_data.copy()
+        temp_target_data = target_data.copy()
+        temp_target_data['收盘'] = price
+        if (price > temp_target_data['最高']).any():
+            temp_target_data['最高'] = price
+        if (price < temp_target_data['最低']).any():
+            temp_target_data['最低'] = price
+        temp_target_data['涨跌幅'] = round((price - last_price) / last_price * 100, 2)
+        temp_target_data['振幅'] = round((temp_target_data['最高'] - temp_target_data['最低']) / last_price * 100, 2)
+        # 将temp_target_data增加到temp_origin_data_copy中,temp_target_data是DataFrame类型的
+        temp_origin_data_copy = pd.concat([temp_origin_data_copy, temp_target_data], axis=0)
+        full_temp_origin_data_copy = gen_full_all_basic_signal(temp_origin_data_copy)
+        result = full_temp_origin_data_copy[(full_temp_origin_data_copy['日期'] == pd.to_datetime(target_date))]
+        result_list.append(result)
+    result_df = pd.concat(result_list, axis=0).reset_index(drop=True)
+    # 将result_df写入文件
+    result_df.to_csv(f'../temp/real_time_price.csv', index=False)
+    return result_df
+
 
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
@@ -2718,7 +2764,8 @@ if __name__ == '__main__':
 
     # load_all_data()
     # get_all_data_perfomance()
-    load_all_data_performance()
+    # gen_all_back()
+    # load_all_data_performance()
 
     # common_data = get_common_line()
     # print(common_data)
@@ -2738,6 +2785,8 @@ if __name__ == '__main__':
     # buy_data = get_target_thread_min(date)
     # back_range_select_real_time(start_time='2024-02-20', end_time='2024-02-20')
     # print(buy_data)
+    origin_data = pd.read_csv('../daily_data_exclude_new_can_buy/新坐标_603040.txt', low_memory=False)
+    get_RF_real_time_price(origin_data, '2024-01-03')
 
     # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
 
@@ -2751,7 +2800,7 @@ if __name__ == '__main__':
     # all_date_count = all_df.groupby('日期').size()
     # print(all_date_count)
     # data = pd.read_csv('../daily_data_exclude_new_can_buy_with_back/东方电子_000682.txt', low_memory=False)
-    # gen_all_back()
+
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=gen_daily_buy_signal_31, backtest_func=backtest_strategy_low_profit)
