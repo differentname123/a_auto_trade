@@ -24,6 +24,7 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 MODEL_PATH = '../model/all_models'
 MODEL_REPORT_PATH = '../model/all_model_reports'
+MODEL_OTHER = '../model/other'
 
 
 def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
@@ -35,6 +36,7 @@ def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
     :param model_path: 模型保存路径
     :param model_name: 模型名称
     """
+    model_path = 'D:\model/all_models'
     print(f"开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, os.path.join(model_path, model_name))
@@ -57,12 +59,24 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
     data = pd.read_csv(file_path_path, low_memory=False)
     signal_columns = [column for column in data.columns if 'signal' in column]
     X = data[signal_columns]
-
+    ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
+    try:
+        # 尝试加载ratio_result
+        with open(ratio_result_path, 'r') as f:
+            ratio_result = json.load(f)
+    except FileNotFoundError:
+        ratio_result= {}
     for thread_day in thread_day_list:
         y = data['Days Held'] <= thread_day
-        true_ratio = sum(y) / len(y)
+        ratio_key = origin_data_path_dir + '_' + str(thread_day)
+        if ratio_key in ratio_result:
+            true_ratio = ratio_result[ratio_key]
+        else:
+            true_ratio = sum(y) / len(y)
+            ratio_result[ratio_key] = true_ratio
+            with open(ratio_result_path, 'w') as f:
+                json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
-
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
         train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
         train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
@@ -119,28 +133,36 @@ def sort_all_report():
     """
     file_path = '../model/all_model_reports'
     all_scores = []  # 用于存储所有的scores和对应的keys
+    good_model_list = []
 
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
+                max_threshold = 0
                 fullname = os.path.join(root, f)
                 with open(fullname, 'r') as file:
-                    result_dict = json.load(file)
+                    try:
+                        result_dict = json.load(file)
 
-                    for key, value in result_dict.items():
-                        score = 1
-                        # 假设value是一个字典，其中包含一个或多个评估指标，包括score
-                        for k, v in value.items():
-                            if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
-                                if v[0]['predicted_true_samples'] < 10:
-                                    score = 0
-                                score *= v[0]['score']  # 累乘score
-                        # score = 0
-                        # # 假设value是一个字典，其中包含一个或多个评估指标，包括score
-                        # for k, v in value.items():
-                        #     if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
-                        #         score += v[0]['score']  # 累乘score
-                        all_scores.append((key, score))
+                        for key, value in result_dict.items():
+                            score = 1
+                            # 假设value是一个字典，其中包含一个或多个评估指标，包括score
+                            for k, v in value.items():
+                                if v[0]['threshold'] > max_threshold:
+                                    max_threshold = v[0]['threshold']
+                                if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
+                                    if v[0]['predicted_true_samples'] < 4:
+                                        score = 0
+                                    score *= v[0]['score']  # 累乘score
+                            # score = 0
+                            # # 假设value是一个字典，其中包含一个或多个评估指标，包括score
+                            # for k, v in value.items():
+                            #     if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
+                            #         score += v[0]['score']  # 累乘score
+                            all_scores.append((key, score, max_threshold))
+                    except json.JSONDecodeError:
+                        print(f'Error occurred when reading {fullname}')
+                        continue
 
     # 按照score对all_scores进行排序，score高的排在前面
     sorted_scores = sorted(all_scores, key=lambda x: x[1], reverse=True)
@@ -158,76 +180,84 @@ def get_model_report(model_path, model_name):
     :param model_path: 模型路径
     :param model_name: 当前正在处理的模型名称
     """
-    file_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.5/1.txt', '../daily_all_100_bad_0.3/1.txt']
-
-    report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
-    result_dict = {}
-    # 加载已有报告
-    if os.path.exists(report_path):
-        try:
-            with open(report_path, 'r') as f:
-                result_dict = json.load(f)
-        except json.JSONDecodeError:
-            result_dict = {}
-    # print(f"为模型生成报告 {model_name}...")
-    thread_ratio = 0.95
-    new_temp_dict = {}
-
     try:
-        model = load(os.path.join(model_path, model_name))
-    except FileNotFoundError:
-        print(f"模型 {model_name} 不存在，跳过。")
-        return
-    # 提取模型的天数阈值
-    thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
-    threshold_values = np.arange(0.5, 1, 0.05)
-    flag = False
-    for file_path in file_path_list:
-        # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
-        if model_name in result_dict and file_path in result_dict[model_name]:
-            if result_dict[model_name][file_path] != {}:
-                new_temp_dict[file_path] = result_dict[model_name][file_path]
-                # print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
-                continue
-        flag = True
-        temp_dict_list = []
-        data = pd.read_csv(file_path, low_memory=False)
-        signal_columns = [column for column in data.columns if 'signal' in column]
-        X_test = data[signal_columns]
-        y_test = data['Days Held'] <= thread_day
-        total_samples = len(y_test)
-        y_pred_proba = model.predict_proba(X_test)
-        for threshold in threshold_values:
-            temp_dict = {}
-            high_confidence_true = (y_pred_proba[:, 1] > threshold)
-            selected_true = high_confidence_true & y_test
-            selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
-            unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
-            precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
-            predicted_true_samples = np.sum(high_confidence_true)
+        # 开始计时
+        start_time = time.time()
+        file_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.5/1.txt', '../daily_all_100_bad_0.3/1.txt']
 
-            temp_dict['threshold'] = float(threshold)  # 确保阈值也是原生类型
-            temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
-            temp_dict['precision'] = precision
-            temp_dict['predicted_true_samples'] = int(predicted_true_samples)
-            temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
-            temp_dict['predicted_ratio'] = predicted_true_samples / total_samples if total_samples > 0 else 0
-            temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
+        report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
+        result_dict = {}
+        # 加载已有报告
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, 'r') as f:
+                    result_dict = json.load(f)
+            except json.JSONDecodeError:
+                result_dict = {}
+        # print(f"为模型生成报告 {model_name}...")
+        thread_ratio = 0.95
+        new_temp_dict = {}
 
-            temp_dict_list.append(temp_dict)
+        try:
+            model = load(os.path.join(model_path, model_name))
+        except FileNotFoundError:
+            print(f"模型 {model_name} 不存在，跳过。")
+            return
+        # 提取模型的天数阈值
+        thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
+        threshold_values = np.arange(0.5, 1, 0.05)
+        flag = False
+        for file_path in file_path_list:
+            # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
+            if model_name in result_dict and file_path in result_dict[model_name]:
+                if result_dict[model_name][file_path] != {}:
+                    new_temp_dict[file_path] = result_dict[model_name][file_path]
+                    # print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
+                    continue
+            flag = True
+            temp_dict_list = []
+            data = pd.read_csv(file_path, low_memory=False)
+            signal_columns = [column for column in data.columns if 'signal' in column]
+            X_test = data[signal_columns]
+            y_test = data['Days Held'] <= thread_day
+            total_samples = len(y_test)
+            y_pred_proba = model.predict_proba(X_test)
+            for threshold in threshold_values:
+                temp_dict = {}
+                high_confidence_true = (y_pred_proba[:, 1] > threshold)
+                selected_true = high_confidence_true & y_test
+                selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
+                unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
+                precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
+                predicted_true_samples = np.sum(high_confidence_true)
 
-        # 按照score排序
-        temp_dict_list = sorted(temp_dict_list, key=lambda x: x['score'], reverse=True)
-        new_temp_dict[file_path] = temp_dict_list
+                temp_dict['threshold'] = float(threshold)  # 确保阈值也是原生类型
+                temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
+                temp_dict['precision'] = precision
+                temp_dict['predicted_true_samples'] = int(predicted_true_samples)
+                temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
+                temp_dict['predicted_ratio'] = predicted_true_samples / total_samples if total_samples > 0 else 0
+                temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
 
-    result_dict[model_name] = new_temp_dict
-    # 将结果保存到文件
-    if flag:
-        with open(report_path, 'w') as f:
-            json.dump(result_dict, f)
-        print(f"模型报告已生成: {model_name}\n\n")
+                temp_dict_list.append(temp_dict)
 
-    return result_dict
+            # 按照score排序
+            temp_dict_list = sorted(temp_dict_list, key=lambda x: x['score'], reverse=True)
+            new_temp_dict[file_path] = temp_dict_list
+
+        result_dict[model_name] = new_temp_dict
+        # 将结果保存到文件
+        if flag:
+            with open(report_path, 'w') as f:
+                json.dump(result_dict, f)
+            # 结束计时
+            end_time = time.time()
+            print(f"模型报告已生成: {model_name}，耗时 {end_time - start_time:.2f} 秒\n\n")
+
+        return result_dict
+    except Exception as e:
+        print(f"生成报告时出现异常: {e}")
+        return {}
 
 def build_models():
     """
@@ -272,14 +302,24 @@ if __name__ == '__main__':
     p1 = Process(target=build_models)
     p11 = Process(target=build_models1)
     p12 = Process(target=build_models2)
-    p2 = Process(target=get_all_model_report)
+    # p2 = Process(target=get_all_model_report)
 
     p1.start()
-    p2.start()
+    # p2.start()
     p11.start()
     p12.start()
 
     p11.join()
     p1.join()
-    p2.join()
+    # p2.join()
     p12.join()
+
+    # good_model_list = []
+    # output_filename = '../temp/all_model_reports.json'
+    # # 加载output_filename，找到最好的模型
+    # with open(output_filename, 'r') as file:
+    #     sorted_scores = json.load(file)
+    #     for model_name, score, threshold in sorted_scores:
+    #         if score > 0.8:
+    #             good_model_list.append((model_name, score, threshold))
+    # sort_all_report()
