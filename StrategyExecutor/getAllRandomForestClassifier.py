@@ -23,6 +23,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 MODEL_PATH = '../model/all_models'
+D_MODEL_PATH = 'D:\model/all_models'
 MODEL_REPORT_PATH = '../model/all_model_reports'
 MODEL_OTHER = '../model/other'
 
@@ -81,6 +82,45 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
         train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
         train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
 
+def train_all_model_grad(file_path_path, thread_day_list=None, is_skip=True):
+    """
+    为file_path_path生成各种模型
+    :param file_path_path: 数据集路径
+    :param thread_day_list: 判断为True的天数列表
+    :param is_skip: 如果已有模型，是否跳过
+    """
+    if thread_day_list is None:
+        thread_day_list = [1, 2, 3]
+    # 获取origin_data_path的上一级目录，不要更上一级目录
+    origin_data_path_dir = os.path.dirname(file_path_path)
+    origin_data_path_dir = origin_data_path_dir.split('/')[-1]
+    print("加载数据{}...".format(file_path_path))
+    data = pd.read_csv(file_path_path, low_memory=False)
+    signal_columns = [column for column in data.columns if 'signal' in column]
+    X = data[signal_columns]
+    ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
+    try:
+        # 尝试加载ratio_result
+        with open(ratio_result_path, 'r') as f:
+            ratio_result = json.load(f)
+    except FileNotFoundError:
+        ratio_result= {}
+    for thread_day in thread_day_list:
+        y = data['Days Held'] <= thread_day
+        ratio_key = origin_data_path_dir + '_' + str(thread_day)
+        if ratio_key in ratio_result:
+            true_ratio = ratio_result[ratio_key]
+        else:
+            true_ratio = sum(y) / len(y)
+            ratio_result[ratio_key] = true_ratio
+            with open(ratio_result_path, 'w') as f:
+                json.dump(ratio_result, f)
+        print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+        train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
+        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
+
+
 def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, origin_data_path_dir):
     """
     训练指定类型的模型并处理类别不平衡
@@ -111,7 +151,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
 
     for params in ParameterGrid(param_grid):
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
-        if is_skip and os.path.exists(os.path.join(MODEL_PATH, model_name)):
+        if is_skip and (os.path.exists(os.path.join(MODEL_PATH, model_name)) or os.path.exists(os.path.join(D_MODEL_PATH, model_name))):
             print(f"模型 {model_name} 已存在，跳过训练。")
             continue
         clf = RandomForestClassifier(**params) if model_type == 'RandomForest' else GradientBoostingClassifier(**params)

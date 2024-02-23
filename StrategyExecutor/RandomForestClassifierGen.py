@@ -23,8 +23,8 @@ MODEL_PATH = '../model/all_models'
 # origin_data_path = '../train_data/26_daily_all_1_bad_0.3/1.txt'
 from StrategyExecutor.CommonRandomForestClassifier import load_rf_model, get_all_good_data_with_model_list
 
-origin_data_path = '../train_data/daily_all_1_bad_0.0/1.txt'
-# origin_data_path = '../temp/real_time_price.csv'
+# origin_data_path = '../train_data/daily_all_1_bad_0.0/1.txt'
+origin_data_path = '../temp/real_time_all_data.csv'
 # origin_data_path = '../final_zuhe/select/select_RF_2024-02-22_real_time.txt'
 # origin_data_path = '../train_data/daily_all_1_bad_0.0/1_all.txt'
 # origin_data_path = '../daily_all_2024/1.txt'
@@ -48,7 +48,6 @@ X = data[signal_columns]
 X1 = data.drop(signal_columns, axis=1)
 # 获取data中'Days Held'列，如果值大于1就为False，否则为True
 # data['Days Held'] = 1
-y = data['Days Held'] <= 2
 # true_count = sum(y)
 # print(f'true_count: {true_count/len(y)}')
 is_skip = True

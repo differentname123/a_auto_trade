@@ -44,7 +44,7 @@ def get_thread_data(data, rf_classifier, threshold):
         selected_samples = X1[high_confidence_true]
         # 统计selected_samples中 收盘 的和
         close_sum = selected_samples['收盘'].sum()
-        print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)}')
+        print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
         print(selected_samples['日期'].value_counts())
     return selected_samples
 
@@ -71,6 +71,7 @@ def load_rf_model(model_path):
                 except FileNotFoundError:
                     print(f"模型 {model_name} 不存在，跳过。")
                     return
+    print(f"加载了 {len(all_rf_model_list)} 个模型")
     return all_rf_model_list
 
 def get_all_good_data(data):
