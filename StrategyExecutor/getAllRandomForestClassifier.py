@@ -38,6 +38,10 @@ def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
     :param model_name: 模型名称
     """
     model_path = 'D:\model/all_models'
+    out_put_path = os.path.join(model_path, model_name)
+    # 创建一个空的out_put_path文件
+    with open(out_put_path, 'w') as f:
+        pass
     print(f"开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, os.path.join(model_path, model_name))

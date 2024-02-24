@@ -366,7 +366,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] > pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2023-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -1965,6 +1965,50 @@ def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
         all_df.to_csv('../final_zuhe/back/back.csv', index=False)
         return all_df
 
+def back_range_select_real_time_RF(start_time='2023-12-04', end_time='2023-12-17'):
+    """
+    回测一段时间内选中的文件
+    :param start_time:
+    :param end_time:
+    :return:
+    """
+
+    out_put_file_path = '../final_zuhe/back/' + start_time + '_' + end_time + 'RF_real_time_back.csv'
+    start_time = datetime.strptime(start_time, '%Y-%m-%d')
+    end_time = datetime.strptime(end_time, '%Y-%m-%d')
+    date_list = []
+    basic_data = load_data('../daily_data_exclude_new_can_buy/东方电子_000682.txt')
+    # basic_data是dataFrame格式数据,获取basic_data中的所有日期
+    all_date_list = basic_data['日期'].tolist()
+
+    all_frame_result = []
+    while start_time <= end_time:
+        # 如果start_time不在date_list中那么就跳过
+        if start_time not in all_date_list:
+            start_time += timedelta(days=1)
+            continue
+        date_list.append(start_time)
+        start_time += timedelta(days=1)
+    print('待回测的日期列表:', len(date_list))
+    for date in date_list:
+        all_frame = get_target_thread_min_RF(date)
+        if all_frame is not None:
+            out_put_file_path = '../final_zuhe/back/' + date.strftime('%Y-%m-%d') + 'RF_real_time_back.csv'
+            all_frame.to_csv(out_put_file_path, index=False)
+            all_frame_result.append(all_frame)
+    all_df = None
+    # 将all_frame_result合并
+    if len(all_frame_result) > 0:
+        all_df = pd.concat(all_frame_result, ignore_index=True)
+    if all_df is None:
+        print('没有选中的股票')
+        return None
+    # all_rf_model_list = load_rf_model(MODEL_PATH)
+    # all_selected_samples = get_all_good_data_with_model_list(all_df, all_rf_model_list)
+    # # 将all_selected_samples保存到out_put_file_path
+    # if all_selected_samples and len(all_selected_samples) > 0:
+    #     all_selected_samples.to_csv(out_put_file_path, index=False)
+
 def back_range_select_real_time(start_time='2023-12-04', end_time='2023-12-17'):
     """
     回测一段时间内选中的文件
@@ -2638,6 +2682,61 @@ def process_file_target_date(fullname, date, gen_daily_buy_signal_26):
             return buy_data
     return None
 
+def process_file_target_date_min_RF(file_path, date):
+    """
+    处理单个文件,会生成该文件每个min时间段的多个步长的数据，并返回指定的frame，比如东方电子02-23有48个分钟数据，每个分钟的数据会生成4个该时间
+    周围价格数据的全指标结果，最终就会返回一个包含48个frame
+    """
+
+    all_result_list = []
+    start_time = time.time()
+    fullname, min_fullname = file_path
+    data = load_data(fullname)
+    min_data = load_data(min_fullname)
+    file_name = fullname.split('/')[-1].split('.')[0]
+    # 将date保留到天,'datetime.datetime' object has no attribute 'split'
+    date = str(date).split(' ')[0]
+    out_put_file_path = '../min_back_data/{}_{}.csv'.format(file_name, date)
+    # 判断out_put_file_path是否存在，如果存在则直接返回
+    if os.path.exists(out_put_file_path):
+        return pd.read_csv(out_put_file_path)
+    # 将min_data中的日期转换为datetime类型
+    min_data['日期'] = pd.to_datetime(min_data['日期'])
+    # 找到min_data中日期大于date且小于date+1的数据
+    min_data = min_data[(min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
+    target_data = data[data['日期'] == date]
+    # 获取target_data的上一个数据，不要使用日期来判断
+    if target_data.empty:
+        return None
+    target_data_index = target_data.index
+    befor_target_data = data.loc[target_data_index - 1] # # 将min_data按照日期逆序排列
+    pre_close = befor_target_data['收盘'].values[0]
+    # 遍历min_data
+    for index, row in min_data.iterrows():
+        # 将row的开盘,收盘,最高,最低,成交量,成交额赋值给data中target_data_index的行
+        data.loc[target_data_index, '开盘'] = row['开盘']
+        data.loc[target_data_index, '收盘'] = row['收盘']
+        data.loc[target_data_index, '最高'] = row['最高']
+        data.loc[target_data_index, '最低'] = row['最低']
+        data.loc[target_data_index, '成交量'] = row['成交量']
+        data.loc[target_data_index, '成交额'] = row['成交额']
+        data.loc[target_data_index, '换手率'] = row['换手率']
+        data.loc[target_data_index, '振幅'] = (row['最高'] - row['最低']) / pre_close * 100
+        data.loc[target_data_index, '涨跌幅'] = (row['收盘'] - pre_close) / pre_close * 100
+        data.loc[target_data_index, '后续最高'] = row['后续最高']
+        data.loc[target_data_index, '后续最低'] = row['后续最低']
+        result_df = get_RF_real_time_price_thread(data, date)
+        if result_df is not None and not result_df.empty:
+            all_result_list.append(result_df)
+    if len(all_result_list) == 0:
+        return None
+    all_result_df = pd.concat(all_result_list, ignore_index=True)
+    end_time = time.time()
+    # 将out_put_file_path写入文件
+    all_result_df.to_csv(out_put_file_path, index=False)
+    print('处理{}耗时:{}'.format(fullname, end_time - start_time))
+    return all_result_df
+
 def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     """
     处理单个文件
@@ -2737,6 +2836,71 @@ def get_target_thread(date='2024-01-22'):
 def contains_english_letter(s):
     # 使用正则表达式检查字符串中是否包含英文字母
     return bool(re.search(r'[a-zA-Z]', s))
+
+def get_target_thread_min_RF(date='2024-01-22'):
+    """
+    获取指定时间满足好指标的每个股票的阈值
+    :return:
+    """
+    file_path = '../daily_data_exclude_new_can_buy/'
+    min_file_path = '../min_data_exclude_new_can_buy/'
+    all_files = []
+    start_time = time.time()
+    # 获取所有文件路径
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            # # # 如果f中包含字母，则跳过
+            # if contains_english_letter(f.split('.')[0]):
+            #     continue
+            min_fullname = os.path.join(min_file_path, f)
+            if os.path.exists(min_fullname):
+                all_files.append([fullname, min_fullname])
+
+    # # # 保留all_files中的后10个文件
+    # all_files = all_files[:20]
+
+    # for f in all_files:
+    #     temp = process_file_target_date_min_RF(f, date)
+
+    # 创建进程池
+    pool = multiprocessing.Pool(multiprocessing.cpu_count())
+
+
+    # 处理每个文件
+    results = [pool.apply_async(process_file_target_date_min_RF, args=(f, date)) for f in all_files]
+
+    # 收集结果
+    all_data = []
+    for res in results:
+        try:
+            data = res.get()  # 尝试获取结果
+            if data is not None and len(data) > 0:  # 检查结果是否为空
+                all_data.append(data)
+            else:
+                print("Warning: Received empty data.")
+        except Exception as e:
+            print(f"Error getting result: {e}")
+
+    # 关闭进程池
+    pool.close()
+    pool.join()
+    if all_data is not None and len(all_data) > 0:
+        all_df = pd.concat(all_data)
+    else:
+        return None
+    # 将结果写入文件
+    # 将date转换成str
+    date = str(date)
+    output_filename = os.path.join('../final_zuhe/select/', '{}_RF_target_thread.csv'.format(date.split(' ')[0]))
+    if all_df is not None:
+        all_df.to_csv(output_filename, index=False)
+        total_count = len(all_df)
+        total_price = all_df['收盘'].sum()
+        print('总数量:{} 总价值：{}w'.format(total_count, round(total_price / 100, 2)))
+        end_time = time.time()
+        print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
+    return all_df
 
 def get_target_thread_min(date='2024-01-22'):
     """
@@ -2968,7 +3132,7 @@ def get_common_line():
 
 def get_RF_real_time_price_thread(file_path, target_date):
     """
-    获取能够满足模型的价格数据
+    获取指定时间的不同价格的全指标数据
     :return:
     """
     # 如果file_path是DataFrame类型，则直接使用
@@ -2982,7 +3146,6 @@ def get_RF_real_time_price_thread(file_path, target_date):
     name = origin_data.iloc[0]['名称']
     code = origin_data.iloc[0]['代码']
     # 生成output文件名，由名称和代码组成
-    output_file_name = f'../final_zuhe/real_time/{name}_{code}_real_time_price.csv'
     result_list = []
     # 将origin_data按照日期转换为时间序列
     origin_data['日期'] = pd.to_datetime(origin_data['日期'])
@@ -2995,15 +3158,16 @@ def get_RF_real_time_price_thread(file_path, target_date):
     # 获取temp_origin_data的最后一行数据的日期
     last_price = temp_origin_data.iloc[-1]['收盘']
     current_price = target_data.iloc[0]['收盘']
+    target_data['current_price'] = current_price
     max_rate = temp_origin_data.iloc[-1]['Max_rate']
     highest_price = round(last_price * (100 + max_rate) / 100, 2)
     lowest_price = round(last_price * (100 - max_rate) / 100, 2)
     # current_highest_price = round(current_price * (100 + max_rate / 5) / 100, 2)
     # current_lowest_price = round(current_price * (100 - max_rate / 5) / 100, 2)
-    current_highest_price = current_price + 0.02
-    current_lowest_price = current_price - 0.02
-    highest_price = min(highest_price, current_highest_price)
-    lowest_price = max(lowest_price, current_lowest_price)
+    # current_highest_price = current_price + 0.02
+    # current_lowest_price = current_price - 0.02
+    # highest_price = min(highest_price, current_highest_price)
+    # lowest_price = max(lowest_price, current_lowest_price)
     # 计算步长step，step = (highest_price - lowest_price) / 1000，向上取整保留两位小数
     step = math.ceil((highest_price - lowest_price) / 10) / 100
     if step < 0.01:
@@ -3026,14 +3190,10 @@ def get_RF_real_time_price_thread(file_path, target_date):
         temp_origin_data_copy = pd.concat([temp_origin_data_copy, temp_target_data], axis=0)
         full_temp_origin_data_copy = gen_full_all_basic_signal(temp_origin_data_copy)
         result = full_temp_origin_data_copy[(full_temp_origin_data_copy['日期'] == pd.to_datetime(target_date))]
-        result['current_price'] = current_price
         result_list.append(result)
     if len(result_list) == 0:
         return None
     result_df = pd.concat(result_list, axis=0).reset_index(drop=True)
-    # 将result_df写入文件
-    result_df.to_csv(output_file_name, index=False)
-
     return result_df
 
 def get_RF_real_time_price(file_path, target_date, all_rf_model_list):
@@ -3126,9 +3286,10 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    data = pd.read_csv('../min_data_exclude_new_can_buy/恒基达鑫_002492.txt')
-    print(data)
+    # data = pd.read_csv('../min_data_exclude_new_can_buy/恒基达鑫_002492.txt')
+    # print(data)
     # save_and_analyse_all_data_mul_real_time_RF('2024-02-23')
+    back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-23')
 
     # common_data = get_common_line()
     # print(common_data)
@@ -3146,7 +3307,7 @@ if __name__ == '__main__':
     # date = '2024-01-26'
     # buy_data = get_target_thread(date)
     # buy_data = get_target_thread_min(date)
-    back_range_select_real_time(start_time='2024-02-20', end_time='2024-02-20')
+    # back_range_select_real_time(start_time='2024-02-20', end_time='2024-02-20')
     # print(buy_data)
     # back_range_RF_real_time(start_time='2024-01-03', end_time='2024-02-05')
 

@@ -278,6 +278,8 @@ def save_stock_data_min(stock_data, exclude_code):
             price_data = fix_st(price_data, '../announcements/{}.json'.format(code))
             if not befor_price_data.empty:
                 price_data = pd.concat([befor_price_data, price_data])
+            price_data['日期'] = pd.to_datetime(price_data['日期'])
+            price_data = price_data.drop_duplicates(subset=['日期'], keep='first')
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")
@@ -298,6 +300,7 @@ def save_stock_data_1_min(stock_data, exclude_code):
             price_data = fix_st(price_data, '../announcements/{}.json'.format(code))
             if not befor_price_data.empty:
                 price_data = pd.concat([befor_price_data, price_data])
+            price_data = price_data.drop_duplicates(subset=['日期'], keep='first')
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")

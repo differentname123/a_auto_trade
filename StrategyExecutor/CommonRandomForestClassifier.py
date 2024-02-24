@@ -70,7 +70,6 @@ def load_rf_model(model_path):
                     all_rf_model_list.append(all_rf_model_map)
                 except FileNotFoundError:
                     print(f"模型 {model_name} 不存在，跳过。")
-                    return
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     return all_rf_model_list
 
