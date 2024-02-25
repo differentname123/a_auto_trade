@@ -19,7 +19,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
+D_MODEL_PATH = 'D:\model/all_models'
+G_MODEL_PATH = 'G:\model/all_models'
 MODEL_PATH = '../model/all_models'
+MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 
 def get_thread_data(data, rf_classifier, threshold):
     """
@@ -60,10 +63,14 @@ def load_rf_model(model_path):
     with open(output_filename, 'r') as file:
         sorted_scores = json.load(file)
         for model_name, score, threshold in sorted_scores:
+            for model_path in MODEL_PATH_LIST:
+                model_file_path = os.path.join(model_path, model_name)
+                if os.path.exists(model_file_path):
+                    break
             if score > 5 and 'thread_day_2' in model_name:
                 all_rf_model_map = {}
                 try:
-                    model = load(os.path.join(model_path, model_name))
+                    model = load(model_file_path)
                     all_rf_model_map[model_name] = model
                     all_rf_model_map['threshold'] = threshold
                     all_rf_model_map['score'] = score

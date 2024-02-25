@@ -22,8 +22,10 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
-MODEL_PATH = '../model/all_models'
 D_MODEL_PATH = 'D:\model/all_models'
+G_MODEL_PATH = 'G:\model/all_models'
+MODEL_PATH = '../model/all_models'
+MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_REPORT_PATH = '../model/all_model_reports'
 MODEL_OTHER = '../model/other'
 
@@ -155,9 +157,11 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
 
     for params in ParameterGrid(param_grid):
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
-        if is_skip and (os.path.exists(os.path.join(MODEL_PATH, model_name)) or os.path.exists(os.path.join(D_MODEL_PATH, model_name))):
-            print(f"模型 {model_name} 已存在，跳过训练。")
-            continue
+        if is_skip:
+            for path in MODEL_PATH_LIST:
+                if os.path.exists(os.path.join(path, model_name)):
+                    print(f"模型 {model_name} 已存在，跳过训练。")
+                    continue
         clf = RandomForestClassifier(**params) if model_type == 'RandomForest' else GradientBoostingClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, MODEL_PATH, model_name)
 
@@ -244,7 +248,11 @@ def get_model_report(model_path, model_name):
 
         try:
             model = load(os.path.join(model_path, model_name))
-        except FileNotFoundError:
+        except Exception as e:
+            if os.path.exists(os.path.join(model_path, model_name)):
+                # 删除损坏的模型文件
+                os.remove(os.path.join(model_path, model_name))
+                print(f"模型 {model_name} 加载失败，跳过。")
             print(f"模型 {model_name} 不存在，跳过。")
             return
         # 提取模型的天数阈值
@@ -332,8 +340,10 @@ def get_all_model_report():
     使用多进程获取所有模型的报告。
     """
     while True:
+        model_list = []
         model_path = MODEL_PATH
-        model_list = [model for model in os.listdir(model_path) if model.endswith('.joblib')]
+        for model_path in MODEL_PATH_LIST:
+            model_list += [model for model in os.listdir(model_path) if model.endswith('.joblib')]
 
         # 使用进程池来并行处理每个模型的报告生成
         with Pool(10) as p:

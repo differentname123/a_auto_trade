@@ -2727,6 +2727,7 @@ def process_file_target_date_min_RF(file_path, date):
         data.loc[target_data_index, '后续最低'] = row['后续最低']
         result_df = get_RF_real_time_price_thread(data, date)
         if result_df is not None and not result_df.empty:
+            result_df['日期'] = row['日期']
             all_result_list.append(result_df)
     if len(all_result_list) == 0:
         return None
@@ -2858,8 +2859,8 @@ def get_target_thread_min_RF(date='2024-01-22'):
                 all_files.append([fullname, min_fullname])
 
     # # # 保留all_files中的后10个文件
-    # all_files = all_files[:20]
-
+    # all_files = all_files[-10:]
+    #
     # for f in all_files:
     #     temp = process_file_target_date_min_RF(f, date)
 
