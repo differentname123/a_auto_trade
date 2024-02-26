@@ -8,7 +8,6 @@
 :description:
 
 """
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -1054,7 +1053,7 @@ def mix(data):
     #
     #            .split(':'))
     data_1['Buy_Signal'] = False
-    target_date = pd.to_datetime('2024-01-19')
+    target_date = pd.to_datetime('2024-01-04')
     # 将日期为target_date的Buy_Signal设置为True
     data_1.loc[data_1['日期'] == target_date, 'Buy_Signal'] = True
 

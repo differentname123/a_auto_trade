@@ -85,8 +85,8 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
                 json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
         train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
+        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
 
 def train_all_model_grad(file_path_path, thread_day_list=None, is_skip=True):
     """
@@ -158,10 +158,14 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     for params in ParameterGrid(param_grid):
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         if is_skip:
+            flag = False
             for path in MODEL_PATH_LIST:
                 if os.path.exists(os.path.join(path, model_name)):
                     print(f"模型 {model_name} 已存在，跳过训练。")
+                    flag = True
                     continue
+            if flag:
+                continue
         clf = RandomForestClassifier(**params) if model_type == 'RandomForest' else GradientBoostingClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, MODEL_PATH, model_name)
 
@@ -355,18 +359,18 @@ def get_all_model_report():
 if __name__ == '__main__':
     p1 = Process(target=build_models)
     p11 = Process(target=build_models1)
-    p12 = Process(target=build_models2)
+    # p12 = Process(target=build_models2)
     # p2 = Process(target=get_all_model_report)
 
     p1.start()
     # p2.start()
     p11.start()
-    p12.start()
+    # p12.start()
 
     p11.join()
     p1.join()
     # p2.join()
-    p12.join()
+    # p12.join()
 
     # good_model_list = []
     # output_filename = '../temp/all_model_reports.json'

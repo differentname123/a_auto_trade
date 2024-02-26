@@ -23,15 +23,36 @@ MODEL_PATH = '../model/all_models'
 # origin_data_path = '../train_data/26_daily_all_1_bad_0.3/1.txt'
 from StrategyExecutor.CommonRandomForestClassifier import load_rf_model, get_all_good_data_with_model_list
 
-# origin_data_path = '../train_data/daily_all_1_bad_0.0/1.txt'
-origin_data_path = '../temp/real_time_all_data.csv'
-# origin_data_path = '../final_zuhe/select/select_RF_2024-02-22_real_time.txt'
+origin_data_path = '../train_data/daily_all_1_bad_0.0/1.txt'
+# data1 = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
+# origin_data_path = '../final_zuhe/select/new_2024-01-02_RF_target_thread.csv'
+# origin_data_path = '../temp/real_time_all_data.csv'
+# origin_data_path = '../final_zuhe/select/select_RF_2024-02-26_real_time.csv'
 # origin_data_path = '../train_data/daily_all_1_bad_0.0/1_all.txt'
 # origin_data_path = '../daily_all_2024/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.3/1.txt'
 # origin_data_path = '../daily_all_100_bad_0.0/1.txt'
 # data = load_data('../daily_data_exclude_new_can_buy_with_back/龙洲股份_002682.txt')
 data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
+# temp_data1 = data1[(data1['日期'] == '2024-02-26') & (data1['收盘'] == 8.33) & (data1['代码'] == '002387')]
+# temp_data = data[(data['日期'] == '2024-02-26') & (data['收盘'] == 8.33) & (data['代码'] == '002387')]
+# # 找出temp_data和temp_data1都有的列
+# same_columns = temp_data1.columns[temp_data1.columns.isin(temp_data.columns)]
+#
+# temp_data1 = temp_data1[same_columns]
+# temp_data = temp_data[same_columns]
+# temp_data1.reset_index(drop=True, inplace=True)
+# temp_data.reset_index(drop=True, inplace=True)
+# diff_columns = temp_data1.columns[temp_data1.ne(temp_data).any()].tolist()
+# for column in diff_columns:
+#     print(f"列 '{column}' 不同:")
+#     print(f"temp_data1 中的值: {temp_data1.loc[0, column]}")
+#     print(f"temp_data 中的值: {temp_data.loc[0, column]}")
+# # 找到temp_data1和temp_data中值不同的列
+#
+# print('加载数据量:', len(data))
+# # data为temp_data1和temp_data合并
+# data = pd.concat([temp_data1, temp_data], axis=0)
 signal_columns = [column for column in data.columns if 'signal' in column]
 # 筛选出data中日期大于2024-01-26并且小于2024-02-05的数据
 data = data[(data['日期'] > '2024-02-20')]

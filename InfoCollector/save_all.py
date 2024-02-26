@@ -465,8 +465,8 @@ def save_index_data():
     return index_data
 
 if __name__ == '__main__':
-    # price_data = get_price('002492', '20230101', '20290124', period='1')
-    # print(price_data)
+    price_data = get_price('002492', '20230101', '20290124', period='1')
+    print(price_data)
     #
     # stock_zh_b_minute_df = ak.stock_zh_b_minute(symbol='sh900901', period='1', adjust="qfq")
     # print(stock_zh_b_minute_df)

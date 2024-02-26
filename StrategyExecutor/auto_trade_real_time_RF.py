@@ -70,22 +70,32 @@ def process_stock_data(order_output_file_path, file_path, auto, amount):
                 min_price = round(float(min_price), 2)
                 max_price = round(float(max_price), 2)
                 current_price = round(float(current_price), 2)
+                price = current_price
                 if min_price >= current_price:
-                    continue
-                price = min_price
-                if stock_no not in order_result:
-                    # 将stock_no, price写入到order_output_file_path文件中
-                    with open(order_output_file_path, 'a', encoding='utf-8') as f:
-                        f.write('{},{}\n'.format(stock_no, price))
+                    price = current_price
+                if max_price <= current_price:
+                    price = max_price
+
+                # 判断当前时间是否在15:55之后
+                if datetime.now().time() > datetime.strptime("14:55", "%H:%M").time():
+                    price = current_price
                     result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
                 else:
-                    if price < min(order_result[stock_no]):
+                    if stock_no not in order_result:
+                        # 将stock_no, price写入到order_output_file_path文件中
                         with open(order_output_file_path, 'a', encoding='utf-8') as f:
                             f.write('{},{}\n'.format(stock_no, price))
                         result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
+                    else:
+                        if price < min(order_result[stock_no]):
+                            with open(order_output_file_path, 'a', encoding='utf-8') as f:
+                                f.write('{},{}\n'.format(stock_no, price))
+                            result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
             except Exception:
                 traceback.print_exc()
                 print(line)
+    if os.path.exists(file_path):
+        os.remove(file_path)
 
 
 def is_time_between(start_time, end_time, check_time=None):
@@ -126,8 +136,15 @@ if __name__ == '__main__':
                 process_stock_data(order_output_file_path, output_file_path, auto, amount)
         else:
             # 如果不在运行时间内，则等待一段时间（例如30秒）后再次检查
+            # 尝试将process杀死
+            try:
+                if process.is_alive():
+                    process.terminate()
+                else:
+                    print('进程已经结束')
+            except Exception:
+                pass
             time.sleep(10)
-
 
 
 

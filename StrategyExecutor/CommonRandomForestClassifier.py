@@ -67,7 +67,7 @@ def load_rf_model(model_path):
                 model_file_path = os.path.join(model_path, model_name)
                 if os.path.exists(model_file_path):
                     break
-            if score > 5 and 'thread_day_2' in model_name:
+            if score > 10 and 'thread_day_2' in model_name:
                 all_rf_model_map = {}
                 try:
                     model = load(model_file_path)
@@ -111,12 +111,12 @@ def get_all_good_data_with_model_list(data, all_rf_model_list):
     all_selected_samples = []
     for rf_model_map in all_rf_model_list:
         rf_model = rf_model_map[list(rf_model_map.keys())[0]]
-        threshold = rf_model_map['threshold']
+        threshold = rf_model_map['threshold'] + 0.05
         score = rf_model_map['score']
         model_name = list(rf_model_map.keys())[0]
         if threshold > 1:
             threshold = 0.98
-        print(f"模型 {rf_model} 的阈值为 {threshold:.2f}")
+        # print(f"模型 {rf_model} 的阈值为 {threshold:.2f}")
         selected_samples = get_thread_data(data, rf_model, threshold)
         if selected_samples is not None:
             selected_samples['score'] = score

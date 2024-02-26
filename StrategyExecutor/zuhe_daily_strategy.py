@@ -891,6 +891,7 @@ def process_results_with_every_period(results_df, threshold_day, dimension='year
         'total_cost': float(round(result['total_cost'].sum(), 4)),
         'size_of_result_df': int(result[result['Days Held'] > threshold_day].shape[0]),
         'total_days_held': int(result['Days Held'].sum()),
+        'ratio': round(result[result['Days Held'] > threshold_day].shape[0] / result.shape[0], 4),
         # 'all_date': result['Buy Date'].dt.strftime('%Y-%m-%d').tolist()
     }
 
