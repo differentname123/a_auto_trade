@@ -220,7 +220,7 @@ def sort_all_report():
     sorted_scores = sorted(all_scores, key=lambda x: x[1], reverse=True)
 
     # 将排序后的结果输出到一个文件中
-    output_filename = '../temp/all_model_reports.json'
+    output_filename = '../final_zuhe/other/all_model_reports.json'
     with open(output_filename, 'w') as outfile:
         json.dump(sorted_scores, outfile, indent=4)
 
@@ -380,4 +380,4 @@ if __name__ == '__main__':
     #     for model_name, score, threshold in sorted_scores:
     #         if score > 0.8:
     #             good_model_list.append((model_name, score, threshold))
-    # sort_all_report()
+    sort_all_report()

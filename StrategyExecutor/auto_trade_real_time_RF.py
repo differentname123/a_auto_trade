@@ -60,6 +60,19 @@ def get_order_info(file_path):
                 print(line)
     return result
 
+def statistic_good_price(file_path):
+    good_list = []
+    with open(file_path, 'r', encoding='utf-8') as file:
+        for line in file.readlines():
+            stock_no, min_price, max_price, current_price = line.strip().split(',')
+            # 将price转换为float类型并且保留两位小数
+            min_price = round(float(min_price), 2)
+            max_price = round(float(max_price), 2)
+            current_price = round(float(current_price), 2)
+            if current_price <= max_price:
+                good_list.append((stock_no, current_price))
+    print('good_list:', good_list)
+
 def process_stock_data(order_output_file_path, file_path, auto, amount):
     order_result = get_order_info(order_output_file_path)
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -76,10 +89,12 @@ def process_stock_data(order_output_file_path, file_path, auto, amount):
                 if max_price <= current_price:
                     price = max_price
 
-                # 判断当前时间是否在15:55之后
+                # 判断当前时间是否在14:55之后
                 if datetime.now().time() > datetime.strptime("14:55", "%H:%M").time():
-                    price = current_price
-                    result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
+                    if current_price <= max_price:
+                        print('当前时间已经超过14:55')
+                        price = current_price
+                        result = auto.quick_buy(stock_no=stock_no, amount=amount, price=price)
                 else:
                     if stock_no not in order_result:
                         # 将stock_no, price写入到order_output_file_path文件中
@@ -107,6 +122,9 @@ def is_time_between(start_time, end_time, check_time=None):
         return check_time >= start_time or check_time <= end_time
 
 if __name__ == '__main__':
+    # target_date = datetime.now().strftime('%Y-%m-%d')
+    # output_file_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
+    # statistic_good_price(output_file_path)
     auto = ThsAuto()  # 连接客户端
     auto.active_mian_window()
     auto.bind_client()

@@ -366,7 +366,7 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    # data = data[data['日期'] > pd.Timestamp('2024-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2023-01-01')]
     data = data[data['日期'] > pd.Timestamp('2018-01-01')]
 
     # 如果有大于30天的断层
@@ -394,7 +394,7 @@ def load_full_data(file_path):
     data['名称'] = name
     data['代码'] = code
     data['数量'] = 0
-    # data = data[data['日期'] > pd.Timestamp('2023-01-01')]
+    data = data[data['日期'] > pd.Timestamp('2023-01-01')]
     data.sort_values(by='日期', ascending=True, inplace=True)
     # 重置索引
     data.reset_index(drop=True, inplace=True)
@@ -2401,8 +2401,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
                      code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
     new_exclude_code_set = set(stock_data_df['代码']) - need_code_set
     new_exclude_code_set.update(exclude_code_set)
-    output_file_path = '../final_zuhe/select/select_RF_{}_real_time.csv'.format(target_date)
-    output_result_path = '../final_zuhe/select/select_RF_result_{}_real_time.csv'.format(target_date)
+    output_file_path = '../final_zuhe/real_time/select_RF_{}_real_time.csv'.format(target_date)
 
     # 筛选出满足条件的股票数据
     filtered_stock_data_df = stock_data_df[~stock_data_df['代码'].isin(new_exclude_code_set)]
@@ -2410,6 +2409,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
     # 保留filtered_stock_data_df的后100个数据
     filtered_stock_data_df = filtered_stock_data_df
     all_rf_model_list = load_rf_model(MODEL_PATH)
+    plus_threshold = 0.05
     while True:
         start = time.time()
         # 将满足条件的DataFrame分成100个子列表
@@ -2431,7 +2431,9 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
         print('待处理的数据量：{}'.format(len(all_result_df)))
 
         try:
-            all_selected_samples = get_all_good_data_with_model_list(all_result_df, all_rf_model_list)
+            if datetime.now().time() > datetime.strptime("14:55", "%H:%M").time():
+                plus_threshold = 0
+            all_selected_samples = get_all_good_data_with_model_list(all_result_df, all_rf_model_list, plus_threshold)
             if all_selected_samples is not None and not all_selected_samples.empty:
                 # 打印all_selected_samples的 code 收盘价
                 # # 筛选出数量大于等于2的条目
@@ -2442,7 +2444,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
                 with open(out_put_path, 'a') as f:
                     for code, row in grouped.iterrows():
                         f.write('{}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'], row['current_price']))
-                        print('{}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'], row['current_price']))
+                        print('{}, {}, {}, {}'.format(code, row['min_close'], row['max_close'], row['current_price']))
         except Exception as e:
             print('处理文件失败：{}'.format(e))
 
@@ -2709,9 +2711,9 @@ def process_file_target_date_min_RF(file_path, date):
     date = str(date).split(' ')[0]
     out_put_file_path = '../min_back_data/{}_{}.csv'.format(file_name, date)
     # 判断out_put_file_path是否存在，如果存在则直接返回
-    if os.path.exists(out_put_file_path):
-        print('处理{}耗时:{}'.format(out_put_file_path, time.time() - start_time))
-        return pd.read_csv(out_put_file_path)
+    # if os.path.exists(out_put_file_path):
+    #     print('处理{}耗时:{}'.format(out_put_file_path, time.time() - start_time))
+    #     return pd.read_csv(out_put_file_path)
     # 将min_data中的日期转换为datetime类型
     min_data['日期'] = pd.to_datetime(min_data['日期'])
     # 找到min_data中日期大于date且小于date+1的数据
@@ -2862,7 +2864,7 @@ def get_target_thread_min_RF(date='2024-01-22'):
     all_files = []
     start_time = time.time()
     date = str(date)
-    output_filename = os.path.join('../final_zuhe/select/', '{}_RF_target_thread.csv'.format(date.split(' ')[0]))
+    output_filename = os.path.join('../final_zuhe/min_data/', '{}_RF_target_thread.csv'.format(date.split(' ')[0]))
     if os.path.exists(output_filename):
         print('{}已经存在'.format(output_filename))
         return None
@@ -3323,7 +3325,24 @@ def fix_RF_data(file_path='../final_zuhe/select/2024-01-02_RF_target_thread.csv'
 
 
     # 最后将结果又重新写入文件
-    origin_data.to_csv(out_put_file_path, index=False)
+    origin_data.to_csv(file_path, index=False)
+
+def predict_min_data():
+    # 读取文件
+    file_path = '../final_zuhe/min_data/'
+    file_list = os.listdir(file_path)
+    all_rf_model_list = load_rf_model(MODEL_PATH)
+    for file in file_list:
+        # 将file_path和file拼接起来
+        file = os.path.join(file_path, file)
+        file = '../final_zuhe/min_data/2024-02-19_RF_target_thread.csv'
+        output_file_name = file.replace('min_data', 'min_data_select')
+        data = pd.read_csv(file, low_memory=False, dtype={'代码': str})
+        print('加载的数据量：', len(data))
+        all_selected_samples = get_all_good_data_with_model_list(data, all_rf_model_list, 0.05)
+        if all_selected_samples is None or len(all_selected_samples) > 0:
+            all_selected_samples.to_csv(output_file_name, index=False)
+        break
 
 
 if __name__ == '__main__':
@@ -3349,12 +3368,9 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    # data = pd.read_csv('../min_data_exclude_new_can_buy/恒基达鑫_002492.txt')
-    # print(data)
-    # save_and_analyse_all_data_mul_real_time_RF('2024-02-23')
-    back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-23')
-
-    # save_and_analyse_all_data_mul_real_time_RF('2024-02-26')
+    # save_and_analyse_all_data_mul_real_time_RF('2024-02-27')
+    # predict_min_data()
+    back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
 
     # common_data = get_common_line()
     # print(common_data)

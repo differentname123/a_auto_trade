@@ -10,6 +10,7 @@
 """
 import json
 import os
+import time
 
 from imblearn.over_sampling import SMOTE
 from joblib import dump, load
@@ -44,9 +45,11 @@ def get_thread_data(data, rf_classifier, threshold):
     # 如果有高于阈值的预测样本，打印对应的原始数据
     if predicted_true_samples > 0:
         # 直接使用布尔索引从原始data中选择对应行
-        selected_samples = X1[high_confidence_true]
+        selected_samples = X1[high_confidence_true].copy()
         # 统计selected_samples中 收盘 的和
         close_sum = selected_samples['收盘'].sum()
+        selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
+        selected_samples.loc[:, 'basic_thread'] = threshold
         print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
         print(selected_samples['日期'].value_counts())
     return selected_samples
@@ -58,7 +61,7 @@ def load_rf_model(model_path):
     :return:
     """
     all_rf_model_list = []
-    output_filename = '../temp/all_model_reports.json'
+    output_filename = '../final_zuhe/other/all_model_reports.json'
     # 加载output_filename，找到最好的模型
     with open(output_filename, 'r') as file:
         sorted_scores = json.load(file)
@@ -101,17 +104,20 @@ def get_all_good_data(data):
         all_selected_samples = pd.concat(all_selected_samples)
     return all_selected_samples
 
-def get_all_good_data_with_model_list(data, all_rf_model_list):
+def get_all_good_data_with_model_list(data, all_rf_model_list, plus_threshold=0.05):
     """
     获取所有模型的预测结果，如果预测结果高于阈值，则打印对应的原始数据
     :param data:
     :param all_rf_model_list:
     :return:
     """
+    print(f"加载了 {len(all_rf_model_list)} 个模型 plus_threshold={plus_threshold}")
     all_selected_samples = []
+    count = 0
     for rf_model_map in all_rf_model_list:
+        start = time.time()
         rf_model = rf_model_map[list(rf_model_map.keys())[0]]
-        threshold = rf_model_map['threshold'] + 0.05
+        threshold = rf_model_map['threshold'] + plus_threshold
         score = rf_model_map['score']
         model_name = list(rf_model_map.keys())[0]
         if threshold > 1:
@@ -122,6 +128,8 @@ def get_all_good_data_with_model_list(data, all_rf_model_list):
             selected_samples['score'] = score
             selected_samples['model_name'] = model_name
             all_selected_samples.append(selected_samples)
+        count += 1
+        print(f"整体进度 {count}/{len(all_rf_model_list)} score {score} threshold {threshold}  basic_threshold {rf_model_map['threshold']} 耗时 {time.time() - start} 模型 {model_name}\n\n")
     # 如果all_selected_samples不为空，将所有的selected_samples合并
     if len(all_selected_samples) > 0:
         all_selected_samples = pd.concat(all_selected_samples)
