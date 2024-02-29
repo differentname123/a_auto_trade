@@ -9,8 +9,10 @@
     通用的一些关于随机森林模型的代码
 """
 import json
+import multiprocessing
 import os
 import time
+from multiprocessing import Pool
 
 from imblearn.over_sampling import SMOTE
 from joblib import dump, load
@@ -54,7 +56,7 @@ def get_thread_data(data, rf_classifier, threshold):
         print(selected_samples['日期'].value_counts())
     return selected_samples
 
-def load_rf_model(model_path):
+def load_rf_model(need_load=True):
     """
     加载随机森林模型
     :param model_path:
@@ -73,8 +75,12 @@ def load_rf_model(model_path):
             if score > 10 and 'thread_day_2' in model_name:
                 all_rf_model_map = {}
                 try:
-                    model = load(model_file_path)
-                    all_rf_model_map[model_name] = model
+                    if need_load:
+                        model = load(model_file_path)
+                        all_rf_model_map[model_name] = model
+                    else:
+                        all_rf_model_map[model_name] = model_file_path
+                        all_rf_model_map['model_path'] = model_file_path
                     all_rf_model_map['threshold'] = threshold
                     all_rf_model_map['score'] = score
                     all_rf_model_list.append(all_rf_model_map)
@@ -133,6 +139,85 @@ def get_all_good_data_with_model_list(data, all_rf_model_list, plus_threshold=0.
     # 如果all_selected_samples不为空，将所有的selected_samples合并
     if len(all_selected_samples) > 0:
         all_selected_samples = pd.concat(all_selected_samples)
+    return all_selected_samples
+
+def get_all_good_data_with_model_name_list_old(data, plus_threshold=0.05):
+    """
+    获取所有模型的预测结果，如果预测结果高于阈值，则打印对应的原始数据
+    :param data:
+    :param all_rf_model_list:
+    :return:
+    """
+    all_rf_model_list = load_rf_model(need_load=False)
+    print(f"加载了 {len(all_rf_model_list)} 个模型 plus_threshold={plus_threshold}")
+    all_selected_samples = []
+    count = 0
+    for rf_model_map in all_rf_model_list:
+        try:
+            start = time.time()
+            threshold = rf_model_map['threshold'] + plus_threshold
+            score = rf_model_map['score']
+            model_name = list(rf_model_map.keys())[0]
+            rf_model = load(rf_model_map['model_path'])
+            if threshold > 1:
+                threshold = 0.98
+            # print(f"模型 {rf_model} 的阈值为 {threshold:.2f}")
+            selected_samples = get_thread_data(data, rf_model, threshold)
+            if selected_samples is not None:
+                selected_samples['score'] = score
+                selected_samples['model_name'] = model_name
+                all_selected_samples.append(selected_samples)
+        except Exception as e:
+            print(f"模型 {model_name} 加载失败 {e}")
+        finally:
+            count += 1
+            print(f"整体进度 {count}/{len(all_rf_model_list)} score {score} threshold {threshold}  basic_threshold {rf_model_map['threshold']} 耗时 {time.time() - start} 模型 {model_name}\n\n")
+    # 如果all_selected_samples不为空，将所有的selected_samples合并
+    if len(all_selected_samples) > 0:
+        all_selected_samples = pd.concat(all_selected_samples)
+    return all_selected_samples
+
+
+def process_model(rf_model_map, data, plus_threshold=0.05):
+    """
+    处理单个模型的预测并收集数据
+    :param rf_model_map: 单个随机森林模型的信息
+    :param data: 需要预测的数据
+    :param plus_threshold: 阈值调整
+    :return: 选中的样本（如果有）
+    """
+    try:
+        start = time.time()
+        threshold = rf_model_map['threshold'] + plus_threshold
+        score = rf_model_map['score']
+        model_name = list(rf_model_map.keys())[0]
+        rf_model = load(rf_model_map['model_path'])
+        if threshold > 1:
+            threshold = 0.98
+
+        selected_samples = get_thread_data(data, rf_model, threshold)
+        if selected_samples is not None:
+            selected_samples['score'] = score
+            selected_samples['model_name'] = model_name
+            return selected_samples
+    except Exception as e:
+        print(f"模型 {model_name} 加载失败 {e}")
+    finally:
+        elapsed_time = time.time() - start
+        print(f"模型 {model_name} 耗时 {elapsed_time}")
+
+
+def get_all_good_data_with_model_name_list(data, plus_threshold=0.05):
+    all_rf_model_list = load_rf_model(need_load=False)
+    print(f"加载了 {len(all_rf_model_list)} 个模型 plus_threshold={plus_threshold}")
+
+    # 使用Pool对象来并行处理
+    with Pool(processes=multiprocessing.cpu_count() - 15) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
+        results = pool.starmap(process_model, [(model, data, plus_threshold) for model in all_rf_model_list])
+
+    # 过滤掉None结果并合并DataFrame
+    all_selected_samples = pd.concat([res for res in results if res is not None])
+
     return all_selected_samples
 
 if __name__ == '__main__':

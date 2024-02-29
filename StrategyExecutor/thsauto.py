@@ -361,26 +361,17 @@ class ThsAuto:
         """
 
         set_text(self.stock_no_ctrl, stock_no)
-        time.sleep(sleep_time)
+        time.sleep(0.15)
         if price is not None:
-            time.sleep(sleep_time)
-            price = '%.3f' % price
+            price = '%.2f' % price
             set_text(self.price_ctrl, price)
-            time.sleep(sleep_time)
+            time.sleep(0.05)
 
         set_text(self.amount_ctrl, str(amount))
-        time.sleep(sleep_time)
+        # time.sleep(sleep_time)
         hot_key(['enter'])
-        result = None
-        retry = 0
-        while retry < retry_time:
-            time.sleep(sleep_time)
-            result = self.get_result()
-            if result:
-                hot_key(['enter'])
-                return result
-            hot_key(['enter'])
-            retry += 1
+        # time.sleep(sleep_time)
+        hot_key(['enter'])
         return {
             'code': 2,
             'status': 'unknown',
