@@ -2399,6 +2399,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
     多线程拉取最新数据并且分析出结果
     :return:
     """
+    start = time.time()
     out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
 
     stock_data_df = ak.stock_zh_a_spot_em()
@@ -2417,7 +2418,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
     # filtered_stock_data_df = filtered_stock_data_df
     # all_rf_model_list = load_rf_model(MODEL_PATH)
     plus_threshold = 0
-    start = time.time()
+
     # 将满足条件的DataFrame分成100个子列表
     stock_data_lists = np.array_split(filtered_stock_data_df, 96)
 
@@ -3183,7 +3184,7 @@ def get_RF_real_time_price_thread(file_path, target_date):
     target_data = origin_data[(origin_data['日期'] == pd.to_datetime(target_date))]
     # 截取temp_origin_data的后100条数据
     temp_origin_data = temp_origin_data.iloc[-100:]
-    if target_data.empty:
+    if target_data.empty or len(temp_origin_data) < 100:
         return None
     # 获取temp_origin_data的最后一行数据的日期
     last_price = temp_origin_data.iloc[-1]['收盘']
@@ -3377,9 +3378,9 @@ if __name__ == '__main__':
 
     # load_all_data()
     # get_all_data_perfomance()
-    gen_all_back()
-    load_all_data_performance()
-    save_and_analyse_all_data_mul_real_time_RF('2024-02-29')
+    # gen_all_back()
+    # load_all_data_performance()
+    save_and_analyse_all_data_mul_real_time_RF('2024-03-01')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
 
