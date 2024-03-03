@@ -98,7 +98,7 @@ def load_data(file_path):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
-def load_data(file_path):
+def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data = pd.read_csv(file_path, low_memory=False)
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
@@ -116,8 +116,8 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2025-01-01')]
-    data = data[data['日期'] > pd.Timestamp('2018-01-01')]
+    data = data[data['日期'] < pd.Timestamp(end_date)]
+    data = data[data['日期'] > pd.Timestamp(start_date)]
 
     # 如果有大于30天的断层
     if not filtered_diff.empty:

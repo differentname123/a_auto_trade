@@ -72,7 +72,7 @@ def load_rf_model(need_load=True):
                 model_file_path = os.path.join(model_path, model_name)
                 if os.path.exists(model_file_path):
                     break
-            if score > 5 and 'thread_day_2' in model_name:
+            if score > 0.1:
                 all_rf_model_map = {}
                 try:
                     if need_load:

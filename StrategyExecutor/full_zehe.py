@@ -3378,7 +3378,7 @@ if __name__ == '__main__':
 
     # load_all_data()
     # get_all_data_perfomance()
-    # gen_all_back()
+    gen_all_back()
     # load_all_data_performance()
     save_and_analyse_all_data_mul_real_time_RF('2024-03-01')
     # predict_min_data()
