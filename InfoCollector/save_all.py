@@ -169,11 +169,12 @@ def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
     code = stock_data['代码']
     if code not in exclude_code:
-        price_data = get_price(code, '19700101', '20291021', period='daily')
+        price_data = get_price(code, '20140101', '20291021', period='daily')
         filename = '../daily_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
         # price_data不为空才保存
-        if not price_data.empty:
+        if not price_data.empty and len(price_data) > 26:
             price_data = fix_st(price_data, '../announcements/{}.json'.format(code))
+            price_data = calculate_future_high_prices(price_data)
             price_data.to_csv(filename, index=False)
             # Logging the save operation with the timestamp
             logging.info(f"Saved data for {name} ({code}) to {filename}")
@@ -464,6 +465,23 @@ def save_index_data():
     index_data['日期'] = pd.to_datetime(index_data['日期'])
     return index_data
 
+def calculate_future_high_prices(data):
+    """
+    计算后续1，2，3日的最高价。
+
+    参数:
+    - data: DataFrame，包含市场数据，其中应包含一个名为'最高价'的列。
+
+    返回值:
+    - 修改后的DataFrame，包含新增的后续1，2，3日最高价列。
+    """
+    # 计算后续1，2，3日的最高价
+    for days in [1, 2, 3]:
+        # 使用shift()将数据向上移动指定的天数，然后使用rolling()和max()计算指定窗口内的最大值
+        data[f'后续{days}日最高价'] = data['最高'].shift(-days).rolling(window=days, min_periods=1).max()
+
+    return data
+
 if __name__ == '__main__':
     # price_data = get_price('002492', '20230101', '20290124', period='1')
     # print(price_data)
@@ -483,6 +501,6 @@ if __name__ == '__main__':
     # fix_announcements()
     # fetch_announcements('002740')
     # save_index_data()
-    save_all_data_mul(save_fun=save_stock_data_1_min)
-    save_all_data_mul(save_fun=save_stock_data_min)
+    # save_all_data_mul(save_fun=save_stock_data_1_min)
+    # save_all_data_mul(save_fun=save_stock_data_min)
     save_all_data_mul()

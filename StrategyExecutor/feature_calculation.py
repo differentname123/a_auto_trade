@@ -10,18 +10,22 @@
     指标的类别分为:1.每只股票自己分析出来的特征(收盘 开盘等数据的比较加上和一段时间比较将时间序列压缩到每一行) 2.大盘分析出来的特征（上证指数 + 深证指数 + 所有股票整体的分析(比如上涨比例 平均涨跌幅...)） 3.自己相对于大盘分析出来的特征（比如自己跌幅相对于大盘平均跌幅的比例）
     
 """
+import json
+import multiprocessing
 import os
+import time
 from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
 
 from InfoCollector.save_all import save_all_data_mul
-from StrategyExecutor.common import load_data
+from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json
 from itertools import combinations
 import talib
 import warnings
 warnings.filterwarnings('ignore', message='.*Warning.*')
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 def calculate_change_percentages(data, periods, key_list):
     """
     计算指定列在给定周期的涨跌幅，并将涨跌幅乘以100，保留两位小数。
@@ -382,88 +386,223 @@ def calculate_future_high_prices(data):
 
 def get_data_feature(data):
     """
-    为data生成相应的feature，data包含开盘，收盘，最高，最低，成交量，日期，代码，换手率
+    Generate features for a given dataset. The dataset includes open, close, high, low prices,
+    volume, date, ticker symbol, and turnover rate. This function adds technical indicators,
+    calculates price changes, marks pre and post-holiday effects, and more.
+
+    :param data: DataFrame containing the stock data with columns for opening, closing, highest,
+                 lowest prices, volume, date, code, and turnover rate.
+    :return: DataFrame with added features or None if the input data is too short.
+    """
+    start_time = time.time()
+    min_required_length = 26  # Minimum required length of the data to proceed
+
+    # Check if data length is less than the minimum required length
+    if len(data) < min_required_length:
+        print(f"{data['名称'].iloc[0]}数据长度小于{min_required_length}，跳过")
+        return None
+
+    # Mark the days before and after holidays
+    mark_holiday_eve_and_post_v3(data, '日期')
+
+    # Calculate change percentages for close, open, high, and low prices over various periods
+    calculate_change_percentages(data, periods=[1, 3, 5, 10], key_list=['收盘', '开盘', '最高', '最低'])
+
+    # Filter columns for change percentages
+    change_percentage_columns = [column for column in data.columns if '_涨跌幅_' in column]
+
+    # Calculate crossover signals based on change percentages
+    data = calculate_crossovers(data, change_percentage_columns)
+
+    # Calculate technical indicators
+    calculate_technical_indicators(data)
+
+    # Calculate the relative amplitude for specified price types
+    calculate_relative_amplitude(data, key_list=['收盘', '开盘', '最高', '最低'])
+
+    # Filter columns excluding specific ones and those not containing signals
+    columns_for_analysis = [column for column in data.columns
+                            if column not in ['日期', '代码', '名称', '数量', 'Max_rate', 'Buy_Signal']
+                            and '是否_信号' not in column]
+
+    # Calculate ratios and dynamic frequencies for selected columns
+    data = calculate_ratio_and_dynamic_frequency(data, columns_for_analysis)
+
+    # Calculate continuous rise or fall in selected columns and mark trend reversal points
+    data = calculate_trend_changes(data, columns_for_analysis)
+
+    # Calculate rolling statistics (mean, max, min) for selected columns and mark extremes
+    data = calculate_rolling_stats_with_max_min_flags_optimized(data, columns_for_analysis, windows=[3, 5, 10])
+
+    # Calculate crossovers for specific price types and Bollinger Bands over various windows
+    data = get_calculate_crossovers(data, key_list=['收盘', '开盘', '最高', '最低',
+                                                       'Bollinger_Upper_股价', 'Bollinger_Middle_股价',
+                                                       'Bollinger_Lower_股价'], windows=[3, 5, 10])
+
+    # Replace NaN values with 0
+    data.fillna(0, inplace=True)
+
+    # Discard the initial rows that are less than the minimum required length
+    data = data.iloc[min_required_length:]
+
+    # Logging the time taken to compute features
+    print(f"名称{data['名称'].iloc[0]} 计算特征耗时 {time.time() - start_time}")
+
+    return data
+
+
+def get_all_data_performance():
+    """
+    加载所有数据，并获取每天的表现情况。
+    此函数首先遍历指定目录下的所有文件，然后使用多进程并行加载这些文件的数据。
+    加载后，数据被合并并按日期分组，以分析每天的数据表现，并将结果保存到JSON文件中。
+    """
+    file_path = '../daily_data_exclude_new_can_buy'
+
+    # 获取目录下所有文件的完整路径
+    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    # 合并各个进程加载的数据
+    all_data_df = load_and_merge_data(all_files)
+    # 将日期列转换为日期时间格式，并处理格式错误
+    all_data_df['日期'] = pd.to_datetime(all_data_df['日期'], errors='coerce')
+
+    # 按日期分组
+    grouped_data = all_data_df.groupby(all_data_df['日期'].dt.date)
+
+    # 分析每组（每天）的数据表现
+    performance_results = {}
+    for date, group in grouped_data:
+        date_str = date.strftime('%Y-%m-%d')  # 格式化日期为字符串
+        performance = analyze_data_performance(group)
+        performance_results[date_str] = performance
+
+    # 保存分析结果到JSON文件
+    results_file_path = '../final_zuhe/other/all_data_performance.json'
+    write_json(results_file_path, performance_results)
+    print(f'所有数据的表现分析已保存到 {results_file_path}')
+
+def analyze_data_performance(data, min_profit_list=[1,2, 3]):
+    """
+    分析给定数据的表现情况。3天内的成功率
     :param data:
     :return:
     """
-    min_len = 26
-    # 判断data是否小于26，小于则跳过
-    if len(data) < min_len:
-        print('{}数据长度小于{}，跳过'.format(data['名称'].iloc[0], min_len))
-        return None
+    result = {}
+    for min_profit in min_profit_list:
+        for days in [1, 2, 3]:
+            key_name = '后续{}日最高价'.format(days)
+            success_rate = (data[key_name] / data['收盘']).ge(1 + min_profit / 100).mean()
+            result[f'后续{days}日{min_profit}成功率'] = success_rate
+    return result
 
-    # 计算后续1，2，3日的最高价
-    data = calculate_future_high_prices(data)
-    # 计算日期的节前和节后标记
-    mark_holiday_eve_and_post_v3(data, '日期')
-
-    # 计算收盘, 开盘, 最高, 最低在[1,3,5]周期的涨跌幅
-    calculate_change_percentages(data, [1, 3, 5, 10], ['收盘', '开盘', '最高', '最低'])
-
-    zhang_columns = [i for i in data.columns if '_涨跌幅_' in i ]
-    data = calculate_crossovers(data, zhang_columns)
-
-
-    # 计算技术指标
-    calculate_technical_indicators(data)
-
-    # 计算收盘, 开盘, 最高, 最低的相对振幅
-    calculate_relative_amplitude(data, ['收盘', '开盘', '最高', '最低'])
-
-    # 获取data中说有包含_的列名
-    columns = [i for i in data.columns if i not in ['日期', '代码', '名称', '数量','Max_rate','Buy_Signal'] and '是否_信号' not in i]
-
-    # 计算指定列在不同滑动窗口内的值分布占比_信号，并动态计算频率。
-    data = calculate_ratio_and_dynamic_frequency(data, columns)
-
-    # 计算指定列的连续上涨或下跌天数，并标记趋势由涨转跌及由跌转涨的点。
-    data = calculate_trend_changes(data, columns)
-
-    # 计算指定列的3天、5天、10天滑动平均值，以及3天、5天、10天内的极大值和极小值。同时标记是否_信号为滑动窗口内的最大值或最小值。
-    # columns = [i for i in data.columns if i not in ['日期', '代码', '名称', '数量', 'Max_rate','Buy_Signal'] and '_归一化_信号' in i and '是否_信号' not in i]
-    data = calculate_rolling_stats_with_max_min_flags_optimized(data, columns, windows=[3, 5, 10])
-
-    data = get_calculate_crossovers(data, ['收盘', '开盘', '最高', '最低', 'Bollinger_Upper_股价', 'Bollinger_Middle_股价', 'Bollinger_Lower_股价'],[3, 5, 10])
-
-    # 将data中的NaN值替换为0
-    data.fillna(0, inplace=True)
-    # sort_keys_by_max_min_diff(data, [i for i in data.columns if '信号' in i])
-    # 删除data中前min_len行数据
-    data = data.iloc[min_len:]
-    return data
-
-def process_file(file_path, save_path):
+def generate_features_for_file(file_path, save_path):
     """
-    为file_path生成相应的feature，并将feature保存到save_path
-    :param file_path:
-    :param save_path:
-    :return:
+    读取指定路径的文件，生成其特征，并将特征数据保存到给定的保存路径。
+
+    :param file_path: str, 待处理文件的完整路径。该文件是生成特征的数据源。
+    :param save_path: str, 特征数据保存的目标目录路径。生成的文件将以源文件名保存在此路径下。
+    :return: None
     """
-    data = load_data(file_path)
+    data = load_data(file_path, end_date='2024-03-01')
     new_data = get_data_feature(data)
     if new_data is not None:
         new_data.to_csv(os.path.join(save_path, os.path.basename(file_path)), index=False)
-def gen_all_feature(file_path, save_path):
+
+def generate_features_for_all_files(source_path, save_path):
     """
-    为file_path中的所有文件生成相应的feature
-    :param file_path:
-    :param save_path:
-    :return:
+    遍历指定路径下的所有文件，为每个文件生成特征并保存。
+
+    该函数首先调用一个函数来保存所有必要的数据（此处省略了该调用的具体实现细节），然后使用多进程方式并行处理每个文件，
+    为每个文件生成特征并将结果保存到指定的目录中。
+
+    :param source_path: str, 包含待处理文件的源目录路径。该函数将递归遍历此路径下的所有文件。
+    :param save_path: str, 生成的特征文件的保存目录路径。每个文件的特征将保存为一个新文件，位置在此路径下。
+    :return: None
     """
-    # save_all_data_mul()
+    save_all_data_mul()
     with Pool() as pool:
-        for root, ds, fs in os.walk(file_path):
-            for f in fs:
-                fullname = os.path.join(root, f)
-                # process_file(fullname, save_path)
-                pool.apply_async(process_file, args=(fullname, save_path))
+        for root, _, files in os.walk(source_path):
+            for file in files:
+                full_path = os.path.join(root, file)
+                pool.apply_async(generate_features_for_file, args=(full_path, save_path))
         pool.close()
         pool.join()
 
+def load_and_merge_data(batch):
+    start_time = time.time()
+    # 使用多进程并行加载当前批次的数据
+    cpu_count = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(processes=cpu_count)
+    file_chunks = [batch[i::cpu_count] for i in range(cpu_count)]
+    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    pool.close()
+    pool.join()
+
+    # 合并当前批次加载的数据
+    all_data_df = pd.concat(chunk_dfs)
+    merge_time = time.time()
+    print(f'当前批次数据合并耗时：{merge_time - start_time:.2f}秒')
+    return all_data_df
+
+def load_bad_data(ratio=0.5, profit=1, day=1):
+    results_file_path = '../final_zuhe/other/all_data_performance.json'
+    performance_results = read_json(results_file_path)
+    key_name = f'后续{day}日{profit}成功率'
+    bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if result[key_name] < ratio]
+
+
+    file_path = '../feature_data_exclude_new_can_buy'
+
+    # 获取目录下所有文件的完整路径
+    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+
+    # 分成3个批次进行加载
+    total_files = len(all_files)
+    batch_size = total_files // 10
+    batches = [all_files[i:i + batch_size] for i in range(0, total_files, batch_size)]
+
+    # 定义一个空的DataFrame用于存储所有批次的数据
+    batch_count = 0
+    for batch in batches:
+        batch_count += 1
+        # 合并当前批次加载的数据
+        all_data_df = load_and_merge_data(batch)
+        # 获取日期在bad_ratio_day中的数据
+        all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
+        bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
+        print(f'总体数据量：{len(all_data_df)}，异常数据量：{len(bad_data)}')
+        key = f'profit_{profit}_day_{day}'
+        out_put_path = f'../train_data/{key}'
+        file_name = f'bad_{ratio}_data_batch_count_{batch_count}.csv'
+        os.makedirs(out_put_path, exist_ok=True)
+        bad_data.to_csv(os.path.join(out_put_path, file_name), index=False)
+        # 释放内存
+        del all_data_df
+        del bad_data
+
 if __name__ == '__main__':
-    file_path = '../daily_data_exclude_new_can_buy'
-    out_path = '../feature_data_exclude_new_can_buy'
-    gen_all_feature(file_path, out_path)
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # out_path = '../feature_data_exclude_new_can_buy'
+    # generate_features_for_all_files(file_path, out_path)
+
+
     # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
     # data = load_data(file_path)
     # new_data = get_data_feature(data)
+    # print(new_data)
+
+    # get_all_data_performance()
+    # load_bad_data()
+
+    file_path = '../train_data/profit_1_day_1'
+
+    # 获取目录下所有文件的完整路径
+    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    data_list = []
+    for file in all_files:
+
+        data = pd.read_csv(file)
+        data_list.append(data)
+        print(f'文件{file}的数据量为{len(data)}')
+    all_df = pd.concat(data_list)
+    all_df.to_csv('../train_data/profit_1_day_1/bad_0.5_data_batch_count.csv', index=False)

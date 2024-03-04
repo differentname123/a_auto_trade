@@ -9,8 +9,11 @@
 
 """
 import datetime
+import json
 import os
 import sys
+import traceback
+
 import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
@@ -66,7 +69,7 @@ def parse_filename(file_path):
     return stock_name, stock_code
 
 # @timeit
-def load_data(file_path):
+def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data = pd.read_csv(file_path, low_memory=False)
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
@@ -84,8 +87,8 @@ def load_data(file_path):
     filtered_diff = date_diff[date_diff > pd.Timedelta(days=30)]
 
     # 过滤时间大于2024年的数据
-    data = data[data['日期'] < pd.Timestamp('2024-01-01')]
-    data = data[data['日期'] > pd.Timestamp('2018-01-01')]
+    data = data[data['日期'] < pd.Timestamp(end_date)]
+    data = data[data['日期'] > pd.Timestamp(start_date)]
 
     # 如果有大于30天的断层
     if not filtered_diff.empty:
@@ -97,6 +100,25 @@ def load_data(file_path):
     data.reset_index(drop=True, inplace=True)
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
+
+def load_file_chunk(file_chunk):
+    """
+    加载文件块的数据
+    """
+    chunk_data = [load_data(fname, end_date='2024-03-01') for fname in file_chunk]
+    return pd.concat(chunk_data)
+
+def write_json(file_path, data):
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False)
+
+def read_json(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        traceback.print_exc()
+        return {}
 
 def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data = pd.read_csv(file_path, low_memory=False)

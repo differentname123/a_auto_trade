@@ -64,7 +64,7 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
     origin_data_path_dir = origin_data_path_dir.split('/')[-1]
     print("加载数据{}...".format(file_path_path))
     data = pd.read_csv(file_path_path, low_memory=False)
-    signal_columns = [column for column in data.columns if 'signal' in column]
+    signal_columns = [column for column in data.columns if '信号' in column]
     X = data[signal_columns]
     ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
     try:
@@ -72,7 +72,7 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
         with open(ratio_result_path, 'r') as f:
             ratio_result = json.load(f)
     except FileNotFoundError:
-        ratio_result= {}
+        ratio_result = {}
     for thread_day in thread_day_list:
         y = data['Days Held'] <= thread_day
         ratio_key = origin_data_path_dir + '_' + str(thread_day)
@@ -319,7 +319,7 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../daily_all_100_bad_0.3/1.txt']
+    origin_data_path_list = ['../train_data/profit_1_day_1/bad_0.5_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
 
@@ -358,17 +358,17 @@ def get_all_model_report():
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     p1 = Process(target=build_models)
-    p11 = Process(target=build_models1)
+    # p11 = Process(target=build_models1)
     # p12 = Process(target=build_models2)
     # p2 = Process(target=get_all_model_report)
 
     p1.start()
     # p2.start()
-    p11.start()
+    # p11.start()
     # p12.start()
 
     p11.join()
-    p1.join()
+    # p1.join()
     # p2.join()
     # p12.join()
 
@@ -380,4 +380,4 @@ if __name__ == '__main__':
     #     for model_name, score, threshold in sorted_scores:
     #         if score > 0.8:
     #             good_model_list.append((model_name, score, threshold))
-    sort_all_report()
+    # sort_all_report()

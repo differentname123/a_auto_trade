@@ -25,7 +25,7 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
 MODEL_PATH = '../model/all_models'
-MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
+MODEL_PATH_LIST = ['D:\good_models']
 
 def get_thread_data(data, rf_classifier, threshold):
     """
@@ -72,7 +72,7 @@ def load_rf_model(need_load=True):
                 model_file_path = os.path.join(model_path, model_name)
                 if os.path.exists(model_file_path):
                     break
-            if score > 0.1:
+            if score > 5 and 'thread_day_2' in model_name:
                 all_rf_model_map = {}
                 try:
                     if need_load:
