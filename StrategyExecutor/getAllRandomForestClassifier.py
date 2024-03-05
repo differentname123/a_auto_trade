@@ -30,7 +30,7 @@ MODEL_REPORT_PATH = '../model/all_model_reports'
 MODEL_OTHER = '../model/other'
 
 
-def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
+def train_and_dump_model(clf, X_train, y_train, model_file_path):
     """
     训练模型并保存到指定路径
     :param clf: 分类器实例
@@ -39,18 +39,23 @@ def train_and_dump_model(clf, X_train, y_train, model_path, model_name):
     :param model_path: 模型保存路径
     :param model_name: 模型名称
     """
-    model_path = 'D:\model/all_models'
-    out_put_path = os.path.join(model_path, model_name)
+    # model_path = 'D:\model/all_models'
+    # 获取model_file_path的文件名
+    model_name = os.path.basename(model_file_path)
+    out_put_path = model_file_path
+    # 如果out_put_path目录不存在，则创建
+    if not os.path.exists(os.path.dirname(out_put_path)):
+        os.makedirs(os.path.dirname(out_put_path))
     # 创建一个空的out_put_path文件
     with open(out_put_path, 'w') as f:
         pass
     print(f"开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
-    dump(clf, os.path.join(model_path, model_name))
-    print(f"模型已保存: {os.path.join(model_path, model_name)}")
+    dump(clf, model_file_path)
+    print(f"模型已保存: {model_name}")
     # get_model_report(model_path, model_name)
 
-def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
+def train_all_model(file_path_path, profit=1,thread_day_list=None, is_skip=True):
     """
     为file_path_path生成各种模型
     :param file_path_path: 数据集路径
@@ -74,7 +79,8 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
     except FileNotFoundError:
         ratio_result = {}
     for thread_day in thread_day_list:
-        y = data['Days Held'] <= thread_day
+        key_name = f'后续{thread_day}日最高价利润率'
+        y = data[key_name] >= profit
         ratio_key = origin_data_path_dir + '_' + str(thread_day)
         if ratio_key in ratio_result:
             true_ratio = ratio_result[ratio_key]
@@ -85,8 +91,9 @@ def train_all_model(file_path_path, thread_day_list=None, is_skip=True):
                 json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
         train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
+        train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
+
 
 def train_all_model_grad(file_path_path, thread_day_list=None, is_skip=True):
     """
@@ -157,17 +164,17 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
 
     for params in ParameterGrid(param_grid):
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
+        model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, model_name)
         if is_skip:
             flag = False
-            for path in MODEL_PATH_LIST:
-                if os.path.exists(os.path.join(path, model_name)):
-                    print(f"模型 {model_name} 已存在，跳过训练。")
-                    flag = True
-                    continue
+            if os.path.exists(model_file_path):
+                print(f"模型 {model_name} 已存在，跳过训练。")
+                flag = True
+                continue
             if flag:
                 continue
         clf = RandomForestClassifier(**params) if model_type == 'RandomForest' else GradientBoostingClassifier(**params)
-        train_and_dump_model(clf, X_train, y_train, MODEL_PATH, model_name)
+        train_and_dump_model(clf, X_train, y_train, model_file_path)
 
         # 对于类别不平衡的处理
         print("处理类别不平衡...")
@@ -177,7 +184,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         smote = SMOTE()
         X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
         model_name_smote = f"smote_{model_name}"
-        train_and_dump_model(clf, X_train_smote, y_train_smote, MODEL_PATH, model_name_smote)
+        train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
 
 def sort_all_report():
     """
@@ -319,9 +326,9 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../train_data/profit_1_day_1/bad_0.5_data_batch_count.csv']
+    origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, [2], is_skip=True)
+        train_all_model(origin_data_path, profit=1, thread_day_list=[1], is_skip=True)
 
 def build_models1():
     """
@@ -367,7 +374,7 @@ if __name__ == '__main__':
     # p11.start()
     # p12.start()
 
-    p11.join()
+    p1.join()
     # p1.join()
     # p2.join()
     # p12.join()

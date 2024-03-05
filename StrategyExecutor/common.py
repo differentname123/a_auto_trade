@@ -105,8 +105,12 @@ def load_file_chunk(file_chunk):
     """
     加载文件块的数据
     """
-    chunk_data = [load_data(fname, end_date='2024-03-01') for fname in file_chunk]
-    return pd.concat(chunk_data)
+    try:
+        chunk_data = [load_data(fname, end_date='2024-03-01') for fname in file_chunk]
+        return pd.concat(chunk_data)
+    except Exception:
+        # traceback.print_exc()
+        return pd.DataFrame()
 
 def write_json(file_path, data):
     with open(file_path, 'w', encoding='utf-8') as f:
@@ -128,7 +132,6 @@ def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data['日期'] = pd.to_datetime(data['日期'])
     data['名称'] = name
     data['代码'] = code
-    data['数量'] = 0
     data.sort_values(by='日期', ascending=True, inplace=True)
     # 过滤掉收盘价小于等于0的数据
     data = data[data['收盘'] > 0]

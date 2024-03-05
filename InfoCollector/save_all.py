@@ -477,8 +477,8 @@ def calculate_future_high_prices(data):
     """
     # 计算后续1，2，3日的最高价
     for days in [1, 2, 3]:
-        # 使用shift()将数据向上移动指定的天数，然后使用rolling()和max()计算指定窗口内的最大值
-        data[f'后续{days}日最高价'] = data['最高'].shift(-days).rolling(window=days, min_periods=1).max()
+        # 获取后续最高价的利润率
+        data[f'后续{days}日最高价利润率'] = round((data['最高'].shift(-days).rolling(window=days, min_periods=1).max() - data['收盘']) / data['收盘'] * 100, 2)
 
     return data
 

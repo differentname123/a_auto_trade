@@ -125,7 +125,7 @@ if __name__ == '__main__':
 
     while True:
         # 检查当前时间是否在9:30到15:00之间
-        if is_time_between(datetime.strptime("14:55", "%H:%M").time(),datetime.strptime("15:00", "%H:%M").time()):
+        if is_time_between(datetime.strptime("14:57", "%H:%M").time(),datetime.strptime("15:00", "%H:%M").time()):
             # 在这里执行您的主要逻辑
             target_date = datetime.now().strftime('%Y-%m-%d')
             output_file_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)

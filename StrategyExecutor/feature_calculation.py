@@ -68,6 +68,35 @@ def calculate_relative_amplitude(data, key_list):
             data[col_name].fillna(0, inplace=True)
 
 
+def calculate_window_relative_amplitude(data, windows=[1,3,5,10]):
+    """
+    对于windows中的每个窗口大小，计算该窗口内的最高和最低价格相对于窗口开始的振幅。
+
+    参数:
+    - data: DataFrame，包含市场数据。
+    - windows: list of int，表示想要计算振幅的时间窗口大小。
+
+    返回值:
+    - 无，函数将直接修改传入的DataFrame。
+    """
+    for window in windows:
+        high_col = f'窗口_{window}_天_最高'
+        low_col = f'窗口_{window}_天_最低'
+        amplitude_col = f'{window}_天_振幅_归一化_信号'
+
+        # 计算窗口内最高和最低价
+        data[high_col] = data['最高'].rolling(window=window, min_periods=1).max()
+        data[low_col] = data['最低'].rolling(window=window, min_periods=1).min()
+
+        # 计算相对振幅
+        data[amplitude_col] = ((data[high_col] - data[low_col]) / data['收盘'].shift(window - 1) * 100).round(2)
+
+        # 替换NaN值为0
+        data[amplitude_col].fillna(0, inplace=True)
+
+        # 可以选择删除临时列
+        data.drop(columns=[high_col, low_col], inplace=True)
+
 def calculate_technical_indicators(data):
     """
     计算股票市场数据的常用技术分析指标。
@@ -183,7 +212,7 @@ def calculate_rolling_stats_with_max_min_flags_optimized(data, key_list, windows
 
 
 
-def calculate_ratio_and_dynamic_frequency(data, key_list, ratio_windows=[5, 10, 20], frequency_windows=[30, 60, 120]):
+def calculate_ratio_and_dynamic_frequency(data, key_list, ratio_windows=[5, 10], frequency_windows=[]):
     """
     计算指定列在不同滑动窗口内的值分布占比_信号，并动态计算频率。
 
@@ -406,10 +435,10 @@ def get_data_feature(data):
     mark_holiday_eve_and_post_v3(data, '日期')
 
     # Calculate change percentages for close, open, high, and low prices over various periods
-    calculate_change_percentages(data, periods=[1, 3, 5, 10], key_list=['收盘', '开盘', '最高', '最低'])
+    calculate_change_percentages(data, periods=[3, 5, 10], key_list=['收盘'])
 
     # Filter columns for change percentages
-    change_percentage_columns = [column for column in data.columns if '_涨跌幅_' in column]
+    change_percentage_columns = [column for column in data.columns if '涨跌幅' in column]
 
     # Calculate crossover signals based on change percentages
     data = calculate_crossovers(data, change_percentage_columns)
@@ -418,12 +447,12 @@ def get_data_feature(data):
     calculate_technical_indicators(data)
 
     # Calculate the relative amplitude for specified price types
-    calculate_relative_amplitude(data, key_list=['收盘', '开盘', '最高', '最低'])
+    calculate_window_relative_amplitude(data)
 
     # Filter columns excluding specific ones and those not containing signals
     columns_for_analysis = [column for column in data.columns
-                            if column not in ['日期', '代码', '名称', '数量', 'Max_rate', 'Buy_Signal']
-                            and '是否_信号' not in column]
+                            if (column not in ['日期', '代码', '名称', '数量', 'Max_rate', 'Buy_Signal']
+                            and '是否_信号' not in column and '相较于' not in column and '后续' not in column )]
 
     # Calculate ratios and dynamic frequencies for selected columns
     data = calculate_ratio_and_dynamic_frequency(data, columns_for_analysis)
@@ -435,9 +464,7 @@ def get_data_feature(data):
     data = calculate_rolling_stats_with_max_min_flags_optimized(data, columns_for_analysis, windows=[3, 5, 10])
 
     # Calculate crossovers for specific price types and Bollinger Bands over various windows
-    data = get_calculate_crossovers(data, key_list=['收盘', '开盘', '最高', '最低',
-                                                       'Bollinger_Upper_股价', 'Bollinger_Middle_股价',
-                                                       'Bollinger_Lower_股价'], windows=[3, 5, 10])
+    data = get_calculate_crossovers(data, key_list=['收盘', 'Bollinger_Upper_股价', 'Bollinger_Lower_股价'], windows=[3, 5, 10])
 
     # Replace NaN values with 0
     data.fillna(0, inplace=True)
@@ -447,6 +474,13 @@ def get_data_feature(data):
 
     # Logging the time taken to compute features
     print(f"名称{data['名称'].iloc[0]} 计算特征耗时 {time.time() - start_time}")
+
+    delete_column = [column for column in data.columns if '信号' not in column and '均值' in column]
+    # 将delete_column从data中删除
+    data.drop(columns=delete_column, inplace=True)
+
+
+    # sort_keys_by_max_min_diff(data,[column for column in data.columns if '信号' in column])
 
     return data
 
@@ -461,6 +495,7 @@ def get_all_data_performance():
 
     # 获取目录下所有文件的完整路径
     all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    # all_files = all_files[:100]
     # 合并各个进程加载的数据
     all_data_df = load_and_merge_data(all_files)
     # 将日期列转换为日期时间格式，并处理格式错误
@@ -481,7 +516,7 @@ def get_all_data_performance():
     write_json(results_file_path, performance_results)
     print(f'所有数据的表现分析已保存到 {results_file_path}')
 
-def analyze_data_performance(data, min_profit_list=[1,2, 3]):
+def analyze_data_performance(data, min_profit_list=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]):
     """
     分析给定数据的表现情况。3天内的成功率
     :param data:
@@ -490,8 +525,8 @@ def analyze_data_performance(data, min_profit_list=[1,2, 3]):
     result = {}
     for min_profit in min_profit_list:
         for days in [1, 2, 3]:
-            key_name = '后续{}日最高价'.format(days)
-            success_rate = (data[key_name] / data['收盘']).ge(1 + min_profit / 100).mean()
+            key_name = '后续{}日最高价利润率'.format(days)
+            success_rate = (data[key_name]).ge(min_profit).mean()
             result[f'后续{days}日{min_profit}成功率'] = success_rate
     return result
 
@@ -532,17 +567,20 @@ def load_and_merge_data(batch):
     start_time = time.time()
     # 使用多进程并行加载当前批次的数据
     cpu_count = multiprocessing.cpu_count()
-    pool = multiprocessing.Pool(processes=cpu_count)
+    pool = multiprocessing.Pool(processes=10)
     file_chunks = [batch[i::cpu_count] for i in range(cpu_count)]
     chunk_dfs = pool.map(load_file_chunk, file_chunks)
     pool.close()
     pool.join()
-
+    try:
     # 合并当前批次加载的数据
-    all_data_df = pd.concat(chunk_dfs)
-    merge_time = time.time()
-    print(f'当前批次数据合并耗时：{merge_time - start_time:.2f}秒')
-    return all_data_df
+        all_data_df = pd.concat(chunk_dfs)
+        merge_time = time.time()
+        print(f'当前批次数据合并耗时：{merge_time - start_time:.2f}秒')
+        return all_data_df
+    except Exception as e:
+        print(f'合并失败，错误为{e}')
+    return None
 
 def load_bad_data(ratio=0.5, profit=1, day=1):
     results_file_path = '../final_zuhe/other/all_data_performance.json'
@@ -558,44 +596,41 @@ def load_bad_data(ratio=0.5, profit=1, day=1):
 
     # 分成3个批次进行加载
     total_files = len(all_files)
-    batch_size = total_files // 10
+    batch_size = total_files // 5
     batches = [all_files[i:i + batch_size] for i in range(0, total_files, batch_size)]
 
     # 定义一个空的DataFrame用于存储所有批次的数据
     batch_count = 0
+    key = f'profit_{profit}_day_{day}_bad_{ratio}'
+    out_put_path = f'../train_data/{key}'
+    print(f'开始加载bad_{out_put_path}的数据')
     for batch in batches:
         batch_count += 1
+        file_name = f'bad_{ratio}_data_batch_count_{batch_count}.csv'
+        file_out_put_path = os.path.join(out_put_path, file_name)
+        if os.path.exists(file_out_put_path):
+            print(f'文件{file_out_put_path}已存在，跳过')
+            continue
+
         # 合并当前批次加载的数据
         all_data_df = load_and_merge_data(batch)
+        if all_data_df is None:
+            continue
         # 获取日期在bad_ratio_day中的数据
         all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
         bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
         print(f'总体数据量：{len(all_data_df)}，异常数据量：{len(bad_data)}')
-        key = f'profit_{profit}_day_{day}'
-        out_put_path = f'../train_data/{key}'
-        file_name = f'bad_{ratio}_data_batch_count_{batch_count}.csv'
         os.makedirs(out_put_path, exist_ok=True)
-        bad_data.to_csv(os.path.join(out_put_path, file_name), index=False)
+        bad_data.to_csv(file_out_put_path, index=False)
         # 释放内存
         del all_data_df
         del bad_data
-
-if __name__ == '__main__':
-    # file_path = '../daily_data_exclude_new_can_buy'
-    # out_path = '../feature_data_exclude_new_can_buy'
-    # generate_features_for_all_files(file_path, out_path)
-
-
-    # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
-    # data = load_data(file_path)
-    # new_data = get_data_feature(data)
-    # print(new_data)
-
-    # get_all_data_performance()
-    # load_bad_data()
-
-    file_path = '../train_data/profit_1_day_1'
-
+    file_path = out_put_path
+    file_name = f'bad_{ratio}_data_batch_count.csv'
+    result_file_path = os.path.join(out_put_path, file_name)
+    if os.path.exists(result_file_path):
+        print(f'文件{result_file_path}已存在，跳过')
+        return
     # 获取目录下所有文件的完整路径
     all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
     data_list = []
@@ -605,4 +640,42 @@ if __name__ == '__main__':
         data_list.append(data)
         print(f'文件{file}的数据量为{len(data)}')
     all_df = pd.concat(data_list)
-    all_df.to_csv('../train_data/profit_1_day_1/bad_0.5_data_batch_count.csv', index=False)
+    all_df.to_csv(os.path.join(out_put_path, file_name), index=False)
+    print(f'文件{file_name}的数据量为{len(all_df)}')
+
+if __name__ == '__main__':
+    file_path = '../daily_data_exclude_new_can_buy'
+    out_path = '../feature_data_exclude_new_can_buy'
+    generate_features_for_all_files(file_path, out_path)
+
+
+    # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
+    # data = load_data(file_path)
+    # new_data = get_data_feature(data)
+    # print(new_data)
+
+    # get_all_data_performance()
+    ratio_list = [0.3, 0.4, 0.5, 0.6, 0.7]
+    profit_list = [1, 2, 3]
+    day_list = [1, 2, 3]
+
+    for profit in profit_list:
+        for day in day_list:
+            for ratio in ratio_list:
+                try:
+                    load_bad_data(ratio=ratio, profit=profit, day=day)
+                except Exception as e:
+                    print(f'ratio={ratio}, profit={profit}, day={day}的数据加载失败，错误为{e}')
+
+    # file_path = '../train_data/profit_1_day_1'
+    #
+    # # 获取目录下所有文件的完整路径
+    # all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    # data_list = []
+    # for file in all_files:
+    #
+    #     data = pd.read_csv(file)
+    #     data_list.append(data)
+    #     print(f'文件{file}的数据量为{len(data)}')
+    # all_df = pd.concat(data_list)
+    # all_df.to_csv('../train_data/profit_1_day_1/bad_0.5_data_batch_count.csv', index=False)
