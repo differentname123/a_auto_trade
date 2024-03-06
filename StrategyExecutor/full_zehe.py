@@ -3376,8 +3376,8 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
-    # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
-    file_path = '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv'
+    file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
+    file_path = '../train_data/2024_data.csv'
     data = pd.read_csv(file_path)
 
     # load_all_data()

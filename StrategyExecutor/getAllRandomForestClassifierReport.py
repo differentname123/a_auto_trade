@@ -11,7 +11,6 @@
 import json
 import os
 import time
-from math import ceil
 from multiprocessing import Process, Pool
 
 from imblearn.over_sampling import SMOTE
@@ -27,8 +26,9 @@ D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
 MODEL_PATH = '../model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
-MODEL_REPORT_PATH = '../model/all_model_reports'
+MODEL_REPORT_PATH = '../model/reports'
 MODEL_OTHER = '../model/other'
+TRAIN_DATA_PATH = '../train_data'
 
 
 def train_and_dump_model(clf, X_train, y_train, model_file_path):
@@ -93,6 +93,7 @@ def train_all_model(file_path_path, profit=1,thread_day_list=None, is_skip=True)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
         train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
+        train_models(X_train, y_train, 'GradientBoosting', thread_day, true_ratio, is_skip, origin_data_path_dir)
 
 
 def train_all_model_grad(file_path_path, thread_day_list=None, is_skip=True):
@@ -146,42 +147,24 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     :param data: 完整数据集
     :param signal_columns: 信号列
     """
-    true_ratio = sum(y_train) / len(y_train)
-    # 确定class_weight的最大范围
-    if true_ratio < 1:
-        max_weight = ceil(1 / true_ratio)
-    else:
-        max_weight = ceil(true_ratio)
-
-    class_weight_configs = []
-    for i in range(1, max_weight + 1):
-        if true_ratio < 1:
-            # 使用布尔值作为键
-            class_weight_configs.append({True: i, False: 1})
-        else:
-            class_weight_configs.append({True: 1, False: i})
-
-    # 向后扩展，确保包括反向权重
-    for i in range(2, max_weight + 1):
-        class_weight_configs.append({True: 1, False: i})
-
     param_grid = {
         'RandomForest': {
             'n_estimators': [100, 250, 300, 400, 500, 600],
             'max_depth': [10, 20, 30, None],
             'min_samples_split': [2, 3, 4, 5, 6],
-            'min_samples_leaf': [1, 2, 3, 4],
-            'class_weight': class_weight_configs  # 添加class_weight到参数网格
+            'min_samples_leaf': [1, 2, 3, 4]
+        },
+        'GradientBoosting': {
+            'n_estimators': [100, 250, 300, 400, 500, 600],
+            'max_depth': [3, 5, 7, 9],
+            'min_samples_split': [2, 3, 4],
+            'min_samples_leaf': [1, 2, 3],
+            'learning_rate': [0.01, 0.1, 0.2]
         }
     }[model_type]
 
-
     for params in ParameterGrid(param_grid):
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
-        # 将model_name的文件名中的'.'替换为'_'
-        model_name = model_name.replace('\'', '_')
-        model_name = model_name.replace(':', '_')
-
         model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, model_name)
         if is_skip:
             flag = False
@@ -191,7 +174,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
                 continue
             if flag:
                 continue
-        clf = RandomForestClassifier(**params)
+        clf = RandomForestClassifier(**params) if model_type == 'RandomForest' else GradientBoostingClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, model_file_path)
 
         # 对于类别不平衡的处理
@@ -201,8 +184,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         # 现在使用SMOTE应该不会报错
         smote = SMOTE()
         X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
-        # 在model_file_path的基础上添加'smote_'前缀
-        model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, 'smote_' + model_name)
+        model_name_smote = f"smote_{model_name}"
         train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
 
 def sort_all_report():
@@ -252,7 +234,8 @@ def sort_all_report():
 
     print(f'Results are sorted and saved to {output_filename}')
 
-def get_model_report(model_path, model_name):
+
+def get_model_report(abs_name, model_name):
     """
     为单个模型生成报告，并更新模型报告文件
     :param model_path: 模型路径
@@ -260,8 +243,23 @@ def get_model_report(model_path, model_name):
     """
     try:
         # 开始计时
+        train_data_list = []
+        train_data_path = TRAIN_DATA_PATH
+        profit = int(model_name.split('profit_')[1].split('_')[0])
+        day = int(model_name.split('day_')[1].split('_')[0])
+        # 获取所有模型的文件名
+        for root, ds, fs in os.walk(train_data_path):
+            for f in fs:
+                if f.endswith('_data_batch_count.csv'):
+                    full_name = os.path.join(root, f)
+                    if f'profit_{profit}_day_{day}' in full_name:
+                        train_data_list.append(full_name)
+
         start_time = time.time()
-        file_path_list = ['../daily_all_2024/1.txt', '../daily_all_100_bad_0.5/1.txt', '../daily_all_100_bad_0.3/1.txt']
+
+        file_path_list = train_data_list
+        file_path_list.append('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
+        # file_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.6/bad_0.6_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv']
 
         report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
         result_dict = {}
@@ -277,11 +275,11 @@ def get_model_report(model_path, model_name):
         new_temp_dict = {}
 
         try:
-            model = load(os.path.join(model_path, model_name))
+            model = load(abs_name)
         except Exception as e:
-            if os.path.exists(os.path.join(model_path, model_name)):
+            if os.path.exists(abs_name):
                 # 删除损坏的模型文件
-                os.remove(os.path.join(model_path, model_name))
+                os.remove(abs_name)
                 print(f"模型 {model_name} 加载失败，跳过。")
             print(f"模型 {model_name} 不存在，跳过。")
             return
@@ -299,19 +297,30 @@ def get_model_report(model_path, model_name):
             flag = True
             temp_dict_list = []
             data = pd.read_csv(file_path, low_memory=False)
-            signal_columns = [column for column in data.columns if 'signal' in column]
+            signal_columns = [column for column in data.columns if '信号' in column]
             X_test = data[signal_columns]
-            y_test = data['Days Held'] <= thread_day
+            key_name = f'后续{thread_day}日最高价利润率'
+            y_test = data[key_name] >= profit
             total_samples = len(y_test)
             y_pred_proba = model.predict_proba(X_test)
             for threshold in threshold_values:
                 temp_dict = {}
                 high_confidence_true = (y_pred_proba[:, 1] > threshold)
+                high_confidence_false = (y_pred_proba[:, 0] > threshold)
+
                 selected_true = high_confidence_true & y_test
                 selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
                 unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
                 precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
                 predicted_true_samples = np.sum(high_confidence_true)
+
+                selected_false = high_confidence_false & ~y_test
+                selected_data_false = data[high_confidence_false]  # 使用布尔索引选择满足条件的数据行
+                unique_dates_false = selected_data_false['日期'].unique()  # 获取不重复的日期值
+                precision_false = np.sum(selected_false) / np.sum(high_confidence_false) if np.sum(high_confidence_false) > 0 else 0
+                predicted_false_samples_false = np.sum(high_confidence_false)
+
+
 
                 temp_dict['threshold'] = float(threshold)  # 确保阈值也是原生类型
                 temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
@@ -319,6 +328,11 @@ def get_model_report(model_path, model_name):
                 temp_dict['predicted_true_samples'] = int(predicted_true_samples)
                 temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
                 temp_dict['predicted_ratio'] = predicted_true_samples / total_samples if total_samples > 0 else 0
+
+                temp_dict['unique_dates_false'] = len(unique_dates_false.tolist())  # 将不重复的日期值转换为列表
+                temp_dict['precision_false'] = precision_false
+                temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
+                temp_dict['predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                 temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
 
                 temp_dict_list.append(temp_dict)
@@ -375,30 +389,31 @@ def get_all_model_report():
         # 获取所有模型的文件名
         for root, ds, fs in os.walk(model_path):
             for f in fs:
+                full_name = os.path.join(root, f)
                 if f.endswith('.joblib'):
-                    model_list.append(f)
+                    model_list.append((full_name, f))
 
         # 使用进程池来并行处理每个模型的报告生成
-        with Pool(10) as p:
-            p.starmap(get_model_report, [(model_path, model_name) for model_name in model_list])
+        with Pool(1) as p:
+            p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
         # time.sleep(60)  # 每隔一天重新生成一次报告
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    p1 = Process(target=build_models)
+    # p1 = Process(target=build_models)
     # p11 = Process(target=build_models1)
     # p12 = Process(target=build_models2)
-    # p2 = Process(target=get_all_model_report)
+    p2 = Process(target=get_all_model_report)
 
-    p1.start()
-    # p2.start()
+    # p1.start()
+    p2.start()
     # p11.start()
     # p12.start()
 
-    p1.join()
     # p1.join()
-    # p2.join()
+    # p1.join()
+    p2.join()
     # p12.join()
 
     # good_model_list = []

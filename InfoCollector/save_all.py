@@ -169,7 +169,7 @@ def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
     code = stock_data['代码']
     if code not in exclude_code:
-        price_data = get_price(code, '20140101', '20291021', period='daily')
+        price_data = get_price(code, '20170101', '20291021', period='daily')
         filename = '../daily_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
         # price_data不为空才保存
         if not price_data.empty and len(price_data) > 26:

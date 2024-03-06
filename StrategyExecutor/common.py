@@ -101,12 +101,12 @@ def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
-def load_file_chunk(file_chunk):
+def load_file_chunk(file_chunk, start_date='2018-01-01' ,end_date='2024-03-01'):
     """
     加载文件块的数据
     """
     try:
-        chunk_data = [load_data(fname, end_date='2024-03-01') for fname in file_chunk]
+        chunk_data = [load_data(fname, start_date=start_date, end_date=end_date) for fname in file_chunk]
         return pd.concat(chunk_data)
     except Exception:
         # traceback.print_exc()

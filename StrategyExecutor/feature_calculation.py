@@ -582,90 +582,107 @@ def load_and_merge_data(batch):
         print(f'合并失败，错误为{e}')
     return None
 
-def load_bad_data(ratio=0.5, profit=1, day=1):
+def data_filter(data):
+    """
+    过滤数据，过滤掉涨跌幅大于0，且开盘、收盘、低价、高价之间最大相差小于0.01的数据。
+
+    :param data: pandas DataFrame，包含市场数据，预期有涨跌幅、开盘、收盘、最低价、最高价等列。
+    :return: 过滤后的pandas DataFrame。
+    """
+    # 检查必要的列是否存在
+    necessary_columns = ['涨跌幅', '开盘', '收盘', '最低', '最高']
+    for column in necessary_columns:
+        if column not in data.columns:
+            raise ValueError(f"缺少必要的列：{column}")
+
+    # 计算开盘、收盘、最低价、最高价之间的最大差异
+    price_range = data[['开盘', '收盘', '最低', '最高']].max(axis=1) - data[['开盘', '收盘', '最低', '最高']].min(axis=1)
+
+    # 应用过滤条件
+    filtered_data = data[(data['涨跌幅'] <= 0) | (price_range >= 0.01)]
+    filtered_data = filtered_data[(filtered_data['涨跌幅'] <= (filtered_data['Max_rate'] - 0.01 / filtered_data['收盘'].shift(1) * 100))]
+
+    return filtered_data
+
+
+def load_bad_data():
+    """
+    all_data_performance.json
+    :param ratio:
+    :param profit:
+    :param day:
+    :return:
+    """
+    start_time = time.time()
+    all_data_file_path = '../train_data/all_data.csv'
+    if not os.path.exists(all_data_file_path):
+        print('开始加载所有数据')
+        # 生成相应的数据
+        file_path = '../feature_data_exclude_new_can_buy'
+        # 获取目录下所有文件的完整路径
+        all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+        all_data_df = load_and_merge_data(all_files)
+        all_data_df.to_csv(all_data_file_path, index=False)
+    else:
+        print('开始加载已有的所有数据')
+        all_data_df = pd.read_csv(all_data_file_path)
+    all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
+    all_data_df = all_data_df[all_data_df['日期'] <= pd.Timestamp('2024-01-01')]
+    # all_data_df.to_csv('../train_data/2024_data.csv')
+    # return
+    new_data = data_filter(all_data_df)
+    print(f'加载所有数据耗时：{time.time() - start_time:.2f}秒 过滤前数据量为{len(all_data_df)} 过滤后数据量为{len(new_data)}')
+    all_data_df = new_data
+
     results_file_path = '../final_zuhe/other/all_data_performance.json'
     performance_results = read_json(results_file_path)
-    key_name = f'后续{day}日{profit}成功率'
-    bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if result[key_name] < ratio]
 
+    ratio_list = [0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7]
+    profit_list = [1, 2, 3, 4, 5]
+    day_list = [1, 2]
 
-    file_path = '../feature_data_exclude_new_can_buy'
-
-    # 获取目录下所有文件的完整路径
-    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
-
-    # 分成3个批次进行加载
-    total_files = len(all_files)
-    batch_size = total_files // 5
-    batches = [all_files[i:i + batch_size] for i in range(0, total_files, batch_size)]
-
-    # 定义一个空的DataFrame用于存储所有批次的数据
-    batch_count = 0
-    key = f'profit_{profit}_day_{day}_bad_{ratio}'
-    out_put_path = f'../train_data/{key}'
-    print(f'开始加载bad_{out_put_path}的数据')
-    for batch in batches:
-        batch_count += 1
-        file_name = f'bad_{ratio}_data_batch_count_{batch_count}.csv'
-        file_out_put_path = os.path.join(out_put_path, file_name)
-        if os.path.exists(file_out_put_path):
-            print(f'文件{file_out_put_path}已存在，跳过')
-            continue
-
-        # 合并当前批次加载的数据
-        all_data_df = load_and_merge_data(batch)
-        if all_data_df is None:
-            continue
-        # 获取日期在bad_ratio_day中的数据
-        all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
-        bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
-        print(f'总体数据量：{len(all_data_df)}，异常数据量：{len(bad_data)}')
-        os.makedirs(out_put_path, exist_ok=True)
-        bad_data.to_csv(file_out_put_path, index=False)
-        # 释放内存
-        del all_data_df
-        del bad_data
-    file_path = out_put_path
-    file_name = f'bad_{ratio}_data_batch_count.csv'
-    result_file_path = os.path.join(out_put_path, file_name)
-    if os.path.exists(result_file_path):
-        print(f'文件{result_file_path}已存在，跳过')
-        return
-    # 获取目录下所有文件的完整路径
-    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
-    data_list = []
-    for file in all_files:
-
-        data = pd.read_csv(file)
-        data_list.append(data)
-        print(f'文件{file}的数据量为{len(data)}')
-    all_df = pd.concat(data_list)
-    all_df.to_csv(os.path.join(out_put_path, file_name), index=False)
-    print(f'文件{file_name}的数据量为{len(all_df)}')
+    for profit in profit_list:
+        for day in day_list:
+            for ratio in ratio_list:
+                key_name = f'后续{day}日{profit}成功率'
+                bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if result[key_name] < ratio]
+                key = f'profit_{profit}_day_{day}_bad_{ratio}'
+                out_put_path = f'../train_data/{key}'
+                print(f'开始加载bad_{out_put_path}的数据')
+                file_name = f'bad_{ratio}_data_batch_count.csv'
+                file_out_put_path = os.path.join(out_put_path, file_name)
+                # 检查文件是否存在
+                if os.path.exists(file_out_put_path):
+                    print(f'bad_{out_put_path}的数据已存在')
+                    continue
+                # 检查目录是否存在，不存在则创建
+                if not os.path.exists(out_put_path):
+                    os.makedirs(out_put_path)
+                bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
+                if len(bad_data) > 3100000:
+                    print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
+                    break
+                print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
+                bad_data.to_csv(file_out_put_path, index=False)
 
 if __name__ == '__main__':
-    file_path = '../daily_data_exclude_new_can_buy'
-    out_path = '../feature_data_exclude_new_can_buy'
-    generate_features_for_all_files(file_path, out_path)
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # out_path = '../feature_data_exclude_new_can_buy'
+    # generate_features_for_all_files(file_path, out_path)
+    load_bad_data()
 
+    # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
+    # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
+    # data = pd.read_csv(file_path)
+    # new_data = data_filter(data)
+    # print(new_data)
+    # # 找到data比new_data多的数据
+    # print(data[~data.isin(new_data).all(1)])
 
     # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
     # data = load_data(file_path)
     # new_data = get_data_feature(data)
     # print(new_data)
-
-    # get_all_data_performance()
-    ratio_list = [0.3, 0.4, 0.5, 0.6, 0.7]
-    profit_list = [1, 2, 3]
-    day_list = [1, 2, 3]
-
-    for profit in profit_list:
-        for day in day_list:
-            for ratio in ratio_list:
-                try:
-                    load_bad_data(ratio=ratio, profit=profit, day=day)
-                except Exception as e:
-                    print(f'ratio={ratio}, profit={profit}, day={day}的数据加载失败，错误为{e}')
 
     # file_path = '../train_data/profit_1_day_1'
     #
