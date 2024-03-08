@@ -190,36 +190,71 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         model_name_smote = f"smote_{model_name}"
         train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
 
-def maintain_scores(temp_score, value, min_unique_dates=4):
+def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
     """
 
     :return:
     """
-    for k, v in value.items():
-        for k1, v1 in v.items():
-            if k1 not in temp_score:
-                temp_score[k1] = {'score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
-            if v1[0]['unique_dates'] >= min_unique_dates:
-                this_score = v1[0]['score']
-            else:
-                this_score = 0
-            temp_score[k1]['score'] *= this_score
-            if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
-                temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
-            if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
-                temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
-            if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
-                temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
 
-    # 过滤掉score为0的
-    temp_score = {k: v for k, v in temp_score.items() if v['score'] > 0}
-    # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
-    if temp_score:
-        temp_score['score'] = max([v['score'] for v in temp_score.values()])
+    if not is_false:
+        for k, v in value.items():
+            for k1, v1 in v.items():
+                if k1 not in temp_score:
+                    temp_score[k1] = {'score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
+                if v1[0]['unique_dates'] >= min_unique_dates:
+                    this_score = v1[0]['score']
+                else:
+                    this_score = 0
+                temp_score[k1]['score'] *= this_score
+                if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
+                    temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
+                if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
+                    temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
+                if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
+                    temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
+
+        # 过滤掉score为0的
+        temp_score = {k: v for k, v in temp_score.items() if v['score'] > 0}
+        # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
+        if temp_score:
+            temp_score['score'] = max([v['score'] for v in temp_score.values()])
+        else:
+            temp_score['score'] = 0
+
+        return temp_score
     else:
-        temp_score['score'] = 0
+        for key, value1 in value.items():
+            for key1, data1 in value1.items():
+                for data in data1:
+                    data['false_score'] = data['precision_false'] * data['predicted_ratio_false'] * 100 if data['precision_false'] > 0.95 else 0
+                value1[key1] = sorted(data1, key=lambda x: x['false_score'], reverse=True)
+            value[key] = value1
 
-    return temp_score
+        for k, v in value.items():
+            for k1, v1 in v.items():
+                if k1 not in temp_score:
+                    temp_score[k1] = {'false_score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
+                if v1[0]['unique_dates_false'] >= min_unique_dates:
+                    this_score = v1[0]['false_score']
+                else:
+                    this_score = 0
+                temp_score[k1]['false_score'] *= this_score
+                if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
+                    temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
+                if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
+                    temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
+                if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
+                    temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
+
+        # 过滤掉score为0的
+        temp_score = {k: v for k, v in temp_score.items() if v['false_score'] > 0}
+        # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
+        if temp_score:
+            temp_score['false_score'] = max([v['false_score'] for v in temp_score.values()])
+        else:
+            temp_score['false_score'] = 0
+
+        return temp_score
 
 def sort_all_report():
     """
@@ -227,6 +262,7 @@ def sort_all_report():
     """
     file_path = '../model/reports'
     all_scores = []  # 用于存储所有的scores和对应的keys
+    all_scores_false = []
     good_model_list = []
 
     for root, ds, fs in os.walk(file_path):
@@ -237,18 +273,25 @@ def sort_all_report():
                     try:
                         result_dict = json.load(file)
                         temp_score = {}
+                        false_temp_score = {}
                         for key, value in result_dict.items():
                             temp_score = maintain_scores(temp_score, value)
+                            false_temp_score = maintain_scores(false_temp_score, value, is_false=True)
                             all_scores.append({'key': key, 'value': temp_score})
+                            all_scores_false.append({'key': key, 'value': false_temp_score})
                     except json.JSONDecodeError:
                         print(f'Error occurred when reading {fullname}')
                         continue
 
     # 按照score对all_scores进行排序，score高的排在前面
     sorted_scores = sorted(all_scores, key=lambda x: x['value']['score'], reverse=True)
+    sorted_all_scores_false = sorted(all_scores_false, key=lambda x: x['value']['false_score'], reverse=True)
 
     # 将排序后的结果输出到一个文件中
-    output_filename = '../final_zuhe/other/all_model_reports.json'
+    output_filename = '../final_zuhe/other/all_model_reports_new.json'
+    false_output_filename = '../final_zuhe/other/all_model_reports_false_new.json'
+    with open(false_output_filename, 'w') as outfile:
+        json.dump(sorted_all_scores_false, outfile, indent=4)
     with open(output_filename, 'w') as outfile:
         json.dump(sorted_scores, outfile, indent=4)
 

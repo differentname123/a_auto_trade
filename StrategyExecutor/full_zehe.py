@@ -3379,12 +3379,14 @@ if __name__ == '__main__':
     # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
     # file_path = '../train_data/2024_data.csv'
     # data = pd.read_csv(file_path)
+    # data = pd.read_csv('../final_zuhe/real_time/select_RF_{}_real_time.csv'.format('2024-03-08'))
+    # get_all_good_data_with_model_name_list(data, 0)
 
     # load_all_data()
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    save_and_analyse_all_data_mul_real_time_RF('2024-03-07')
+    save_and_analyse_all_data_mul_real_time_RF('2024-03-08')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
 

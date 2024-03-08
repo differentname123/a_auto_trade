@@ -361,7 +361,7 @@ class ThsAuto:
         """
 
         set_text(self.stock_no_ctrl, stock_no)
-        time.sleep(0.15)
+        time.sleep(0.2)
         if price is not None:
             price = '%.2f' % price
             set_text(self.price_ctrl, price)

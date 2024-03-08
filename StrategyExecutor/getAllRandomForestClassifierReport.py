@@ -364,6 +364,7 @@ def get_model_report(abs_name, model_name):
                     temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
                     temp_dict['predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                     temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
+                    temp_dict['false_score'] = precision_false * temp_dict['predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
                     if this_key not in temp_dict_result:
                         temp_dict_result[this_key] = []
                     temp_dict_result[this_key].append(temp_dict)
@@ -407,17 +408,19 @@ def get_model_report(abs_name, model_name):
                     selected_data_diff_neg = data[high_confidence_diff_neg]
                     unique_dates_diff_neg = selected_data_diff_neg['日期'].unique()
                     selected_false_diff_neg = high_confidence_diff_neg & ~y_test
-                    precision_diff_neg = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
+                    precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
                         high_confidence_diff_neg) > 0 else 0
                     predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
 
                     # 为了区分，我们添加一个新的字段后缀 "_neg" 来表示这是负类概率 - 正类概率 大于阈值的情况
                     temp_dict['unique_dates_false'] = len(unique_dates_diff_neg.tolist())
-                    temp_dict['precision_false'] = precision_diff_neg
+                    temp_dict['precision_false'] = precision_false
                     temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_diff_neg)
                     temp_dict['predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
                     temp_dict['score'] = temp_dict['precision'] * temp_dict[
                         'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
+                    temp_dict['false_score'] = precision_false * temp_dict[
+                        'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
 
                     if this_key not in temp_dict_result:
                         temp_dict_result[this_key] = []
@@ -461,6 +464,8 @@ def get_model_report(abs_name, model_name):
                 temp_dict[
                     'predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                 temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
+                temp_dict['false_score'] = precision_false * temp_dict[
+                    'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
                 if this_key not in temp_dict_result:
                     temp_dict_result[this_key] = []
                 temp_dict_result[this_key].append(temp_dict)
@@ -504,18 +509,20 @@ def get_model_report(abs_name, model_name):
                 selected_data_diff_neg = data[high_confidence_diff_neg]
                 unique_dates_diff_neg = selected_data_diff_neg['日期'].unique()
                 selected_false_diff_neg = high_confidence_diff_neg & ~y_test
-                precision_diff_neg = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
+                precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
                     high_confidence_diff_neg) > 0 else 0
                 predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
 
                 # 为了区分，我们添加一个新的字段后缀 "_neg" 来表示这是负类概率 - 正类概率 大于阈值的情况
                 temp_dict['unique_dates_false'] = len(unique_dates_diff_neg.tolist())
-                temp_dict['precision_false'] = precision_diff_neg
+                temp_dict['precision_false'] = precision_false
                 temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_diff_neg)
                 temp_dict[
                     'predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
                 temp_dict['score'] = temp_dict['precision'] * temp_dict[
                     'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
+                temp_dict['false_score'] = precision_false * temp_dict[
+                    'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
 
                 if this_key not in temp_dict_result:
                     temp_dict_result[this_key] = []
