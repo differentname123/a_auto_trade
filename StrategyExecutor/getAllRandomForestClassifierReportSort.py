@@ -190,45 +190,62 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         model_name_smote = f"smote_{model_name}"
         train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
 
+def maintain_scores(temp_score, value, min_unique_dates=4):
+    """
+
+    :return:
+    """
+    for k, v in value.items():
+        for k1, v1 in v.items():
+            if k1 not in temp_score:
+                temp_score[k1] = {'score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
+            if v1[0]['unique_dates'] >= min_unique_dates:
+                this_score = v1[0]['score']
+            else:
+                this_score = 0
+            temp_score[k1]['score'] *= this_score
+            if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
+                temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
+            if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
+                temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
+            if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
+                temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
+
+    # 过滤掉score为0的
+    temp_score = {k: v for k, v in temp_score.items() if v['score'] > 0}
+    # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
+    if temp_score:
+        temp_score['score'] = max([v['score'] for v in temp_score.values()])
+    else:
+        temp_score['score'] = 0
+
+    return temp_score
+
 def sort_all_report():
     """
     将所有数据按照score排序，并输出到一个文件中
     """
-    file_path = '../model/all_model_reports'
+    file_path = '../model/reports'
     all_scores = []  # 用于存储所有的scores和对应的keys
     good_model_list = []
 
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
-                max_threshold = 0
                 fullname = os.path.join(root, f)
                 with open(fullname, 'r') as file:
                     try:
                         result_dict = json.load(file)
-
+                        temp_score = {}
                         for key, value in result_dict.items():
-                            score = 1
-                            # 假设value是一个字典，其中包含一个或多个评估指标，包括score
-                            for k, v in value.items():
-                                if v[0]['threshold'] > max_threshold:
-                                    max_threshold = v[0]['threshold']
-                                if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
-                                    if v[0]['predicted_true_samples'] < 4:
-                                        score = 0
-                                    score *= v[0]['score']  # 累乘score
-                            # score = 0
-                            # # 假设value是一个字典，其中包含一个或多个评估指标，包括score
-                            # for k, v in value.items():
-                            #     if v and 'score' in v[0]:  # 确保v是一个列表，并且第一个元素是一个字典且包含score
-                            #         score += v[0]['score']  # 累乘score
-                            all_scores.append((key, score, max_threshold))
+                            temp_score = maintain_scores(temp_score, value)
+                            all_scores.append({'key': key, 'value': temp_score})
                     except json.JSONDecodeError:
                         print(f'Error occurred when reading {fullname}')
                         continue
 
     # 按照score对all_scores进行排序，score高的排在前面
-    sorted_scores = sorted(all_scores, key=lambda x: x[1], reverse=True)
+    sorted_scores = sorted(all_scores, key=lambda x: x['value']['score'], reverse=True)
 
     # 将排序后的结果输出到一个文件中
     output_filename = '../final_zuhe/other/all_model_reports.json'
@@ -257,7 +274,7 @@ def get_model_report(abs_name, model_name):
                 if f.endswith('_data_batch_count.csv'):
                     full_name = os.path.join(root, f)
                     full_bad = float(f.split('bad_')[1].split('_')[0])
-                    if f'profit_{profit}_day_{day}' in full_name and full_bad <= 0.5:
+                    if f'profit_{profit}_day_{day}' in full_name and full_bad <= bad:
                         train_data_list.append(full_name)
 
         start_time = time.time()
@@ -303,7 +320,7 @@ def get_model_report(abs_name, model_name):
                     # print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
                     continue
             flag = True
-            temp_dict_result = {}
+            temp_dict_list = []
             data = pd.read_csv(file_path, low_memory=False)
             signal_columns = [column for column in data.columns if '信号' in column]
             X_test = data[signal_columns]
@@ -329,7 +346,6 @@ def get_model_report(abs_name, model_name):
                 proba_df = np.column_stack((false_proba, true_proba))
                 y_pred_proba = proba_df
                 for abs_threshold in abs_threshold_values:
-                    this_key = 'tree_1_abs_1'
                     temp_dict = {}
                     high_confidence_true = (y_pred_proba[:, 1] > abs_threshold)
                     high_confidence_false = (y_pred_proba[:, 0] > abs_threshold)
@@ -364,13 +380,12 @@ def get_model_report(abs_name, model_name):
                     temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
                     temp_dict['predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                     temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
-                    if this_key not in temp_dict_result:
-                        temp_dict_result[this_key] = []
-                    temp_dict_result[this_key].append(temp_dict)
+
+                    temp_dict_list.append(temp_dict)
 
                 for cha_zhi_threshold in cha_zhi_values:
                     temp_dict = {}
-                    this_key = 'tree_1_cha_zhi_1'
+
                     # 计算概率差异：正类概率 - 负类概率
                     proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
 
@@ -419,13 +434,10 @@ def get_model_report(abs_name, model_name):
                     temp_dict['score'] = temp_dict['precision'] * temp_dict[
                         'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
 
-                    if this_key not in temp_dict_result:
-                        temp_dict_result[this_key] = []
-                    temp_dict_result[this_key].append(temp_dict)
+                    temp_dict_list.append(temp_dict)
 
             y_pred_proba = model.predict_proba(X_test)
             for abs_threshold in abs_threshold_values:
-                this_key = 'tree_0_abs_1'
                 temp_dict = {}
                 high_confidence_true = (y_pred_proba[:, 1] > abs_threshold)
                 high_confidence_false = (y_pred_proba[:, 0] > abs_threshold)
@@ -461,13 +473,12 @@ def get_model_report(abs_name, model_name):
                 temp_dict[
                     'predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                 temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
-                if this_key not in temp_dict_result:
-                    temp_dict_result[this_key] = []
-                temp_dict_result[this_key].append(temp_dict)
+
+                temp_dict_list.append(temp_dict)
 
             for cha_zhi_threshold in cha_zhi_values:
                 temp_dict = {}
-                this_key = 'tree_0_cha_zhi_1'
+
                 # 计算概率差异：正类概率 - 负类概率
                 proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
 
@@ -517,15 +528,11 @@ def get_model_report(abs_name, model_name):
                 temp_dict['score'] = temp_dict['precision'] * temp_dict[
                     'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
 
-                if this_key not in temp_dict_result:
-                    temp_dict_result[this_key] = []
-                temp_dict_result[this_key].append(temp_dict)
+                temp_dict_list.append(temp_dict)
 
             # 按照score排序
-            for key, value in temp_dict_result.items():
-                temp_dict_list = sorted(value, key=lambda x: x['score'], reverse=True)
-                temp_dict_result[key] = temp_dict_list
-            new_temp_dict[file_path] = temp_dict_result
+            temp_dict_list = sorted(temp_dict_list, key=lambda x: x['score'], reverse=True)
+            new_temp_dict[file_path] = temp_dict_list
 
         result_dict[model_name] = new_temp_dict
         # 将结果保存到文件
@@ -578,38 +585,15 @@ def get_all_model_report():
                 full_name = os.path.join(root, f)
                 if f.endswith('.joblib'):
                     model_list.append((full_name, f))
-        # for full_name, model_name in model_list:
-        #     get_model_report(full_name, model_name)
+        for full_name, model_name in model_list:
+            get_model_report(full_name, model_name)
 
         # 使用进程池来并行处理每个模型的报告生成
-        with Pool(2) as p:
+        with Pool(1) as p:
             p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
         # time.sleep(60)  # 每隔一天重新生成一次报告
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    # p1 = Process(target=build_models)
-    # p11 = Process(target=build_models1)
-    # p12 = Process(target=build_models2)
-    p2 = Process(target=get_all_model_report)
-
-    # p1.start()
-    p2.start()
-    # p11.start()
-    # p12.start()
-
-    # p1.join()
-    # p1.join()
-    p2.join()
-    # p12.join()
-
-    # good_model_list = []
-    # output_filename = '../temp/all_model_reports.json'
-    # # 加载output_filename，找到最好的模型
-    # with open(output_filename, 'r') as file:
-    #     sorted_scores = json.load(file)
-    #     for model_name, score, threshold in sorted_scores:
-    #         if score > 0.8:
-    #             good_model_list.append((model_name, score, threshold))
-    # sort_all_report()
+    sort_all_report()

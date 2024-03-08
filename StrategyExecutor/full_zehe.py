@@ -3376,15 +3376,15 @@ if __name__ == '__main__':
     # back_range_select_op(start_time='2024-01-22', end_time='2024-01-22')
     # print(good_data)
 
-    file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
-    file_path = '../train_data/2024_data.csv'
-    data = pd.read_csv(file_path)
+    # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
+    # file_path = '../train_data/2024_data.csv'
+    # data = pd.read_csv(file_path)
 
     # load_all_data()
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    save_and_analyse_all_data_mul_real_time_RF('2024-03-05')
+    save_and_analyse_all_data_mul_real_time_RF('2024-03-07')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
 
