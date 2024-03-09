@@ -11,6 +11,7 @@
 import json
 import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Process, Pool
 
 from imblearn.over_sampling import SMOTE
@@ -21,6 +22,8 @@ from sklearn.model_selection import train_test_split, cross_val_score, Parameter
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
+
+from StrategyExecutor.common import low_memory_load
 
 D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
@@ -238,7 +241,56 @@ def sort_all_report():
     print(f'Results are sorted and saved to {output_filename}')
 
 
-def get_model_report(abs_name, model_name):
+def predict_proba(tree, X_test):
+    return tree.predict_proba(X_test)
+
+
+def predict_proba_subset(trees, X_test):
+    preds = [predict_proba(tree, X_test) for tree in trees]
+    return np.stack(preds)
+
+
+def split_estimators(estimators, n_splits):
+    k, m = divmod(len(estimators), n_splits)
+    return [estimators[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n_splits)]
+
+
+# 这是一个新定义的具名函数，用于替代之前的lambda表达式
+def predict_subset(trees_X_test):
+    trees, X_test = trees_X_test
+    return predict_proba_subset(trees, X_test)
+
+
+def parallel_predict_proba(estimators, X_test, n_jobs=10):
+    start = time.time()
+    splitted_estimators = split_estimators(estimators, n_jobs)
+
+    # 将X_test作为参数一起打包，以便传递给predict_subset函数
+    trees_X_test_pairs = [(trees, X_test) for trees in splitted_estimators]
+
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        results = list(executor.map(predict_subset, trees_X_test_pairs))
+
+    combined_results = np.concatenate(results, axis=0)
+    print(f"并行预测耗时: {time.time() - start:.2f}秒")
+    return combined_results
+
+def predict_in_batches(estimators, X_test, batch_size=100000):
+    # 划分X_test为多个批次，每个批次最多包含10万行
+    batches = [X_test[i:i + batch_size] for i in range(0, X_test.shape[0], batch_size)]
+    results = []
+    print(f"开始预测，共{len(batches)}批次...")
+
+    for batch in batches:
+        # 对每个批次进行并行预测
+        batch_result = parallel_predict_proba(estimators, batch)
+        results.append(batch_result)
+
+    # 合并所有批次的结果
+    final_results = np.concatenate(results, axis=1)
+    return final_results
+
+def get_model_report(abs_name, model_name, need_reverse=False):
     """
     为单个模型生成报告，并更新模型报告文件
     :param model_path: 模型路径
@@ -263,7 +315,11 @@ def get_model_report(abs_name, model_name):
         start_time = time.time()
 
         file_path_list = train_data_list
+
         file_path_list.append('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
+        # 生成一个随机数，如果是奇数那就逆序file_path_list
+        if need_reverse:
+            file_path_list.reverse()
         # file_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.6/bad_0.6_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv']
 
         report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
@@ -296,6 +352,7 @@ def get_model_report(abs_name, model_name):
         cha_zhi_values = np.arange(0.01, 1, 0.05)
         flag = False
         for file_path in file_path_list:
+            file_start_time = time.time()
             # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
             if model_name in result_dict and file_path in result_dict[model_name]:
                 if result_dict[model_name][file_path] != {}:
@@ -304,15 +361,22 @@ def get_model_report(abs_name, model_name):
                     continue
             flag = True
             temp_dict_result = {}
-            data = pd.read_csv(file_path, low_memory=False)
+            start = time.time()
+            data = low_memory_load(file_path)
+            # # 将data取前1000行
+            # data = data.head(1000)
+            print(f"加载数据 {file_path} 耗时: {time.time() - start:.2f}秒")
             signal_columns = [column for column in data.columns if '信号' in column]
             X_test = data[signal_columns]
             key_name = f'后续{thread_day}日最高价利润率'
             y_test = data[key_name] >= profit
             total_samples = len(y_test)
-
             n_trees = len(model.estimators_)
-            tree_preds = np.array([tree.predict_proba(X_test) for tree in model.estimators_])
+
+            start = time.time()
+            tree_preds = predict_in_batches(model.estimators_, X_test)
+            end_time = time.time()
+            print(f"预测耗时: {end_time - start:.2f}秒 ({n_trees}棵树)")
 
             for tree_threshold in tree_values:
                 # 计算预测概率大于阈值的次数，判断为True
@@ -533,6 +597,7 @@ def get_model_report(abs_name, model_name):
                 temp_dict_list = sorted(value, key=lambda x: x['score'], reverse=True)
                 temp_dict_result[key] = temp_dict_list
             new_temp_dict[file_path] = temp_dict_result
+            print(f"耗时 {time.time() - file_start_time:.2f}秒 模型 {model_name} 对于文件 {file_path} 的报告已生成")
 
         result_dict[model_name] = new_temp_dict
         # 将结果保存到文件
@@ -585,12 +650,34 @@ def get_all_model_report():
                 full_name = os.path.join(root, f)
                 if f.endswith('.joblib'):
                     model_list.append((full_name, f))
-        # for full_name, model_name in model_list:
-        #     get_model_report(full_name, model_name)
+        for full_name, model_name in model_list:
+            get_model_report(full_name, model_name)
 
-        # 使用进程池来并行处理每个模型的报告生成
-        with Pool(2) as p:
-            p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
+        # # 使用进程池来并行处理每个模型的报告生成
+        # with Pool(2) as p:
+        #     p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
+        # time.sleep(60)  # 每隔一天重新生成一次报告
+
+def get_all_model_report1():
+    """
+    使用多进程获取所有模型的报告。
+    """
+    while True:
+        model_list = []
+        model_path = MODEL_PATH
+        # 获取所有模型的文件名
+        for root, ds, fs in os.walk(model_path):
+            for f in fs:
+                full_name = os.path.join(root, f)
+                if f.endswith('.joblib'):
+                    model_list.append((full_name, f))
+        model_list.reverse()
+        for full_name, model_name in model_list:
+            get_model_report(full_name, model_name, True)
+
+        # # 使用进程池来并行处理每个模型的报告生成
+        # with Pool(2) as p:
+        #     p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
         # time.sleep(60)  # 每隔一天重新生成一次报告
 
 
@@ -600,15 +687,18 @@ if __name__ == '__main__':
     # p11 = Process(target=build_models1)
     # p12 = Process(target=build_models2)
     p2 = Process(target=get_all_model_report)
+    p21 = Process(target=get_all_model_report1)
 
     # p1.start()
     p2.start()
+    p21.start()
     # p11.start()
     # p12.start()
 
     # p1.join()
     # p1.join()
     p2.join()
+    p21.join()
     # p12.join()
 
     # good_model_list = []

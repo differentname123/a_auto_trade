@@ -3356,6 +3356,52 @@ def predict_min_data():
             all_selected_samples.to_csv(output_file_name, index=False)
 
 
+def infer_dtype_convert(dtype):
+    """
+    Helper function to convert data types for memory efficiency.
+    """
+    if dtype == 'float64':
+        return 'float16'
+    elif dtype == 'int64':
+        return 'int8'
+    else:
+        return dtype
+
+
+def low_memory_load(file_path):
+    """
+    Load a file with memory-efficient data types.
+
+    Args:
+    file_path: Path to the file to load.
+
+    Returns:
+    A pandas DataFrame with float64 and int64 columns converted to float32 and int32.
+    """
+    # Read the first few rows to infer data type
+    temp_df = pd.read_csv(file_path, nrows=100)
+
+    # Create a dictionary of column names and their optimized data types
+    dtype_dict = {col: infer_dtype_convert(str(temp_df[col].dtype)) for col in temp_df.columns}
+
+    # Re-load the file with optimized data types
+    df = pd.read_csv(file_path, dtype=dtype_dict)
+
+    return df
+
+def downcast_dtypes(df):
+    """
+    将DataFrame中的float64转换为float32，将int64转换为int32
+    """
+    # 处理浮点数列
+    float_cols = df.select_dtypes(include=['float64']).columns
+    df[float_cols] = df[float_cols].astype(np.float32)
+
+    # 处理整数列
+    int_cols = df.select_dtypes(include=['int64']).columns
+    df[int_cols] = df[int_cols].astype(np.int32)
+
+    return df
 
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
@@ -3379,8 +3425,32 @@ if __name__ == '__main__':
     # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
     # file_path = '../train_data/2024_data.csv'
     # data = pd.read_csv(file_path)
-    # data = pd.read_csv('../final_zuhe/real_time/select_RF_{}_real_time.csv'.format('2024-03-08'))
-    # get_all_good_data_with_model_name_list(data, 0)
+    data = low_memory_load('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
+    origin_data = pd.read_csv('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
+    # 输出data中列名包含 '信号' 的列，并将该列的最大和最小值输出，并且记录整体的最大和最小值
+    signal_columns = [col for col in data.columns if '信号' in col]
+    print(signal_columns)
+    # 输出data和origin_data中最大值和最小值不一样的列，差值在0.01内都算一样
+    for col in signal_columns:
+        if np.issubdtype(data[col].dtype, np.number):
+            if (data[col].max() - origin_data[col].max() > 0.02) or (data[col].min() - origin_data[col].min() > 0.02):
+                print(f'{col}的最大值不一样：{data[col].max()} {origin_data[col].max()} {data[col].min()} {origin_data[col].min()}')
+    # 计算转换前的内存占用
+    memory_before = origin_data.memory_usage(deep=True).sum()
+    print(f"转换前的内存占用: {memory_before} bytes")
+
+    memory_before = data.memory_usage(deep=True).sum()
+    print(f"转换前后的内存占用: {memory_before} bytes")
+
+    # 应用数据类型转换
+    data_downcasted = downcast_dtypes(data)
+
+    # 计算转换后的内存占用
+    memory_after = data_downcasted.memory_usage(deep=True).sum()
+    print(f"转换后的内存占用: {memory_after} bytes")
+
+    # 输出内存占用减少量
+    print(f"内存占用减少了: {memory_before - memory_after} bytes")
 
     # load_all_data()
     # get_all_data_perfomance()

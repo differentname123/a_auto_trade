@@ -101,6 +101,39 @@ def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
+def infer_dtype_convert(dtype):
+    """
+    Helper function to convert data types for memory efficiency.
+    """
+    if dtype == 'float64':
+        return 'float16'
+    elif dtype == 'int64':
+        return 'int8'
+    else:
+        return dtype
+
+
+def low_memory_load(file_path):
+    """
+    Load a file with memory-efficient data types.
+
+    Args:
+    file_path: Path to the file to load.
+
+    Returns:
+    A pandas DataFrame with float64 and int64 columns converted to float32 and int32.
+    """
+    # Read the first few rows to infer data type
+    temp_df = pd.read_csv(file_path, nrows=100)
+
+    # Create a dictionary of column names and their optimized data types
+    dtype_dict = {col: infer_dtype_convert(str(temp_df[col].dtype)) for col in temp_df.columns}
+
+    # Re-load the file with optimized data types
+    df = pd.read_csv(file_path, dtype=dtype_dict)
+
+    return df
+
 def load_file_chunk(file_chunk, start_date='2018-01-01' ,end_date='2024-03-01'):
     """
     加载文件块的数据

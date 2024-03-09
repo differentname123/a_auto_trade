@@ -6,10 +6,11 @@
 :last_date:
     2024-01-30 15:24
 :description:
-    
+
 """
 import json
 import os
+import random
 import time
 from math import ceil
 from multiprocessing import Process, Pool
@@ -22,6 +23,8 @@ from sklearn.model_selection import train_test_split, cross_val_score, Parameter
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
+
+from StrategyExecutor.common import low_memory_load
 
 D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
@@ -56,7 +59,8 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path):
     print(f"模型已保存: {model_name}")
     # get_model_report(model_path, model_name)
 
-def train_all_model(file_path_path, profit=1,thread_day_list=None, is_skip=True):
+
+def train_all_model(file_path_path, profit=1, thread_day_list=None, is_skip=True):
     """
     为file_path_path生成各种模型
     :param file_path_path: 数据集路径
@@ -69,7 +73,7 @@ def train_all_model(file_path_path, profit=1,thread_day_list=None, is_skip=True)
     origin_data_path_dir = os.path.dirname(file_path_path)
     origin_data_path_dir = origin_data_path_dir.split('/')[-1]
     print("加载数据{}...".format(file_path_path))
-    data = pd.read_csv(file_path_path, low_memory=False)
+    data = low_memory_load(file_path_path)
     signal_columns = [column for column in data.columns if '信号' in column]
     X = data[signal_columns]
     ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
@@ -117,7 +121,7 @@ def train_all_model_grad(file_path_path, thread_day_list=None, is_skip=True):
         with open(ratio_result_path, 'r') as f:
             ratio_result = json.load(f)
     except FileNotFoundError:
-        ratio_result= {}
+        ratio_result = {}
     for thread_day in thread_day_list:
         y = data['Days Held'] <= thread_day
         ratio_key = origin_data_path_dir + '_' + str(thread_day)
@@ -175,35 +179,31 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         }
     }[model_type]
 
+    params_list = list(ParameterGrid(param_grid))
+    random.shuffle(params_list)
 
-    for params in ParameterGrid(param_grid):
+    for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         # 将model_name的文件名中的'.'替换为'_'
-        model_name = model_name.replace('\'', '_')
-        model_name = model_name.replace(':', '_')
+        model_name = model_name.replace('.', '_').replace('\'', '_').replace(':', '_')
 
         model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, model_name)
-        if is_skip:
-            flag = False
-            if os.path.exists(model_file_path):
-                print(f"模型 {model_name} 已存在，跳过训练。")
-                flag = True
-                continue
-            if flag:
-                continue
+        if is_skip and os.path.exists(model_file_path):
+            print(f"模型 {model_name} 已存在，跳过训练。")
+            continue
+
         clf = RandomForestClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, model_file_path)
 
-        # 对于类别不平衡的处理
+        # 处理类别不平衡...
         print("处理类别不平衡...")
-        # 检查并转换布尔列为整数
-        X_train = X_train.astype(int)
-        # 现在使用SMOTE应该不会报错
+        X_train = X_train.astype(int)  # 检查并转换布尔列为整数
         smote = SMOTE()
         X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
-        # 在model_file_path的基础上添加'smote_'前缀
+
         model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, 'smote_' + model_name)
         train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
+
 
 def sort_all_report():
     """
@@ -251,6 +251,7 @@ def sort_all_report():
         json.dump(sorted_scores, outfile, indent=4)
 
     print(f'Results are sorted and saved to {output_filename}')
+
 
 def get_model_report(model_path, model_name):
     """
@@ -310,7 +311,8 @@ def get_model_report(model_path, model_name):
                 selected_true = high_confidence_true & y_test
                 selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
                 unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
-                precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
+                precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(
+                    high_confidence_true) > 0 else 0
                 predicted_true_samples = np.sum(high_confidence_true)
 
                 temp_dict['threshold'] = float(threshold)  # 确保阈值也是原生类型
@@ -341,6 +343,7 @@ def get_model_report(model_path, model_name):
         print(f"生成报告时出现异常: {e}")
         return {}
 
+
 def build_models():
     """
     训练所有模型
@@ -348,6 +351,7 @@ def build_models():
     origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, profit=1, thread_day_list=[1], is_skip=True)
+
 
 def build_models1():
     """
@@ -357,6 +361,7 @@ def build_models1():
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
 
+
 def build_models2():
     """
     训练所有模型
@@ -364,6 +369,7 @@ def build_models2():
     origin_data_path_list = ['../daily_all_100_bad_0.0/1.txt']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
+
 
 def get_all_model_report():
     """
