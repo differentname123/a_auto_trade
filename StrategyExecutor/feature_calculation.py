@@ -554,6 +554,14 @@ def generate_features_for_all_files(source_path, save_path):
     :param save_path: str, 生成的特征文件的保存目录路径。每个文件的特征将保存为一个新文件，位置在此路径下。
     :return: None
     """
+    # 删除source_path和save_path下的所有文件
+    for root, _, files in os.walk(save_path):
+        for file in files:
+            os.remove(os.path.join(root, file))
+    for root, _, files in os.walk(source_path):
+        for file in files:
+            os.remove(os.path.join(root, file))
+
     save_all_data_mul()
     with Pool() as pool:
         for root, _, files in os.walk(source_path):
@@ -666,9 +674,9 @@ def load_bad_data():
                 bad_data.to_csv(file_out_put_path, index=False)
 
 if __name__ == '__main__':
-    # file_path = '../daily_data_exclude_new_can_buy'
-    # out_path = '../feature_data_exclude_new_can_buy'
-    # generate_features_for_all_files(file_path, out_path)
+    file_path = '../daily_data_exclude_new_can_buy'
+    out_path = '../feature_data_exclude_new_can_buy'
+    generate_features_for_all_files(file_path, out_path)
     load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'

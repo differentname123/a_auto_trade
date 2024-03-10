@@ -501,6 +501,6 @@ if __name__ == '__main__':
     # fix_announcements()
     # fetch_announcements('002740')
     # save_index_data()
-    # save_all_data_mul(save_fun=save_stock_data_1_min)
-    # save_all_data_mul(save_fun=save_stock_data_min)
+    save_all_data_mul(save_fun=save_stock_data_1_min)
+    save_all_data_mul(save_fun=save_stock_data_min)
     save_all_data_mul()

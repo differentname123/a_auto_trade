@@ -3425,7 +3425,7 @@ if __name__ == '__main__':
     # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
     # file_path = '../train_data/2024_data.csv'
     # data = pd.read_csv(file_path)
-    data = low_memory_load('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
+    data = low_memory_load('../train_data/2024_data_new.csv')
     origin_data = pd.read_csv('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
     # 输出data中列名包含 '信号' 的列，并将该列的最大和最小值输出，并且记录整体的最大和最小值
     signal_columns = [col for col in data.columns if '信号' in col]

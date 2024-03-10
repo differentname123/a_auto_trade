@@ -314,12 +314,10 @@ def get_model_report(abs_name, model_name, need_reverse=False):
 
         start_time = time.time()
 
-        file_path_list = train_data_list
+        file_path_list = []
 
         file_path_list.append('../train_data/profit_1_day_2024_bad_0/bad_0_data_batch_count.csv')
-        # 生成一个随机数，如果是奇数那就逆序file_path_list
-        if need_reverse:
-            file_path_list.reverse()
+        file_path_list.extend(train_data_list)
         # file_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.6/bad_0.6_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv']
 
         report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
@@ -351,7 +349,15 @@ def get_model_report(abs_name, model_name, need_reverse=False):
         tree_values = np.arange(0.5, 1, 0.05)
         cha_zhi_values = np.arange(0.01, 1, 0.05)
         flag = False
+        this_key_map = {
+            'tree_1_abs_1': True,'tree_0_abs_1':True,
+            'tree_1_cha_zhi_1':True, 'tree_0_cha_zhi_1':True
+        }
         for file_path in file_path_list:
+            # 如果this_key_map的值都是False，则跳出循环
+            if not any(this_key_map.values()):
+                print(f" 分数全为0 对于文件 {file_path}所有this_key全为false 模型 {model_name}")
+                break
             file_start_time = time.time()
             # 判断result_dict[model_name][file_path]是否存在，如果存在则跳过
             if model_name in result_dict and file_path in result_dict[model_name]:
@@ -372,49 +378,157 @@ def get_model_report(abs_name, model_name, need_reverse=False):
             y_test = data[key_name] >= profit
             total_samples = len(y_test)
             n_trees = len(model.estimators_)
+            if this_key_map['tree_1_abs_1'] or this_key_map["tree_1_cha_zhi_1"]:
+                start = time.time()
+                tree_preds = predict_in_batches(model.estimators_, X_test)
+                end_time = time.time()
+                print(f"预测耗时: {end_time - start:.2f}秒 ({n_trees}棵树)")
 
-            start = time.time()
-            tree_preds = predict_in_batches(model.estimators_, X_test)
-            end_time = time.time()
-            print(f"预测耗时: {end_time - start:.2f}秒 ({n_trees}棵树)")
+                for tree_threshold in tree_values:
+                    # 计算预测概率大于阈值的次数，判断为True
+                    true_counts = np.sum(tree_preds[:, :, 1] > tree_threshold, axis=0)
+                    # 计算预测概率大于阈值的次数，判断为False
+                    false_counts = np.sum(tree_preds[:, :, 0] > tree_threshold, axis=0)
+                    if true_counts.size == 0 and false_counts.size == 0:
+                        continue
 
-            for tree_threshold in tree_values:
-                # 计算预测概率大于阈值的次数，判断为True
-                true_counts = np.sum(tree_preds[:, :, 1] > tree_threshold, axis=0)
-                # 计算预测概率大于阈值的次数，判断为False
-                false_counts = np.sum(tree_preds[:, :, 0] > tree_threshold, axis=0)
-                if true_counts.size == 0 and false_counts.size == 0:
-                    continue
+                    # 计算大于阈值判断为True的概率
+                    true_proba = true_counts / n_trees
+                    # 计算大于阈值判断为False的概率
+                    false_proba = false_counts / n_trees
+                    proba_df = np.column_stack((false_proba, true_proba))
+                    y_pred_proba = proba_df
+                    for abs_threshold in abs_threshold_values:
+                        this_key = 'tree_1_abs_1'
+                        if not this_key_map[this_key]:
+                            break
 
-                # 计算大于阈值判断为True的概率
-                true_proba = true_counts / n_trees
-                # 计算大于阈值判断为False的概率
-                false_proba = false_counts / n_trees
-                proba_df = np.column_stack((false_proba, true_proba))
-                y_pred_proba = proba_df
+                        temp_dict = {}
+                        high_confidence_true = (y_pred_proba[:, 1] > abs_threshold)
+                        high_confidence_false = (y_pred_proba[:, 0] > abs_threshold)
+                        # 判断是否个数都是0
+                        if np.sum(high_confidence_true) == 0 and np.sum(high_confidence_false) == 0:
+                            continue
+
+                        selected_true = high_confidence_true & y_test
+                        selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
+                        unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
+                        precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
+                        predicted_true_samples = np.sum(high_confidence_true)
+
+                        selected_false = high_confidence_false & ~y_test
+                        selected_data_false = data[high_confidence_false]  # 使用布尔索引选择满足条件的数据行
+                        unique_dates_false = selected_data_false['日期'].unique()  # 获取不重复的日期值
+                        precision_false = np.sum(selected_false) / np.sum(high_confidence_false) if np.sum(high_confidence_false) > 0 else 0
+                        predicted_false_samples_false = np.sum(high_confidence_false)
+
+
+                        temp_dict['tree_threshold'] = float(tree_threshold)
+                        temp_dict['cha_zhi_threshold'] = 0
+                        temp_dict['abs_threshold'] = float(abs_threshold)  # 确保阈值也是原生类型
+                        temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
+                        temp_dict['precision'] = precision
+                        temp_dict['predicted_true_samples'] = int(predicted_true_samples)
+                        temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
+                        temp_dict['predicted_ratio'] = predicted_true_samples / total_samples if total_samples > 0 else 0
+
+                        temp_dict['unique_dates_false'] = len(unique_dates_false.tolist())  # 将不重复的日期值转换为列表
+                        temp_dict['precision_false'] = precision_false
+                        temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
+                        temp_dict['predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
+                        temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
+                        temp_dict['false_score'] = precision_false * temp_dict['predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
+                        if this_key not in temp_dict_result:
+                            temp_dict_result[this_key] = []
+                        temp_dict_result[this_key].append(temp_dict)
+
+                    for cha_zhi_threshold in cha_zhi_values:
+                        temp_dict = {}
+                        this_key = 'tree_1_cha_zhi_1'
+                        if not this_key_map[this_key]:
+                            break
+                        # 计算概率差异：正类概率 - 负类概率
+                        proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
+
+                        # 判断概率差异是否大于阈值
+                        high_confidence_diff = (proba_diff > cha_zhi_threshold)
+                        proba_diff_neg = y_pred_proba[:, 0] - y_pred_proba[:, 1]
+                        high_confidence_diff_neg = (proba_diff_neg > cha_zhi_threshold)
+                        if np.sum(high_confidence_diff) == 0 and np.sum(high_confidence_diff_neg) == 0:
+                            continue
+
+                        # 使用高置信差异的布尔索引选择满足条件的数据行
+                        selected_data_diff = data[high_confidence_diff]
+                        unique_dates_diff = selected_data_diff['日期'].unique()
+
+                        # 选出实际为True的样本，且其概率差异大于阈值
+                        selected_true_diff = high_confidence_diff & y_test
+                        precision_diff = np.sum(selected_true_diff) / np.sum(high_confidence_diff) if np.sum(
+                            high_confidence_diff) > 0 else 0
+                        predicted_true_samples_diff = np.sum(high_confidence_diff)
+
+                        # 与之前保持字段名称一致
+                        temp_dict['tree_threshold'] = float(tree_threshold)
+                        temp_dict['cha_zhi_threshold'] = float(cha_zhi_threshold)
+                        temp_dict['abs_threshold'] = 0
+                        temp_dict['unique_dates'] = len(unique_dates_diff.tolist())  # 将不重复的日期值转换为列表
+                        temp_dict['precision'] = precision_diff
+                        temp_dict['predicted_true_samples'] = int(predicted_true_samples_diff)
+                        temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
+                        temp_dict['predicted_ratio'] = predicted_true_samples_diff / total_samples if total_samples > 0 else 0
+
+                        # 另一情况：负类概率 - 正类概率 大于阈值的统计
+                        # 注意：此处逻辑同上，差异在于方向相反
+
+                        selected_data_diff_neg = data[high_confidence_diff_neg]
+                        unique_dates_diff_neg = selected_data_diff_neg['日期'].unique()
+                        selected_false_diff_neg = high_confidence_diff_neg & ~y_test
+                        precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
+                            high_confidence_diff_neg) > 0 else 0
+                        predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
+
+                        # 为了区分，我们添加一个新的字段后缀 "_neg" 来表示这是负类概率 - 正类概率 大于阈值的情况
+                        temp_dict['unique_dates_false'] = len(unique_dates_diff_neg.tolist())
+                        temp_dict['precision_false'] = precision_false
+                        temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_diff_neg)
+                        temp_dict['predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
+                        temp_dict['score'] = temp_dict['precision'] * temp_dict[
+                            'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
+                        temp_dict['false_score'] = precision_false * temp_dict[
+                            'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
+
+                        if this_key not in temp_dict_result:
+                            temp_dict_result[this_key] = []
+                        temp_dict_result[this_key].append(temp_dict)
+            else:
+                print('分数全为0 tree_1_abs_1 and tree_1_cha_zhi_1 is False')
+            if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
+                y_pred_proba = model.predict_proba(X_test)
                 for abs_threshold in abs_threshold_values:
-                    this_key = 'tree_1_abs_1'
+                    this_key = 'tree_0_abs_1'
+                    if not this_key_map[this_key]:
+                        break
                     temp_dict = {}
                     high_confidence_true = (y_pred_proba[:, 1] > abs_threshold)
                     high_confidence_false = (y_pred_proba[:, 0] > abs_threshold)
-                    # 判断是否个数都是0
                     if np.sum(high_confidence_true) == 0 and np.sum(high_confidence_false) == 0:
                         continue
 
                     selected_true = high_confidence_true & y_test
                     selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
                     unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
-                    precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(high_confidence_true) > 0 else 0
+                    precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(
+                        high_confidence_true) > 0 else 0
                     predicted_true_samples = np.sum(high_confidence_true)
 
                     selected_false = high_confidence_false & ~y_test
                     selected_data_false = data[high_confidence_false]  # 使用布尔索引选择满足条件的数据行
                     unique_dates_false = selected_data_false['日期'].unique()  # 获取不重复的日期值
-                    precision_false = np.sum(selected_false) / np.sum(high_confidence_false) if np.sum(high_confidence_false) > 0 else 0
+                    precision_false = np.sum(selected_false) / np.sum(high_confidence_false) if np.sum(
+                        high_confidence_false) > 0 else 0
                     predicted_false_samples_false = np.sum(high_confidence_false)
 
-
-                    temp_dict['tree_threshold'] = float(tree_threshold)
+                    temp_dict['tree_threshold'] = 0
                     temp_dict['cha_zhi_threshold'] = 0
                     temp_dict['abs_threshold'] = float(abs_threshold)  # 确保阈值也是原生类型
                     temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
@@ -426,16 +540,20 @@ def get_model_report(abs_name, model_name, need_reverse=False):
                     temp_dict['unique_dates_false'] = len(unique_dates_false.tolist())  # 将不重复的日期值转换为列表
                     temp_dict['precision_false'] = precision_false
                     temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
-                    temp_dict['predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
+                    temp_dict[
+                        'predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
                     temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
-                    temp_dict['false_score'] = precision_false * temp_dict['predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
+                    temp_dict['false_score'] = precision_false * temp_dict[
+                        'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
                     if this_key not in temp_dict_result:
                         temp_dict_result[this_key] = []
                     temp_dict_result[this_key].append(temp_dict)
 
                 for cha_zhi_threshold in cha_zhi_values:
                     temp_dict = {}
-                    this_key = 'tree_1_cha_zhi_1'
+                    this_key = 'tree_0_cha_zhi_1'
+                    if not this_key_map[this_key]:
+                        break
                     # 计算概率差异：正类概率 - 负类概率
                     proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
 
@@ -457,7 +575,7 @@ def get_model_report(abs_name, model_name, need_reverse=False):
                     predicted_true_samples_diff = np.sum(high_confidence_diff)
 
                     # 与之前保持字段名称一致
-                    temp_dict['tree_threshold'] = float(tree_threshold)
+                    temp_dict['tree_threshold'] = 0
                     temp_dict['cha_zhi_threshold'] = float(cha_zhi_threshold)
                     temp_dict['abs_threshold'] = 0
                     temp_dict['unique_dates'] = len(unique_dates_diff.tolist())  # 将不重复的日期值转换为列表
@@ -480,7 +598,8 @@ def get_model_report(abs_name, model_name, need_reverse=False):
                     temp_dict['unique_dates_false'] = len(unique_dates_diff_neg.tolist())
                     temp_dict['precision_false'] = precision_false
                     temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_diff_neg)
-                    temp_dict['predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
+                    temp_dict[
+                        'predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
                     temp_dict['score'] = temp_dict['precision'] * temp_dict[
                         'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
                     temp_dict['false_score'] = precision_false * temp_dict[
@@ -489,113 +608,22 @@ def get_model_report(abs_name, model_name, need_reverse=False):
                     if this_key not in temp_dict_result:
                         temp_dict_result[this_key] = []
                     temp_dict_result[this_key].append(temp_dict)
-
-            y_pred_proba = model.predict_proba(X_test)
-            for abs_threshold in abs_threshold_values:
-                this_key = 'tree_0_abs_1'
-                temp_dict = {}
-                high_confidence_true = (y_pred_proba[:, 1] > abs_threshold)
-                high_confidence_false = (y_pred_proba[:, 0] > abs_threshold)
-                if np.sum(high_confidence_true) == 0 and np.sum(high_confidence_false) == 0:
-                    continue
-
-                selected_true = high_confidence_true & y_test
-                selected_data = data[high_confidence_true]  # 使用布尔索引选择满足条件的数据行
-                unique_dates = selected_data['日期'].unique()  # 获取不重复的日期值
-                precision = np.sum(selected_true) / np.sum(high_confidence_true) if np.sum(
-                    high_confidence_true) > 0 else 0
-                predicted_true_samples = np.sum(high_confidence_true)
-
-                selected_false = high_confidence_false & ~y_test
-                selected_data_false = data[high_confidence_false]  # 使用布尔索引选择满足条件的数据行
-                unique_dates_false = selected_data_false['日期'].unique()  # 获取不重复的日期值
-                precision_false = np.sum(selected_false) / np.sum(high_confidence_false) if np.sum(
-                    high_confidence_false) > 0 else 0
-                predicted_false_samples_false = np.sum(high_confidence_false)
-
-                temp_dict['tree_threshold'] = 0
-                temp_dict['cha_zhi_threshold'] = 0
-                temp_dict['abs_threshold'] = float(abs_threshold)  # 确保阈值也是原生类型
-                temp_dict['unique_dates'] = len(unique_dates.tolist())  # 将不重复的日期值转换为列表
-                temp_dict['precision'] = precision
-                temp_dict['predicted_true_samples'] = int(predicted_true_samples)
-                temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
-                temp_dict['predicted_ratio'] = predicted_true_samples / total_samples if total_samples > 0 else 0
-
-                temp_dict['unique_dates_false'] = len(unique_dates_false.tolist())  # 将不重复的日期值转换为列表
-                temp_dict['precision_false'] = precision_false
-                temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_false)
-                temp_dict[
-                    'predicted_ratio_false'] = predicted_false_samples_false / total_samples if total_samples > 0 else 0
-                temp_dict['score'] = precision * temp_dict['predicted_ratio'] * 100 if precision > thread_ratio else 0
-                temp_dict['false_score'] = precision_false * temp_dict[
-                    'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
-                if this_key not in temp_dict_result:
-                    temp_dict_result[this_key] = []
-                temp_dict_result[this_key].append(temp_dict)
-
-            for cha_zhi_threshold in cha_zhi_values:
-                temp_dict = {}
-                this_key = 'tree_0_cha_zhi_1'
-                # 计算概率差异：正类概率 - 负类概率
-                proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
-
-                # 判断概率差异是否大于阈值
-                high_confidence_diff = (proba_diff > cha_zhi_threshold)
-                proba_diff_neg = y_pred_proba[:, 0] - y_pred_proba[:, 1]
-                high_confidence_diff_neg = (proba_diff_neg > cha_zhi_threshold)
-                if np.sum(high_confidence_diff) == 0 and np.sum(high_confidence_diff_neg) == 0:
-                    continue
-
-                # 使用高置信差异的布尔索引选择满足条件的数据行
-                selected_data_diff = data[high_confidence_diff]
-                unique_dates_diff = selected_data_diff['日期'].unique()
-
-                # 选出实际为True的样本，且其概率差异大于阈值
-                selected_true_diff = high_confidence_diff & y_test
-                precision_diff = np.sum(selected_true_diff) / np.sum(high_confidence_diff) if np.sum(
-                    high_confidence_diff) > 0 else 0
-                predicted_true_samples_diff = np.sum(high_confidence_diff)
-
-                # 与之前保持字段名称一致
-                temp_dict['tree_threshold'] = 0
-                temp_dict['cha_zhi_threshold'] = float(cha_zhi_threshold)
-                temp_dict['abs_threshold'] = 0
-                temp_dict['unique_dates'] = len(unique_dates_diff.tolist())  # 将不重复的日期值转换为列表
-                temp_dict['precision'] = precision_diff
-                temp_dict['predicted_true_samples'] = int(predicted_true_samples_diff)
-                temp_dict['total_samples'] = int(total_samples)  # 确保转换为Python原生int类型
-                temp_dict['predicted_ratio'] = predicted_true_samples_diff / total_samples if total_samples > 0 else 0
-
-                # 另一情况：负类概率 - 正类概率 大于阈值的统计
-                # 注意：此处逻辑同上，差异在于方向相反
-
-                selected_data_diff_neg = data[high_confidence_diff_neg]
-                unique_dates_diff_neg = selected_data_diff_neg['日期'].unique()
-                selected_false_diff_neg = high_confidence_diff_neg & ~y_test
-                precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
-                    high_confidence_diff_neg) > 0 else 0
-                predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
-
-                # 为了区分，我们添加一个新的字段后缀 "_neg" 来表示这是负类概率 - 正类概率 大于阈值的情况
-                temp_dict['unique_dates_false'] = len(unique_dates_diff_neg.tolist())
-                temp_dict['precision_false'] = precision_false
-                temp_dict['predicted_false_samples_false'] = int(predicted_false_samples_diff_neg)
-                temp_dict[
-                    'predicted_ratio_false'] = predicted_false_samples_diff_neg / total_samples if total_samples > 0 else 0
-                temp_dict['score'] = temp_dict['precision'] * temp_dict[
-                    'predicted_ratio'] * 100 if temp_dict['precision'] > thread_ratio else 0
-                temp_dict['false_score'] = precision_false * temp_dict[
-                    'predicted_ratio_false'] * 100 if precision_false > thread_ratio else 0
-
-                if this_key not in temp_dict_result:
-                    temp_dict_result[this_key] = []
-                temp_dict_result[this_key].append(temp_dict)
-
+            else:
+                print('分数全为0 tree_0_abs_1 and tree_0_cha_zhi_1 is False')
             # 按照score排序
             for key, value in temp_dict_result.items():
+                temp_dict_list = sorted(value, key=lambda x: x['false_score'], reverse=True)
+                false_flag = True
+                true_flag = True
+                if temp_dict_list[0]['false_score'] > 0:
+                    false_flag = False
                 temp_dict_list = sorted(value, key=lambda x: x['score'], reverse=True)
+                if temp_dict_list[0]['score'] > 0:
+                    true_flag = False
                 temp_dict_result[key] = temp_dict_list
+                if false_flag and true_flag:
+                    print(f"分数全为0 {key} 对于文件 {file_path} 模型 {model_name}的，跳过后续")
+                    this_key_map[key] = False
             new_temp_dict[file_path] = temp_dict_result
             print(f"耗时 {time.time() - file_start_time:.2f}秒 模型 {model_name} 对于文件 {file_path} 的报告已生成")
 
