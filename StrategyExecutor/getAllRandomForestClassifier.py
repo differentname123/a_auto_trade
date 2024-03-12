@@ -34,7 +34,7 @@ MODEL_REPORT_PATH = '../model/all_model_reports'
 MODEL_OTHER = '../model/other'
 
 
-def train_and_dump_model(clf, X_train, y_train, model_file_path):
+def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path):
     """
     训练模型并保存到指定路径
     :param clf: 分类器实例
@@ -50,13 +50,16 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path):
     # 如果out_put_path目录不存在，则创建
     if not os.path.exists(os.path.dirname(out_put_path)):
         os.makedirs(os.path.dirname(out_put_path))
-    # 创建一个空的out_put_path文件
-    with open(out_put_path, 'w') as f:
-        pass
+    # # 创建一个空的out_put_path文件
+    # with open(out_put_path, 'w') as f:
+    #     pass
     print(f"开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, model_file_path)
     print(f"模型已保存: {model_name}")
+    # 将模型名称写入existed_model.txt文件
+    with open(exist_model_file_path, 'a') as f:
+        f.write(model_name + '\n')
     # get_model_report(model_path, model_name)
 
 
@@ -181,19 +184,32 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
 
     params_list = list(ParameterGrid(param_grid))
     random.shuffle(params_list)
+    print(f"待训练的模型数量: {len(params_list)}")
 
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         # 将model_name的文件名中的'.'替换为'_'
         model_name = model_name.replace('.', '_').replace('\'', '_').replace(':', '_')
-
-        model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, model_name)
-        if is_skip and os.path.exists(model_file_path):
-            print(f"模型 {model_name} 已存在，跳过训练。")
-            continue
+        model_file_path = os.path.join(G_MODEL_PATH, origin_data_path_dir, model_name)
+        exist_model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, 'existed_model.txt')
+        # 读取existed_model.txt文件，判断模型是否已存在
+        if is_skip and os.path.exists(exist_model_file_path):
+            with open(exist_model_file_path, 'r') as f:
+                existed_model_list = f.readlines()
+                if model_name in existed_model_list:
+                    print(f"模型已存在，跳过: {model_name}")
+                    continue
+        exist_model_file_path = os.path.join(G_MODEL_PATH, origin_data_path_dir, 'existed_model.txt')
+        # 读取existed_model.txt文件，判断模型是否已存在
+        if is_skip and os.path.exists(exist_model_file_path):
+            with open(exist_model_file_path, 'r') as f:
+                existed_model_list = f.readlines()
+                if model_name in existed_model_list:
+                    print(f"模型已存在，跳过: {model_name}")
+                    continue
 
         clf = RandomForestClassifier(**params)
-        train_and_dump_model(clf, X_train, y_train, model_file_path)
+        train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
         # 处理类别不平衡...
         print("处理类别不平衡...")
@@ -201,8 +217,8 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         smote = SMOTE()
         X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
 
-        model_file_path = os.path.join(MODEL_PATH, origin_data_path_dir, 'smote_' + model_name)
-        train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
+        model_file_path = os.path.join(G_MODEL_PATH, origin_data_path_dir, 'smote_' + model_name)
+        train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path, exist_model_file_path)
 
 
 def sort_all_report():

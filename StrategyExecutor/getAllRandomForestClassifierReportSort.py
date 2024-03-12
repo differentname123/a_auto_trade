@@ -11,6 +11,8 @@
 import json
 import os
 import time
+import traceback
+from collections import Counter
 from multiprocessing import Process, Pool
 
 from imblearn.over_sampling import SMOTE
@@ -190,6 +192,30 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         model_name_smote = f"smote_{model_name}"
         train_and_dump_model(clf, X_train_smote, y_train_smote, model_file_path)
 
+def add_score(final_result, value, is_false=False):
+    max_score = 0
+    for k, v in final_result.items():
+        if not is_false:
+            final_result[k]['score'] = 0
+        else:
+            final_result[k]['false_score'] = 0
+        for k1, v1 in value.items():
+            # print(k1)
+            for detail in v1[k]:
+                if v['tree_threshold'] == detail['tree_threshold'] and v['cha_zhi_threshold'] == detail['cha_zhi_threshold'] and v['abs_threshold'] == detail['abs_threshold']:
+                    if not is_false:
+                        final_result[k]['score'] += (detail['score'])
+                        # print(detail['score'])
+                    else:
+                        final_result[k]['false_score'] *= (detail['false_score'])
+        if not is_false:
+            if final_result[k]['score'] > max_score:
+                max_score = final_result[k]['score']
+        else:
+            if final_result[k]['false_score'] > max_score:
+                max_score = final_result[k]['false_score']
+    return max_score
+
 def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
     """
 
@@ -197,64 +223,91 @@ def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
     """
 
     if not is_false:
+        result = {}
+
         for k, v in value.items():
+            if k not in result:
+                result[k] = {}
             for k1, v1 in v.items():
-                if k1 not in temp_score:
-                    temp_score[k1] = {'score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
-                if v1[0]['unique_dates'] >= min_unique_dates:
-                    this_score = v1[0]['score']
-                else:
-                    this_score = 0
-                temp_score[k1]['score'] *= this_score
-                if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
-                    temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
-                if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
-                    temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
-                if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
-                    temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
+                if k1 not in result[k]:
+                    result[k][k1] = []
+                for combination in v1:
+                    if combination['unique_dates'] >= min_unique_dates and combination['precision'] > 0.95:
+                        result[k][k1].append((combination['tree_threshold'], combination['cha_zhi_threshold'], combination['abs_threshold']))
 
-        # 过滤掉score为0的
-        temp_score = {k: v for k, v in temp_score.items() if v['score'] > 0}
-        # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
-        if temp_score:
-            temp_score['score'] = max([v['score'] for v in temp_score.values()])
-        else:
-            temp_score['score'] = 0
+        final_result = {}
+        for k1 in result[list(result.keys())[0]]:
+            common_combinations = set(result[list(result.keys())[0]][k1])
+            for k in result:
+                # 如果result[k][k1]不存在，则赋值为[]
+                if k1 not in result[k]:
+                    result[k][k1] = []
+                common_combinations &= set(result[k][k1])
 
-        return temp_score
+            if common_combinations:
+                min_sum = float('inf')
+                min_combination = None
+                for combination in common_combinations:
+                    sum_threshold = sum(combination)
+                    if sum_threshold < min_sum:
+                        min_sum = sum_threshold
+                        min_combination = combination
+
+                final_result[k1] = {'tree_threshold': min_combination[0], 'cha_zhi_threshold': min_combination[1], 'abs_threshold': min_combination[2]}
+        max_score = add_score(final_result, value)
+        final_result['score'] = max_score
+        return final_result
     else:
+        result = {}
+
         for key, value1 in value.items():
+            if key not in result:
+                result[key] = {}
             for key1, data1 in value1.items():
+                if key1 not in result[key]:
+                    result[key][key1] = []
                 for data in data1:
                     data['false_score'] = data['precision_false'] * data['predicted_ratio_false'] * 100 if data['precision_false'] > 0.95 else 0
-                value1[key1] = sorted(data1, key=lambda x: x['false_score'], reverse=True)
+                    if data['unique_dates_false'] >= min_unique_dates and data['precision_false'] > 0.95:
+                        result[key][key1].append((data['tree_threshold'], data['cha_zhi_threshold'], data['abs_threshold']))
             value[key] = value1
 
-        for k, v in value.items():
-            for k1, v1 in v.items():
-                if k1 not in temp_score:
-                    temp_score[k1] = {'false_score': 1, 'tree_threshold': 0, 'cha_zhi_threshold': 0, 'abs_threshold': 0}
-                if v1[0]['unique_dates_false'] >= min_unique_dates:
-                    this_score = v1[0]['false_score']
-                else:
-                    this_score = 0
-                temp_score[k1]['false_score'] *= this_score
-                if v1[0]['tree_threshold'] > temp_score[k1]['tree_threshold']:
-                    temp_score[k1]['tree_threshold'] = v1[0]['tree_threshold']
-                if v1[0]['cha_zhi_threshold'] > temp_score[k1]['cha_zhi_threshold']:
-                    temp_score[k1]['cha_zhi_threshold'] = v1[0]['cha_zhi_threshold']
-                if v1[0]['abs_threshold'] > temp_score[k1]['abs_threshold']:
-                    temp_score[k1]['abs_threshold'] = v1[0]['abs_threshold']
+        final_result = {}
+        for k1 in result[list(result.keys())[0]]:
+            common_combinations = set(result[list(result.keys())[0]][k1])
+            for k in result:
+                # 如果result[k][k1]不存在，则赋值为[]
+                if k1 not in result[k]:
+                    result[k][k1] = []
+                common_combinations &= set(result[k][k1])
 
-        # 过滤掉score为0的
-        temp_score = {k: v for k, v in temp_score.items() if v['false_score'] > 0}
-        # 将temp_score['score']赋值为最大的那个score，需要考虑到temp_score为空的情况
-        if temp_score:
-            temp_score['false_score'] = max([v['false_score'] for v in temp_score.values()])
-        else:
-            temp_score['false_score'] = 0
+            if common_combinations:
+                min_sum = float('inf')
+                min_combination = None
+                for combination in common_combinations:
+                    sum_threshold = sum(combination)
+                    if sum_threshold < min_sum:
+                        min_sum = sum_threshold
+                        min_combination = combination
 
-        return temp_score
+                final_result[k1] = {'tree_threshold': min_combination[0], 'cha_zhi_threshold': min_combination[1], 'abs_threshold': min_combination[2]}
+
+        max_score = add_score(final_result, value, is_false=True)
+        final_result['false_score'] = max_score
+        return final_result
+
+def delete_model(model_name_list):
+    # 获取../model/all_models下的所有文件的路径，如果是目录则需要递归
+    for root, ds, fs in os.walk(MODEL_PATH):
+        for f in fs:
+            if f.endswith('joblib'):
+                fullname = os.path.join(root, f)
+                if f in model_name_list:
+                    os.remove(fullname)
+                    # 将fullname增量写入../model/other/deleted_model.txt
+                    with open('../model/all_models/deleted_model.txt', 'a') as file:
+                        file.write(fullname + '\n')
+                    print(f'{f}已删除')
 
 def sort_all_report():
     """
@@ -264,11 +317,13 @@ def sort_all_report():
     all_scores = []  # 用于存储所有的scores和对应的keys
     all_scores_false = []
     good_model_list = []
+    false_model_list = []
 
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
                 fullname = os.path.join(root, f)
+                # fullname = '../model/reports\smote_RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.3_thread_day_1_true_ratio_0.22435625692288758_class_weight_{True_ 1, False_ 1}_max_depth_30_min_samples_leaf_2_min_samples_split_2_n_estimators_250.joblib_report.json'
                 with open(fullname, 'r') as file:
                     try:
                         result_dict = json.load(file)
@@ -279,8 +334,9 @@ def sort_all_report():
                             false_temp_score = maintain_scores(false_temp_score, value, is_false=True)
                             all_scores.append({'key': key, 'value': temp_score})
                             all_scores_false.append({'key': key, 'value': false_temp_score})
-                    except json.JSONDecodeError:
-                        print(f'Error occurred when reading {fullname}')
+                    except Exception as e:
+                        traceback.print_exc()
+                        print(f'Error occurred when reading {fullname} {e}')
                         continue
 
     # 按照score对all_scores进行排序，score高的排在前面
@@ -290,6 +346,17 @@ def sort_all_report():
     # 将排序后的结果输出到一个文件中
     output_filename = '../final_zuhe/other/all_model_reports_new.json'
     false_output_filename = '../final_zuhe/other/all_model_reports_false_new.json'
+    # 找到sorted_all_scores_false中false_score是0的key
+    for i in range(len(sorted_all_scores_false)):
+        if sorted_all_scores_false[i]['value']['false_score'] == 0:
+            false_model_list.append(sorted_all_scores_false[i]['key'])
+    # 找到sorted_scores中score是0的key
+    for i in range(len(sorted_scores)):
+        if sorted_scores[i]['value']['score'] == 0:
+            good_model_list.append(sorted_scores[i]['key'])
+    # 找到false_model_list和good_model_list的交集
+    intersection = list(set(false_model_list).intersection(set(good_model_list)))
+    delete_model(intersection)
     with open(false_output_filename, 'w') as outfile:
         json.dump(sorted_all_scores_false, outfile, indent=4)
     with open(output_filename, 'w') as outfile:

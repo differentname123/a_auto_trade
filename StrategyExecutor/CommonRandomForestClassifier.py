@@ -12,6 +12,8 @@ import json
 import multiprocessing
 import os
 import time
+import traceback
+import warnings
 from multiprocessing import Pool
 
 from imblearn.over_sampling import SMOTE
@@ -27,11 +29,11 @@ from StrategyExecutor.common import low_memory_load
 
 D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
-MODEL_PATH = '../model/all_models'
+MODEL_PATH = '../model/all_models/'
 MODEL_PATH_LIST = ['D:\good_models', MODEL_PATH]
+warnings.filterwarnings(action='ignore', category=UserWarning)
 
-
-def get_thread_data_new_tree_0(y_pred_proba, X1, threshold, cha_zhi_threshold=0, abs_threshold=0):
+def get_thread_data_new_tree_1(tree_preds, X1, tree_threshold=0, cha_zhi_threshold=0, abs_threshold=0):
     """
     使用随机森林模型预测data中的数据，如果预测结果高于阈值threshold，则打印对应的原始数据，返回高于阈值的原始数据
     :param data:
@@ -40,20 +42,96 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, threshold, cha_zhi_threshold=0,
     :return:
     """
     selected_samples = None
+    n_trees = tree_preds.shape[0]
+    true_counts = np.sum(tree_preds[:, :, 1] > tree_threshold, axis=0)
+    # 计算预测概率大于阈值的次数，判断为False
+    false_counts = np.sum(tree_preds[:, :, 0] > tree_threshold, axis=0)
+    if true_counts.size == 0 and false_counts.size == 0:
+        print('没有预测结果大于阈值')
+        return selected_samples
 
-    high_confidence_true = (y_pred_proba[:, 1] > threshold)
-    predicted_true_samples = np.sum(high_confidence_true)
-    # 如果有高于阈值的预测样本，打印对应的原始数据
-    if predicted_true_samples > 0:
-        # 直接使用布尔索引从原始data中选择对应行
-        selected_samples = X1[high_confidence_true].copy()
-        # 统计selected_samples中 收盘 的和
-        close_sum = selected_samples['收盘'].sum()
-        selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
-        selected_samples.loc[:, 'basic_thread'] = threshold
-        print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
-        print(selected_samples['日期'].value_counts())
-    return selected_samples
+    # 计算大于阈值判断为True的概率
+    true_proba = true_counts / n_trees
+    # 计算大于阈值判断为False的概率
+    false_proba = false_counts / n_trees
+    proba_df = np.column_stack((false_proba, true_proba))
+    y_pred_proba = proba_df
+    if abs_threshold > 0:
+        threshold = abs_threshold
+        high_confidence_true = (y_pred_proba[:, 1] > threshold)
+        predicted_true_samples = np.sum(high_confidence_true)
+        # 如果有高于阈值的预测样本，打印对应的原始数据
+        if predicted_true_samples > 0:
+            # 直接使用布尔索引从原始data中选择对应行
+            selected_samples = X1[high_confidence_true].copy()
+            # 统计selected_samples中 收盘 的和
+            close_sum = selected_samples['收盘'].sum()
+            selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
+            selected_samples.loc[:, 'basic_thread'] = threshold
+            print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
+            print(selected_samples['日期'].value_counts())
+        return selected_samples
+    else:
+        if cha_zhi_threshold > 0:
+            proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
+
+            # 判断概率差异是否大于阈值
+            high_confidence_true = (proba_diff > cha_zhi_threshold)
+            predicted_true_samples = np.sum(high_confidence_true)
+            # 如果有高于阈值的预测样本，打印对应的原始数据
+            if predicted_true_samples > 0:
+                # 直接使用布尔索引从原始data中选择对应行
+                selected_samples = X1[high_confidence_true].copy()
+                # 统计selected_samples中 收盘 的和
+                close_sum = selected_samples['收盘'].sum()
+                selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
+                selected_samples.loc[:, 'basic_thread'] = cha_zhi_threshold
+                print(f'高于阈值 {cha_zhi_threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
+                print(selected_samples['日期'].value_counts())
+            return selected_samples
+
+def get_thread_data_new_tree_0(y_pred_proba, X1, cha_zhi_threshold=0, abs_threshold=0):
+    """
+    使用随机森林模型预测data中的数据，如果预测结果高于阈值threshold，则打印对应的原始数据，返回高于阈值的原始数据
+    :param data:
+    :param rf_classifier:
+    :param threshold:
+    :return:
+    """
+    selected_samples = None
+    if abs_threshold > 0:
+        threshold = abs_threshold
+        high_confidence_true = (y_pred_proba[:, 1] > threshold)
+        predicted_true_samples = np.sum(high_confidence_true)
+        # 如果有高于阈值的预测样本，打印对应的原始数据
+        if predicted_true_samples > 0:
+            # 直接使用布尔索引从原始data中选择对应行
+            selected_samples = X1[high_confidence_true].copy()
+            # 统计selected_samples中 收盘 的和
+            close_sum = selected_samples['收盘'].sum()
+            selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
+            selected_samples.loc[:, 'basic_thread'] = threshold
+            print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
+            print(selected_samples['日期'].value_counts())
+        return selected_samples
+    else:
+        if cha_zhi_threshold > 0:
+            proba_diff = y_pred_proba[:, 1] - y_pred_proba[:, 0]
+
+            # 判断概率差异是否大于阈值
+            high_confidence_true = (proba_diff > cha_zhi_threshold)
+            predicted_true_samples = np.sum(high_confidence_true)
+            # 如果有高于阈值的预测样本，打印对应的原始数据
+            if predicted_true_samples > 0:
+                # 直接使用布尔索引从原始data中选择对应行
+                selected_samples = X1[high_confidence_true].copy()
+                # 统计selected_samples中 收盘 的和
+                close_sum = selected_samples['收盘'].sum()
+                selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true, 1]
+                selected_samples.loc[:, 'basic_thread'] = cha_zhi_threshold
+                print(f'高于阈值 {cha_zhi_threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
+                print(selected_samples['日期'].value_counts())
+            return selected_samples
 
 def get_thread_data(data, rf_classifier, threshold):
     """
@@ -125,26 +203,34 @@ def load_rf_model_new(score_threshold=0.05):
     """
     all_rf_model_list = []
     output_filename = '../final_zuhe/other/all_model_reports_new.json'
+    model_file_list = []
+    for model_path in MODEL_PATH_LIST:
+        # 获取model_path下的所有文件的全路径，如果是目录还需要继续递归
+        for root, dirs, files in os.walk(model_path):
+            for file in files:
+                model_file_list.append(os.path.join(root, file))
     # 加载output_filename，找到最好的模型
     with open(output_filename, 'r') as file:
         sorted_scores_list = json.load(file)
         for sorted_scores in sorted_scores_list:
             model_name = sorted_scores['key']
             score_value = sorted_scores['value']
-            for model_path in MODEL_PATH_LIST:
-                model_file_path = os.path.join(model_path, model_name)
-                if os.path.exists(model_file_path):
+            model_file_path = None
+            for model_path in model_file_list:
+                if model_name in model_path:
+                    model_file_path = model_path
                     break
-            if score_value['score'] > 0:
-                other_dict = {}
-                score_value['model_path'] = model_file_path
-                for key, value in score_value.items():
-                    if 'tree' in key:
-                        if float(value['score']) >= score_threshold:
-                            other_dict[key] = value
-                if len(other_dict) > 0:
-                    other_dict['model_path'] = model_file_path
-                    all_rf_model_list.append(other_dict)
+            if model_file_path is not None:
+                if score_value['score'] > 0:
+                    other_dict = {}
+                    score_value['model_path'] = model_file_path
+                    for key, value in score_value.items():
+                        if 'tree' in key:
+                            if float(value['score']) > score_threshold:
+                                other_dict[key] = value
+                    if len(other_dict) > 0:
+                        other_dict['model_path'] = model_file_path
+                        all_rf_model_list.append(other_dict)
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     return all_rf_model_list
 
@@ -270,13 +356,22 @@ def process_model(rf_model_map, data, plus_threshold=0.05):
         print(f"模型 {model_name} 耗时 {elapsed_time}")
 
 def get_proba_data(data, rf_classifier):
-    signal_columns = [column for column in data.columns if 'signal' in column]
+    signal_columns = [column for column in data.columns if '信号' in column]
     # 获取data中在signal_columns中的列
     X = data[signal_columns]
     # 获取data中去除signal_columns中的列
     X1 = data.drop(signal_columns, axis=1)
     y_pred_proba = rf_classifier.predict_proba(X)
     return y_pred_proba, X1
+
+def get_proba_data_tree(data, rf_classifier):
+    signal_columns = [column for column in data.columns if '信号' in column]
+    # 获取data中在signal_columns中的列
+    X = data[signal_columns]
+    # 获取data中去除signal_columns中的列
+    X1 = data.drop(signal_columns, axis=1)
+    tree_preds = np.array([tree.predict_proba(X) for tree in rf_classifier.estimators_])
+    return tree_preds, X1
 
 def process_model_new(rf_model_map, data):
     """
@@ -286,24 +381,38 @@ def process_model_new(rf_model_map, data):
     :param plus_threshold: 阈值调整
     :return: 选中的样本（如果有）
     """
+    start = time.time()
+    all_selected_samples_list = []
+    model_name = os.path.basename(rf_model_map['model_path'])
     try:
         y_pred_proba = None
-        start = time.time()
+        X1 = None
+        tree_preds = None
         rf_model = load(rf_model_map['model_path'])
+        # 获取rf_model_map['model_path']中的模型名称
+
         for key, value in rf_model_map.items():
             if 'tree' in key:
                 if 'tree_0' in key:
                     if y_pred_proba is None:
                         y_pred_proba, X1 = get_proba_data(data, rf_model)
-                    get_thread_data_new_tree_0(y_pred_proba, X1, rf_model, value['cha_zhi_threshold'], value['abs_threshold'])
-
-                    selected_samples = get_thread_data(data, rf_model, threshold)
-        selected_samples = get_thread_data(data, rf_model, threshold)
-        if selected_samples is not None:
-            selected_samples['score'] = score
-            selected_samples['model_name'] = model_name
-            return selected_samples
+                    selected_samples = get_thread_data_new_tree_0(y_pred_proba, X1, cha_zhi_threshold=value['cha_zhi_threshold'], abs_threshold=value['abs_threshold'])
+                    if selected_samples is not None:
+                        selected_samples['param'] = value['score']
+                        selected_samples['model_name'] = model_name
+                        all_selected_samples_list.append(selected_samples)
+                if 'tree_1' in key:
+                    if tree_preds is None:
+                        tree_preds, X1 = get_proba_data_tree(data, rf_model)
+                    selected_samples = get_thread_data_new_tree_1(tree_preds, X1, tree_threshold=value['tree_threshold'], cha_zhi_threshold=value['cha_zhi_threshold'], abs_threshold=value['abs_threshold'])
+                    if selected_samples is not None:
+                        selected_samples['param'] = value['score']
+                        selected_samples['model_name'] = model_name
+                        all_selected_samples_list.append(selected_samples)
+        if len(all_selected_samples_list) > 0:
+            return pd.concat(all_selected_samples_list)
     except Exception as e:
+        traceback.print_exc()
         print(f"模型 {model_name} 加载失败 {e}")
     finally:
         elapsed_time = time.time() - start
@@ -325,24 +434,56 @@ def get_all_good_data_with_model_name_list(data, plus_threshold=0.05):
 def get_all_good_data_with_model_name_list_new(data, score_threshold=0.05):
     all_rf_model_list = load_rf_model_new(score_threshold)
     print(f"加载了 {len(all_rf_model_list)} 个模型")
-    for model in all_rf_model_list:
-        process_model_new(model, data)
+    # for model in all_rf_model_list:
+    #     print(process_model_new(model, data))
 
     # 使用Pool对象来并行处理
     with Pool(processes=multiprocessing.cpu_count() - 15) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
-        results = pool.starmap(process_model_new, [(model, data, score_threshold) for model in all_rf_model_list])
+        results = pool.starmap(process_model_new, [(model, data) for model in all_rf_model_list])
 
     # 过滤掉None结果并合并DataFrame
     all_selected_samples = pd.concat([res for res in results if res is not None])
-
+    all_selected_samples.to_csv(f'../temp/all_selected_samples_{score_threshold}.csv', index=False)
     return all_selected_samples
 
 if __name__ == '__main__':
     # origin_data_path = '../temp/real_time_price.csv'
     # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
     # get_all_good_data(data)
-    # data = low_memory_load('../train_data/2024_data_new.csv')
-    data = {}
-    get_all_good_data_with_model_name_list_new(data, 0.05)
+    # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
+    # load_rf_model_new(0)
+    data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
+    data1 = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-12_real_time.csv', low_memory=False, dtype={'代码': str})
+    data = pd.read_csv('../train_data/2024_data_new.csv', low_memory=False, dtype={'代码': str})
+    data['日期'] = pd.to_datetime(data['日期'])
+    data = data[(data['日期'] == '2024-03-12') & (data['代码'] == '605168')]
+    data1 = data1[ (data1['代码'] == '605168')]
+    # 获取data和data1中列名的交集
+    common_columns = data.columns.intersection(data1.columns)
+
+    # 找到列名相同但值不同的列
+    different_columns = []
+    for column in common_columns:
+        # 由于data和data1筛选后只包含一行，可以直接访问
+        if data[column].iloc[0] != data1[column].iloc[0]:
+            different_columns.append(column)
+            print(f"列名相同但值不同的列有：{column} {data[column].iloc[0]} {data1[column].iloc[0]}")
+
+    print("列名相同但值不同的列有：", different_columns)
+    signal_columns = [column for column in data.columns if '信号' in column]
+    # 获取data中在signal_columns中的列
+    X = data[signal_columns]
+    # 获取data中去除signal_columns中的列
+    X1 = data.drop(signal_columns, axis=1)
+
+    signal_columns = [column for column in data.columns if '信号' in column]
+    # 获取data中在signal_columns中的列
+    X2 = data1[signal_columns]
+    # 获取data中去除signal_columns中的列
+    X3 = data1.drop(signal_columns, axis=1)
+    # 截取data最后4000行
+    # data = data.iloc[-4000:]
+    # data = {}
+    get_all_good_data_with_model_name_list_new(data, 0)
     # load_rf_model_new()
 

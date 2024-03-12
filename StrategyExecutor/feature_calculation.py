@@ -154,7 +154,7 @@ def calculate_trend_changes(data, key_list):
         new_columns[f'{key}_连续下跌天数_信号'] = np.where(rise_fall_signal < 0, consecutive_counts, 0)
 
     # 将字典转换为 DataFrame
-    new_columns_df = pd.DataFrame(new_columns)
+    new_columns_df = pd.DataFrame(new_columns, index=data.index)
 
     # 计算由跌转涨和由涨转跌的信号，并加入到 new_columns_df 中
     for key in key_list:
@@ -451,7 +451,7 @@ def get_data_feature(data):
 
     # Filter columns excluding specific ones and those not containing signals
     columns_for_analysis = [column for column in data.columns
-                            if (column not in ['日期', '代码', '名称', '数量', 'Max_rate', 'Buy_Signal']
+                            if (column not in ['日期', '代码', 'code','current_price', '名称', '数量', 'Max_rate', 'Buy_Signal']
                             and '是否_信号' not in column and '相较于' not in column and '后续' not in column )]
 
     # Calculate ratios and dynamic frequencies for selected columns
@@ -473,7 +473,7 @@ def get_data_feature(data):
     data = data.iloc[min_required_length:]
 
     # Logging the time taken to compute features
-    print(f"名称{data['名称'].iloc[0]} 计算特征耗时 {time.time() - start_time}")
+    # print(f"名称{data['名称'].iloc[0]} 计算特征耗时 {time.time() - start_time}")
 
     delete_column = [column for column in data.columns if '信号' not in column and '均值' in column]
     # 将delete_column从data中删除

@@ -88,6 +88,7 @@ def process_stock_data(order_output_file_path, file_path, auto, amount):
                     price = current_price
                 if max_price <= current_price:
                     price = max_price
+                price += 0.01
                 if stock_no not in order_result:
                     # 将stock_no, price写入到order_output_file_path文件中
                     with open(order_output_file_path, 'a', encoding='utf-8') as f:
