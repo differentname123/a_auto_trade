@@ -365,12 +365,12 @@ class ThsAuto:
         if price is not None:
             price = '%.2f' % price
             set_text(self.price_ctrl, price)
-            time.sleep(0.05)
+            time.sleep(0.1)
 
         set_text(self.amount_ctrl, str(amount))
         # time.sleep(sleep_time)
         hot_key(['enter'])
-        # time.sleep(sleep_time)
+        time.sleep(0.05)
         hot_key(['enter'])
         return {
             'code': 2,
