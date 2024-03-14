@@ -242,6 +242,8 @@ def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
                 # 如果result[k][k1]不存在，则赋值为[]
                 if k1 not in result[k]:
                     result[k][k1] = []
+                if len(result) != 6:
+                    result[k][k1] = []
                 common_combinations &= set(result[k][k1])
 
             if common_combinations:
@@ -278,6 +280,8 @@ def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
             for k in result:
                 # 如果result[k][k1]不存在，则赋值为[]
                 if k1 not in result[k]:
+                    result[k][k1] = []
+                if len(result) != 6:
                     result[k][k1] = []
                 common_combinations &= set(result[k][k1])
 
@@ -354,9 +358,9 @@ def sort_all_report():
     for i in range(len(sorted_scores)):
         if sorted_scores[i]['value']['score'] == 0:
             good_model_list.append(sorted_scores[i]['key'])
-    # 找到false_model_list和good_model_list的交集
-    intersection = list(set(false_model_list).intersection(set(good_model_list)))
-    delete_model(intersection)
+    # # 找到false_model_list和good_model_list的交集
+    # intersection = list(set(false_model_list).intersection(set(good_model_list)))
+    # delete_model(intersection)
     with open(false_output_filename, 'w') as outfile:
         json.dump(sorted_all_scores_false, outfile, indent=4)
     with open(output_filename, 'w') as outfile:
@@ -682,26 +686,6 @@ def build_models2():
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
 
-def get_all_model_report():
-    """
-    使用多进程获取所有模型的报告。
-    """
-    while True:
-        model_list = []
-        model_path = MODEL_PATH
-        # 获取所有模型的文件名
-        for root, ds, fs in os.walk(model_path):
-            for f in fs:
-                full_name = os.path.join(root, f)
-                if f.endswith('.joblib'):
-                    model_list.append((full_name, f))
-        for full_name, model_name in model_list:
-            get_model_report(full_name, model_name)
-
-        # 使用进程池来并行处理每个模型的报告生成
-        with Pool(1) as p:
-            p.starmap(get_model_report, [(full_name, model_name) for full_name, model_name in model_list])
-        # time.sleep(60)  # 每隔一天重新生成一次报告
 
 
 # 将build_models和get_all_model_report用两个进程同时执行

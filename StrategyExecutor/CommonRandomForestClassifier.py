@@ -414,6 +414,10 @@ def process_model_new(rf_model_map, data):
     except Exception as e:
         traceback.print_exc()
         print(f"模型 {model_name} 加载失败 {e}")
+        # 删除模型文件
+        if os.path.exists(rf_model_map['model_path']):
+            os.remove(rf_model_map['model_path'])
+            print(f"删除模型 {model_name} 成功")
     finally:
         elapsed_time = time.time() - start
         print(f"模型 {model_name} 耗时 {elapsed_time}")
@@ -445,42 +449,31 @@ def get_all_good_data_with_model_name_list_new(data, score_threshold=0.05):
     all_selected_samples = pd.concat([res for res in results if res is not None])
     all_selected_samples.to_csv(f'../temp/all_selected_samples_{score_threshold}.csv', index=False)
     return all_selected_samples
+def write_joblib_files_to_txt(directory):
+    # 获取目录下所有以.joblib结尾的文件
+    joblib_files = [f for f in os.listdir(directory) if f.endswith('joblib')]
+
+    # 将文件名写入existed_model.txt
+    with open(os.path.join(directory, 'existed_model.txt'), 'w') as file:
+        for joblib_file in joblib_files:
+            file.write(joblib_file + '\n')
+
+    print(f"以.joblib结尾的文件名已写入existed_model.txt文件。共写入{len(joblib_files)}个文件名。")
 
 if __name__ == '__main__':
+    # write_joblib_files_to_txt('/mnt/g/model/all_models/profit_1_day_1_bad_0.3')
+    # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
+
     # origin_data_path = '../temp/real_time_price.csv'
     # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
     # get_all_good_data(data)
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
     # load_rf_model_new(0)
     data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    data1 = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-12_real_time.csv', low_memory=False, dtype={'代码': str})
+    # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-13_real_time.csv', low_memory=False, dtype={'代码': str})
     data = pd.read_csv('../train_data/2024_data_new.csv', low_memory=False, dtype={'代码': str})
     data['日期'] = pd.to_datetime(data['日期'])
-    data = data[(data['日期'] == '2024-03-12') & (data['代码'] == '605168')]
-    data1 = data1[ (data1['代码'] == '605168')]
-    # 获取data和data1中列名的交集
-    common_columns = data.columns.intersection(data1.columns)
-
-    # 找到列名相同但值不同的列
-    different_columns = []
-    for column in common_columns:
-        # 由于data和data1筛选后只包含一行，可以直接访问
-        if data[column].iloc[0] != data1[column].iloc[0]:
-            different_columns.append(column)
-            print(f"列名相同但值不同的列有：{column} {data[column].iloc[0]} {data1[column].iloc[0]}")
-
-    print("列名相同但值不同的列有：", different_columns)
-    signal_columns = [column for column in data.columns if '信号' in column]
-    # 获取data中在signal_columns中的列
-    X = data[signal_columns]
-    # 获取data中去除signal_columns中的列
-    X1 = data.drop(signal_columns, axis=1)
-
-    signal_columns = [column for column in data.columns if '信号' in column]
-    # 获取data中在signal_columns中的列
-    X2 = data1[signal_columns]
-    # 获取data中去除signal_columns中的列
-    X3 = data1.drop(signal_columns, axis=1)
+    data = data[data['日期'] >= '2024-03-01']
     # 截取data最后4000行
     # data = data.iloc[-4000:]
     # data = {}

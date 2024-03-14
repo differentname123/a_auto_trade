@@ -674,15 +674,15 @@ def load_bad_data():
                 bad_data.to_csv(file_out_put_path, index=False)
 
 if __name__ == '__main__':
-    file_path = '../daily_data_exclude_new_can_buy'
-    out_path = '../feature_data_exclude_new_can_buy'
-    generate_features_for_all_files(file_path, out_path)
-    load_bad_data()
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # out_path = '../feature_data_exclude_new_can_buy'
+    # generate_features_for_all_files(file_path, out_path)
+    # load_bad_data()
 
-    # file_path = '../feature_data_exclude_new_can_buy/东方电子_000682.txt'
+    file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
     # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
-    # data = pd.read_csv(file_path)
-    # new_data = data_filter(data)
+    data = pd.read_csv(file_path)
+    new_data = data_filter(data)
     # print(new_data)
     # # 找到data比new_data多的数据
     # print(data[~data.isin(new_data).all(1)])
