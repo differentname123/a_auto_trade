@@ -20,7 +20,8 @@ import numpy as np
 import pandas as pd
 
 from InfoCollector.save_all import save_all_data_mul
-from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json
+from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json, load_data_filter, \
+    load_file_chunk_filter
 from itertools import combinations
 import talib
 import warnings
@@ -538,10 +539,15 @@ def generate_features_for_file(file_path, save_path):
     :param save_path: str, 特征数据保存的目标目录路径。生成的文件将以源文件名保存在此路径下。
     :return: None
     """
-    data = load_data(file_path, end_date='2024-03-01')
-    new_data = get_data_feature(data)
-    if new_data is not None:
-        new_data.to_csv(os.path.join(save_path, os.path.basename(file_path)), index=False)
+    data_list = load_data_filter(file_path, end_date='2024-03-01')
+    new_data_list = []
+    for data in data_list:
+        new_data = get_data_feature(data)
+        new_data_list.append(new_data)
+    if len(new_data_list) != 0:
+        new_data = pd.concat(new_data_list)
+        if new_data is not None:
+            new_data.to_csv(os.path.join(save_path, os.path.basename(file_path)), index=False)
 
 def generate_features_for_all_files(source_path, save_path):
     """
@@ -577,7 +583,7 @@ def load_and_merge_data(batch):
     cpu_count = multiprocessing.cpu_count()
     pool = multiprocessing.Pool(processes=10)
     file_chunks = [batch[i::cpu_count] for i in range(cpu_count)]
-    chunk_dfs = pool.map(load_file_chunk, file_chunks)
+    chunk_dfs = pool.map(load_file_chunk_filter, file_chunks)
     pool.close()
     pool.join()
     try:
@@ -590,27 +596,7 @@ def load_and_merge_data(batch):
         print(f'合并失败，错误为{e}')
     return None
 
-def data_filter(data):
-    """
-    过滤数据，过滤掉涨跌幅大于0，且开盘、收盘、低价、高价之间最大相差小于0.01的数据。
 
-    :param data: pandas DataFrame，包含市场数据，预期有涨跌幅、开盘、收盘、最低价、最高价等列。
-    :return: 过滤后的pandas DataFrame。
-    """
-    # 检查必要的列是否存在
-    necessary_columns = ['涨跌幅', '开盘', '收盘', '最低', '最高']
-    for column in necessary_columns:
-        if column not in data.columns:
-            raise ValueError(f"缺少必要的列：{column}")
-
-    # 计算开盘、收盘、最低价、最高价之间的最大差异
-    price_range = data[['开盘', '收盘', '最低', '最高']].max(axis=1) - data[['开盘', '收盘', '最低', '最高']].min(axis=1)
-
-    # 应用过滤条件
-    filtered_data = data[(data['涨跌幅'] <= 0) | (price_range >= 0.01)]
-    filtered_data = filtered_data[(filtered_data['涨跌幅'] <= (filtered_data['Max_rate'] - 0.01 / filtered_data['收盘'].shift(1) * 100))]
-
-    return filtered_data
 
 
 def load_bad_data():
@@ -634,9 +620,11 @@ def load_bad_data():
     else:
         print('开始加载已有的所有数据')
         all_data_df = pd.read_csv(all_data_file_path)
+    # return
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
+    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    all_data_df_2024.to_csv('../train_data/2024_data.csv')
     all_data_df = all_data_df[all_data_df['日期'] <= pd.Timestamp('2024-01-01')]
-    # all_data_df.to_csv('../train_data/2024_data.csv')
     # return
     new_data = data_filter(all_data_df)
     print(f'加载所有数据耗时：{time.time() - start_time:.2f}秒 过滤前数据量为{len(all_data_df)} 过滤后数据量为{len(new_data)}')
@@ -645,7 +633,7 @@ def load_bad_data():
     results_file_path = '../final_zuhe/other/all_data_performance.json'
     performance_results = read_json(results_file_path)
 
-    ratio_list = [0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7]
+    ratio_list = [0.2, 0.25, 0.3, 0.4, 0.5]
     profit_list = [1, 2, 3, 4, 5]
     day_list = [1, 2]
 
@@ -673,16 +661,75 @@ def load_bad_data():
                 print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
                 bad_data.to_csv(file_out_put_path, index=False)
 
+def data_filter(data):
+    """
+    过滤数据，过滤掉涨跌幅大于0，且开盘、收盘、低价、高价之间最大相差小于0.01的数据。
+
+    :param data: pandas DataFrame，包含市场数据，预期有涨跌幅、开盘、收盘、最低价、最高价等列。
+    :return: 过滤后的pandas DataFrame。
+    """
+    # 检查必要的列是否存在
+    necessary_columns = ['涨跌幅', '开盘', '收盘', '最低', '最高']
+    for column in necessary_columns:
+        if column not in data.columns:
+            raise ValueError(f"缺少必要的列：{column}")
+
+    # 计算开盘、收盘、最低价、最高价之间的最大差异
+    price_range = data[['开盘', '收盘', '最低', '最高']].max(axis=1) - data[['开盘', '收盘', '最低', '最高']].min(axis=1)
+
+    # 应用过滤条件
+    filtered_data = data[(data['涨跌幅'] <= 0) | (price_range >= 0.01)]
+    filtered_data = filtered_data[(filtered_data['涨跌幅'] <= (filtered_data['Max_rate'] - 0.01 / filtered_data['收盘'].shift(1) * 100))]
+
+    return filtered_data
+
+def data_filter_for_single(data):
+    """
+    针对单个股票数据进行过滤，发现异常数据，直接删除后面一个月的数据
+
+    :param data: pandas DataFrame，包含市场数据，预期有涨跌幅、开盘、收盘、最低价、最高价等列。
+    :return: 过滤后的pandas DataFrame。
+    """
+    # 检查必要的列是否存在
+    necessary_columns = ['涨跌幅', '开盘', '收盘', '最低', '最高']
+    for column in necessary_columns:
+        if column not in data.columns:
+            raise ValueError(f"缺少必要的列：{column}")
+
+    # 计算开盘、收盘、最低价、最高价之间的最大差异
+    price_range = data[['开盘', '收盘', '最低', '最高']].max(axis=1) - data[['开盘', '收盘', '最低', '最高']].min(axis=1)
+
+    # 应用过滤条件
+    filtered_data = data[(data['涨跌幅'] <= 0) | (price_range >= 0.01)]
+    filtered_data = filtered_data[(filtered_data['涨跌幅'] <= (filtered_data['Max_rate'] - 0.01 / filtered_data['收盘'].shift(1) * 100))]
+
+    return filtered_data
+
+
 if __name__ == '__main__':
+    #
+    # for root, _, files in os.walk('../daily_data_exclude_new_can_buy'):
+    #     for file in files:
+    #         full_path = os.path.join(root, file)
+    # full_path = '../daily_data_exclude_new_can_buy/北讯退_002359.txt'
+    # data = load_data_filter(full_path, end_date='2024-03-01')
+
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # # 获取目录下所有文件的完整路径
+    # all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    # # all_files = all_files[:100]
+    # all_data_df = load_and_merge_data(all_files)
+    # print(all_data_df)
+
     # file_path = '../daily_data_exclude_new_can_buy'
     # out_path = '../feature_data_exclude_new_can_buy'
     # generate_features_for_all_files(file_path, out_path)
-    # load_bad_data()
+    load_bad_data()
 
-    file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
-    # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
-    data = pd.read_csv(file_path)
-    new_data = data_filter(data)
+    # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
+    # # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
+    # data = pd.read_csv(file_path)
+    # new_data = data_filter(data)
     # print(new_data)
     # # 找到data比new_data多的数据
     # print(data[~data.isin(new_data).all(1)])

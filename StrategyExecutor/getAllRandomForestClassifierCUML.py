@@ -23,6 +23,8 @@ import cupy as cp
 import cudf
 from sklearn.model_selection import ParameterGrid
 
+from StrategyExecutor.common import downcast_dtypes
+
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
@@ -67,7 +69,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     param_grid = {
         'RandomForest': {
             'n_estimators': [100, 250, 300, 400, 500, 600],
-            'max_depth': [10, 20, 30, 400],
+            'max_depth': [10, 20, 30, 40, 100],
             'min_samples_split': [2, 3, 4, 5, 6],
             'min_samples_leaf': [1, 2, 3, 4]
         }
@@ -76,7 +78,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     params_list = list(ParameterGrid(param_grid))
     random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)}")
-    save_path = D_MODEL_PATH
+    save_path = G_MODEL_PATH
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
@@ -96,39 +98,6 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         exist_model_file_path = os.path.join(save_path, 'existed_model.txt')
         clf = RandomForestClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
-
-def downcast_dtypes(df):
-    """
-    Downcast the data types of a cuDF DataFrame to the smallest possible type.
-
-    Parameters:
-        df (cudf.DataFrame): The input DataFrame.
-
-    Returns:
-        cudf.DataFrame: The DataFrame with downcasted data types.
-    """
-    dtypes = df.dtypes
-    for col in df.columns:
-        if dtypes[col] == 'object':
-            # 如果列是字符串类型,则不进行转换
-            continue
-        elif str(dtypes[col]).startswith('float'):
-            # 对于浮点类型,尝试转换为float32或float16
-            if df[col].max() < np.finfo(np.float32).max and df[col].min() > np.finfo(np.float32).min:
-                df[col] = df[col].astype(np.float32)
-            else:
-                df[col] = df[col].astype(np.float16)
-        elif str(dtypes[col]).startswith('int'):
-            # 对于整数类型,尝试转换为int8, int16或int32
-            max_value = df[col].max()
-            min_value = df[col].min()
-            if max_value < np.iinfo(np.int8).max and min_value > np.iinfo(np.int8).min:
-                df[col] = df[col].astype(np.int8)
-            elif max_value < np.iinfo(np.int16).max and min_value > np.iinfo(np.int16).min:
-                df[col] = df[col].astype(np.int16)
-            else:
-                df[col] = df[col].astype(np.int32)
-    return df
 
 def train_all_model(file_path_path, profit=1, thread_day_list=None, is_skip=True):
     """
@@ -176,9 +145,9 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv']
+    origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, profit=1, thread_day_list=[2], is_skip=True)
+        train_all_model(origin_data_path, profit=1, thread_day_list=[1, 2], is_skip=True)
 
 if __name__ == '__main__':
     build_models()

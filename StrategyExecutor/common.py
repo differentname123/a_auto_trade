@@ -145,6 +145,52 @@ def load_file_chunk(file_chunk, start_date='2018-01-01' ,end_date='2024-03-01'):
         # traceback.print_exc()
         return pd.DataFrame()
 
+def downcast_dtypes(df):
+    """
+    Downcast the data types of a cuDF DataFrame to the smallest possible type.
+
+    Parameters:
+        df (cudf.DataFrame): The input DataFrame.
+
+    Returns:
+        cudf.DataFrame: The DataFrame with downcasted data types.
+    """
+    dtypes = df.dtypes
+    for col in df.columns:
+        if dtypes[col] == 'object':
+            # 如果列是字符串类型,则不进行转换
+            continue
+        elif str(dtypes[col]).startswith('float'):
+            # 对于浮点类型,尝试转换为float32或float16
+            if df[col].max() < np.finfo(np.float32).max and df[col].min() > np.finfo(np.float32).min:
+                df[col] = df[col].astype(np.float32)
+            else:
+                df[col] = df[col].astype(np.float16)
+        elif str(dtypes[col]).startswith('int'):
+            # 对于整数类型,尝试转换为int8, int16或int32
+            max_value = df[col].max()
+            min_value = df[col].min()
+            if max_value < np.iinfo(np.int8).max and min_value > np.iinfo(np.int8).min:
+                df[col] = df[col].astype(np.int8)
+            elif max_value < np.iinfo(np.int16).max and min_value > np.iinfo(np.int16).min:
+                df[col] = df[col].astype(np.int16)
+            else:
+                df[col] = df[col].astype(np.int32)
+    return df
+
+def load_file_chunk_filter(file_chunk, start_date='2018-01-01' ,end_date='2024-03-01'):
+    """
+    加载文件块的数据
+    """
+    try:
+        chunk_data = [load_data_filter(fname, start_date=start_date, end_date=end_date) for fname in file_chunk]
+        # 将chunk_data铺平从二维列表转换为一维列表
+        chunk_data = [item for sublist in chunk_data for item in sublist]
+        return pd.concat(chunk_data)
+    except Exception:
+        # traceback.print_exc()
+        return pd.DataFrame()
+
 def write_json(file_path, data):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False)
@@ -187,6 +233,61 @@ def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data.reset_index(drop=True, inplace=True)
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
+
+
+def load_data_filter(file_path, start_date='2018-01-01', end_date='2024-01-01'):
+    """
+    带有过滤性的加载数据，最后会返回多段数据
+    :param file_path: 文件路径
+    :param start_date: 开始日期
+    :param end_date: 结束日期
+    :return: 分段的数据列表
+    """
+    data = pd.read_csv(file_path, low_memory=False)
+    name, code = parse_filename(file_path)
+    if '时间' in data.columns:
+        data = data.rename(columns={'时间': '日期'})
+    data['日期'] = pd.to_datetime(data['日期'])
+    data['名称'] = name
+    data['代码'] = code
+    data.sort_values(by='日期', ascending=True, inplace=True)
+
+    # 时间过滤
+    data = data[(data['日期'] >= pd.to_datetime(start_date)) & (data['日期'] <= pd.to_datetime(end_date))]
+    # 重置索引
+    data.reset_index(drop=True, inplace=True)
+
+    # 异常数据过滤条件
+    conditions = (data['收盘'] < 1) | (data['涨跌幅'] > 11) | (data['涨跌幅'] < -11) | (data['振幅'] > 21)
+
+    # 标记异常数据
+    data['异常'] = conditions
+
+    # 分段逻辑，基于异常数据的索引
+    segments = []
+    if not data.empty:
+        last_index = data.index[0] - 1  # 初始化为第一个索引之前的位置
+    else:
+        return segments  # 如果数据为空，则直接返回空列表
+
+    for index, row in data.iterrows():
+        if row['异常']:
+            if index - last_index > 1:  # 确保两个异常数据不是相邻的
+                segments.append(data[last_index + 1:index])  # 从上一个异常之后到当前异常之前
+            last_index = index
+
+    if last_index + 1 < data.index[-1]:  # 确保最后一段数据被添加
+        segments.append(data[last_index + 1:])
+
+    # 移除异常标记列
+    for segment in segments:
+        segment.drop(columns=['异常'], inplace=True)
+
+    # 过滤掉segment长度小于26的数据
+    segments = [segment for segment in segments if len(segment) >= 26]
+
+
+    return segments
 
 def T_indicators(data):
     """
