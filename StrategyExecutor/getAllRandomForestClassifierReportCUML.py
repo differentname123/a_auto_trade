@@ -91,8 +91,7 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
 
     daily_precision = {}
     daily_precision_false = {}
-    if precision >= thread_ratio or precision_false >= thread_ratio:
-
+    if precision >= thread_ratio:
         for date in unique_dates:
             date_mask = selected_data['日期'] == date
             date_selected_true = selected_true[high_confidence_true]
@@ -104,6 +103,7 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
                 'false_count': int(date_count - date_true_count),
                 'true_count': int(date_true_count)
             }
+    if precision_false >= thread_ratio:
         for date in unique_dates_false:
             date_mask_false = selected_data_false['日期'] == date
             date_selected_false = selected_false[high_confidence_false]
@@ -122,7 +122,6 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
     if this_key not in temp_dict_result:
         temp_dict_result[this_key] = []
     temp_dict_result[this_key].append(temp_dict)
-
     return temp_dict_result
 
 
@@ -227,11 +226,11 @@ def process_cha_zhi_threshold(data, y_pred_proba, y_test, total_samples, cha_zhi
     if this_key not in temp_dict_result:
         temp_dict_result[this_key] = []
     temp_dict_result[this_key].append(temp_dict)
-
     return temp_dict_result
 
 def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values, cha_zhi_values, thread_ratio,
                        this_key_map, temp_dict_result):
+    start_time = time.time()
     for abs_threshold in abs_threshold_values:
         this_key = 'tree_0_abs_1'
         if not this_key_map[this_key]:
@@ -239,15 +238,7 @@ def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_
 
         temp_dict_result = process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_threshold, 0,
                                                  thread_ratio, this_key, temp_dict_result)
-
-    for cha_zhi_threshold in cha_zhi_values:
-        this_key = 'tree_0_cha_zhi_1'
-        if not this_key_map[this_key]:
-            break
-
-        temp_dict_result = process_cha_zhi_threshold(data, y_pred_proba, y_test, total_samples, cha_zhi_threshold, 0,
-                                                     thread_ratio, this_key, temp_dict_result)
-
+    print(f"abs 耗时 {time.time() - start_time:.2f}秒 模型 abs 的报告已生成 平均耗时: {(time.time() - start_time)/ len(abs_threshold_values):.2f}秒")
     return temp_dict_result
 
 
@@ -261,24 +252,22 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         start_time = time.time()
         report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
         result_dict = load_existing_report(report_path)
-        thread_ratio = 0.95
+        thread_ratio = 0.9
         new_temp_dict = {}
-
-        model = load_model(abs_name, model_name)
-        if model is None:
-            return
-
-        abs_threshold_values = np.arange(0.5, 1, 0.05)
-        cha_zhi_values = np.arange(0.01, 1, 0.05)
-        this_key_map = {
-            'tree_1_abs_1': False, 'tree_0_abs_1': True,
-            'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
-        }
         if is_report_exists(result_dict, model_name, file_path):
             new_temp_dict[file_path] = result_dict[model_name][file_path]
             print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
             return
 
+        model = load_model(abs_name, model_name)
+        if model is None:
+            return
+        abs_threshold_values = np.arange(0.5, 1, 0.01)
+        cha_zhi_values = np.arange(0.01, 1, 0.05)
+        this_key_map = {
+            'tree_1_abs_1': False, 'tree_0_abs_1': True,
+            'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
+        }
         file_start_time = time.time()
         temp_dict_result = {}
         print("加载数据{}...".format(file_path))
@@ -287,21 +276,21 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         key_name = f'后续{thread_day}日最高价利润率'
         y_test = data[key_name] >= profit
         total_samples = len(y_test)
+        print(f"处理数据耗时: {time.time() - file_start_time:.2f}秒")
 
 
         if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
+            start = time.time()
             y_pred_proba = model.predict_proba(X_test)
+            print(f" 预测耗时: {time.time() - start:.2f}秒 {model_name}")
             temp_dict_result = process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values,
                                                   cha_zhi_values, thread_ratio, this_key_map, temp_dict_result)
-
-        update_this_key_map(temp_dict_result, this_key_map, file_path, model_name)
+        print(f"生成报告耗时: {time.time() - file_start_time:.2f}秒 获取模型 {model_name} 对于文件 {file_path} 的报告")
         new_temp_dict[file_path] = temp_dict_result
-        print(f"耗时 {time.time() - file_start_time:.2f}秒 模型 {model_name} 对于文件 {file_path} 的报告已生成")
-
         result_dict[model_name] = new_temp_dict
         save_report(report_path, result_dict)
         end_time = time.time()
-        print(f"模型报告已生成: {model_name}，耗时 {end_time - start_time:.2f} 秒\n\n")
+        print(f"整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name}，\n\n")
 
         return result_dict
     except Exception as e:

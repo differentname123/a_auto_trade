@@ -685,9 +685,158 @@ def build_models2():
     origin_data_path_list = ['../daily_all_100_bad_0.0/1.txt']
     for origin_data_path in origin_data_path_list:
         train_all_model(origin_data_path, [2], is_skip=True)
+def statistics(daily_precision):
+    result = {}
+    min_day = 0
+    best_date_count = 0
+    middle_date_count = 0
+    best_num_count = 0
+    middle_num_count = 0
+    best_num_true_count = 0
+    middle_num_true_count = 0
+    total_date_count = len(daily_precision)
+    single_date_count = 0
+    total_num_count = 0
+    for date, precision in daily_precision.items():
+        total_num_count += precision['count']
+    for date, precision in daily_precision.items():
+        if precision['count'] > min_day:
+            single_date_count += 1
+            if precision['precision'] > 0.9:
+                best_date_count += 1
+                best_num_count += precision['count']
+                best_num_true_count += precision['true_count']
+            if precision['precision'] > 0.9 or precision['false_count'] <= 1:
+                middle_date_count += 1
+                middle_num_count += precision['count']
+                middle_num_true_count += precision['true_count']
+
+    best_date_ratio = best_date_count / total_date_count if total_date_count > 0 else 0  # 最好日期的比例
+    middle_date_ratio = middle_date_count / total_date_count if total_date_count > 0 else 0
+    best_num_ratio = best_num_count / total_num_count if total_num_count > 0 else 0 # 最好日期对应的样本数比例
+    middle_num_ratio = middle_num_count / total_num_count if total_num_count > 0 else 0
+    best_num_true_score = best_num_true_count / best_num_count if best_num_count > 0 else 0
+    middle_num_true_score = middle_num_true_count / middle_num_count if middle_num_count > 0 else 0
+    best_date_score = best_date_count / single_date_count if single_date_count > 0 else 0
+    middle_date_score = middle_date_count / single_date_count if single_date_count > 0 else 0
+    single_date_ratio = single_date_count / total_date_count if total_date_count > 0 else 0
+    result['single_date_ratio'] = single_date_ratio
+    result['single_date_count'] = single_date_count
+    result['best_date_score'] = best_date_score
+    result['middle_date_score'] = middle_date_score
+    result['best_num_true_score'] = best_num_true_score
+    result['middle_num_true_score'] = middle_num_true_score
+    result['best_num_true_count'] = best_num_true_count
+    result['middle_num_true_count'] = middle_num_true_count
+    result['best_date_ratio'] = best_date_ratio
+    result['middle_date_ratio'] = middle_date_ratio
+    result['best_num_ratio'] = best_num_ratio
+    result['middle_num_ratio'] = middle_num_ratio
+    result['total_date_count'] = total_date_count
+    result['total_num_count'] = total_num_count
+    result['best_date_count'] = best_date_count
+    result['middle_date_count'] = middle_date_count
+    result['best_num_count'] = best_num_count
+    result['middle_num_count'] = middle_num_count
+    return result
+
+def deal_reports(report_list, min_unique_dates=3, sort_key='middle_score', sort_key2='date_count'):
+    result_list = []
+    for report in report_list:
+        result = {}
+        result['tree_threshold'] = report['tree_threshold']
+        result['cha_zhi_threshold'] = report['cha_zhi_threshold']
+        result['abs_threshold'] = report['abs_threshold']
+        result['precision'] = report['precision']
+        daily_precision = report['daily_precision']
+        total_count = len(daily_precision)
+        middle_count = 0
+        best_count = 0
+        for date, precision in daily_precision.items():
+            if precision['precision'] > 0.9:
+                best_count += 1
+            if precision['precision'] > 0.9 or precision['false_count'] <= 1:
+                middle_count += 1
+        # best_count = total_count
+        # middle_count = total_count
+        middle_score = middle_count / total_count if total_count > 0 else 0
+        best_score = best_count / total_count if total_count > 0 else 0
+        result['best_score'] = best_score
+        result['middle_score'] = middle_score
+        result['date_count'] = total_count
+        result['best_count'] = best_count
+        result['middle_count'] = middle_count
+        result['chazhi_count'] = middle_count - best_count
+        result_list.append(result)
+    # 删除middle_score为0的项
+    result_list = [item for item in result_list if item[sort_key] > 0]
+
+    # 删除date_count小于4的项
+    result_list = [item for item in result_list if item['date_count'] >= min_unique_dates]
+
+    # # 删除precision小于0.9的项
+    # result_list = [item for item in result_list if item['best_score'] > 0.9]
+
+    # 先按照date_count降序排序，再按照middle_score降序排序
+    result_list = sorted(result_list, key=lambda x: (x[sort_key], x[sort_key2]), reverse=True)
+    return result_list
+
+def sort_new():
+    """
+    新的排序结果
+    :return:
+    """
+    file_path = '../model/reports'
+    good_model_list = []
+    sort_key = 'date_count'
+    sort_key2 = 'date_count'
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            if f.endswith('.json'):
+                fullname = os.path.join(root, f)
+                # fullname = '../model/reports\smote_RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.3_thread_day_1_true_ratio_0.22435625692288758_class_weight_{True_ 1, False_ 1}_max_depth_30_min_samples_leaf_2_min_samples_split_2_n_estimators_250.joblib_report.json'
+                with open(fullname, 'r') as file:
+                    try:
+                        result_dict = json.load(file)
+                        for model_name, report_value in result_dict.items():
+                            if 'thread_day_1' not in model_name:
+                                continue
+                            for test_data_path, detail_report in report_value.items():
+                                if 'all' in test_data_path:
+                                    temp_dict = {}
+                                    max_score = 0
+                                    date_count = 0
+                                    precision = 0
+                                    temp_dict['model_name'] = model_name
+                                    for this_key, report_list in detail_report.items():
+                                        result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
+                                        temp_dict[this_key] = result_list
+                                        if result_list:
+                                            if result_list[0][sort_key] > max_score:
+                                                max_score = result_list[0][sort_key]
+                                                date_count = result_list[0]['date_count']
+                                                precision = result_list[0]['precision']
+                                    temp_dict['max_score'] = max_score
+                                    temp_dict['date_count'] = date_count
+                                    temp_dict['precision'] = precision
+                                    good_model_list.append(temp_dict)
+                    except Exception as e:
+                        traceback.print_exc()
+                        pass
+    # 将good_model_list先按照date_count降序排序再按照max_score降序排序
+    good_model_list = sorted(good_model_list, key=lambda x: (x['max_score'], x['date_count']), reverse=True) # 10个好的 最大46
+    with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'w') as outfile:
+        json.dump(good_model_list, outfile, indent=4)
+
+
+
+
 
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    sort_all_report()
+    # file = '/mnt/w/project/python_project/a_auto_trade/train_data/2024_data.csv'
+    # data = pd.read_csv(file, low_memory=False)
+    sort_new()
+    # sort_all_report()
