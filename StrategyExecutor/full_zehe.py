@@ -38,8 +38,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
-from sympy.physics.quantum.identitysearch import scipy
 import matplotlib
 
 from InfoCollector.save_all import save_all_data_mul, get_price, fix_st, save_index_data
@@ -1648,25 +1646,6 @@ def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=mix):
     all_df.to_csv('../back/complex/all_df_full.csv', index=False)
 
 
-def calculate_normal_distribution(data):
-    """
-    计算数据的正态分布。
-
-    Args:
-      data: 数据列表，每个元素都是浮点数。
-
-    Returns:
-      均值、标准差、正态分布概率密度函数。
-    """
-
-    # 计算均值和标准差
-    mean = np.mean(data)
-    std = np.std(data)
-
-    # 生成正态分布概率密度函数
-    pdf = scipy.stats.norm(mean, std).pdf
-
-    return mean, std, pdf
 
 
 def simulate_strategy_profitable(data, sell_thresholds):
@@ -2459,7 +2438,7 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     # 保留filtered_stock_data_df的后100个数据
     # filtered_stock_data_df = filtered_stock_data_df
     # all_rf_model_list = load_rf_model(MODEL_PATH)
-    plus_threshold = 0
+    plus_threshold = 50
 
     # 将满足条件的DataFrame分成100个子列表
     stock_data_lists = np.array_split(filtered_stock_data_df, 96)
@@ -3470,7 +3449,7 @@ def get_RF_real_time_price(file_path, target_date, all_rf_model_list):
 
 def save_and_analyse_all_data_mul_real_time_RF(target_date):
     save_and_analyse_all_data_RF_real_time_thread_new(target_date)
-    save_and_analyse_all_data_RF_real_time_thread(target_date)
+    # save_and_analyse_all_data_RF_real_time_thread(target_date)
 
 
 def fix_RF_data(file_path='../final_zuhe/min_data/2024-01-02_RF_target_thread.csv'):
@@ -3635,7 +3614,7 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    save_and_analyse_all_data_mul_real_time_RF('2024-03-13')
+    save_and_analyse_all_data_mul_real_time_RF('2024-03-15')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')

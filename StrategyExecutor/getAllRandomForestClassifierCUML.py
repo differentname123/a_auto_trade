@@ -147,7 +147,7 @@ def build_models():
     """
     origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, profit=1, thread_day_list=[1, 2], is_skip=True)
+        train_all_model(origin_data_path, profit=1, thread_day_list=[1], is_skip=True)
 
 if __name__ == '__main__':
     build_models()
