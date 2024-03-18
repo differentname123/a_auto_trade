@@ -776,7 +776,7 @@ def statistics_optimized(daily_precision, min_unique_dates=4):
     return result
 
 
-def deal_reports(report_list, min_unique_dates=3, sort_key='middle_score', sort_key2='date_count'):
+def deal_reports(report_list, min_unique_dates=3, sort_key='date_count', sort_key2='date_count'):
     result_list = []
     for report in report_list:
         result = {}
@@ -811,8 +811,8 @@ def sort_new():
                     try:
                         result_dict = json.load(file)
                         for model_name, report_value in result_dict.items():
-                            if 'thread_day_1' not in model_name:
-                                continue
+                            # if 'thread_day_1' not in model_name:
+                            #     continue
                             for test_data_path, detail_report in report_value.items():
                                 if 'all' in test_data_path:
                                     temp_dict = {}

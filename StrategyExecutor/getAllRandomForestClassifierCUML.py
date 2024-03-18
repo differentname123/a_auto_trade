@@ -30,7 +30,7 @@ G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_OTHER = '../model/other'
-
+MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/reports'
 
 def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path):
     """
@@ -49,7 +49,7 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_fil
     print(f"开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, model_file_path)
-    print(f"耗时 {time.time() - start_time} 模型已保存: {model_file_path}")
+    print(f"耗时 {time.time() - start_time} 模型已保存: {model_file_path}\n\n")
     with open(exist_model_file_path, 'a') as f:
         f.write(model_name + '\n')
 
@@ -69,7 +69,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     param_grid = {
         'RandomForest': {
             'n_estimators': [100, 250, 300, 400, 500, 600],
-            'max_depth': [10, 20, 30, 40, 100],
+            'max_depth': [10, 20, 30, 40, 100, 200, 400],
             'min_samples_split': [2, 3, 4, 5, 6],
             'min_samples_leaf': [1, 2, 3, 4]
         }
@@ -78,7 +78,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     params_list = list(ParameterGrid(param_grid))
     random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)}")
-    save_path = G_MODEL_PATH
+    save_path = D_MODEL_PATH
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
@@ -145,9 +145,17 @@ def build_models():
     """
     训练所有模型
     """
-    origin_data_path_list = ['../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv', '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv', '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
+    origin_data_path_list = [
+        '../train_data/profit_1_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
+        '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
+        '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
+        '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, profit=1, thread_day_list=[1], is_skip=True)
+        train_all_model(origin_data_path, profit=1, thread_day_list=[1,2], is_skip=True)
 
 if __name__ == '__main__':
     build_models()

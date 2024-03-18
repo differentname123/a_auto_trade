@@ -401,7 +401,7 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     #     print(process_model_new(model, data))
 
     # 使用Pool对象来并行处理
-    with Pool(processes=5) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
+    with Pool(processes=10) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
         results = pool.starmap(process_model_new, [(model, data) for model in all_rf_model_list])
 
     # 过滤掉None结果并合并DataFrame
@@ -409,8 +409,12 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     all_selected_samples.to_csv(f'../temp/all_selected_samples_{date_count_threshold}.csv', index=False)
     return all_selected_samples
 def write_joblib_files_to_txt(directory):
-    # 获取目录下所有以.joblib结尾的文件
-    joblib_files = [f for f in os.listdir(directory) if f.endswith('joblib')]
+    # 获取目录下所有以joblib结尾的文件,如果是目录还需要继续递归
+    joblib_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.joblib'):
+                joblib_files.append(file)
 
     # 将文件名写入existed_model.txt
     with open(os.path.join(directory, 'existed_model.txt'), 'w') as file:
@@ -420,18 +424,21 @@ def write_joblib_files_to_txt(directory):
     print(f"以.joblib结尾的文件名已写入existed_model.txt文件。共写入{len(joblib_files)}个文件名。")
 
 if __name__ == '__main__':
-    # write_joblib_files_to_txt('/mnt/g/model/all_models/profit_1_day_1_bad_0.3')
+    # write_joblib_files_to_txt('/mnt/d/model/all_models/')
+    # write_joblib_files_to_txt('/mnt/g/model/all_models/')
     # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
 
     # origin_data_path = '../temp/real_time_price.csv'
     # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
     # get_all_good_data(data)
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    # all_rf_model_list = load_rf_model_new(150)
+    all_rf_model_list = load_rf_model_new(10)
+    # 将all_rf_model_list按照score升序排序
+    all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-13_real_time.csv', low_memory=False, dtype={'代码': str})
-    # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../train_data/2024_data_all.csv')
+    data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../train_data/2024_data_all.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['日期'] >= '2024-03-01']
     # 截取data最后4000行

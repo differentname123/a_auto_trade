@@ -17,9 +17,11 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Process, Pool
 import cudf
+import pandas as pd
 from joblib import dump, load
 import numpy as np
 from StrategyExecutor.common import low_memory_load, downcast_dtypes
+from StrategyExecutor.getAllRandomForestClassifierReportSort import deal_reports
 
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
@@ -49,9 +51,10 @@ def load_model(abs_name, model_name):
         print(f"模型 {model_name} 加载成功。")
         return model
     except Exception as e:
+        traceback.print_exc()
         if os.path.exists(abs_name):
-            os.remove(abs_name)
-            print(f"模型 {model_name} 加载失败，跳过。")
+            # os.remove(abs_name)
+            print(f"模型 {abs_name} 加载失败，跳过。")
         print(f"模型 {model_name} 不存在，跳过。")
         return None
 
@@ -272,7 +275,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         temp_dict_result = {}
         print("加载数据{}...".format(file_path))
         profit = int(model_name.split('profit_')[1].split('_')[0])
-        thread_day = int(model_name.split('day_')[1].split('_')[0])
+        thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
         key_name = f'后续{thread_day}日最高价利润率'
         y_test = data[key_name] >= profit
         total_samples = len(y_test)
@@ -304,19 +307,28 @@ def get_all_model_report():
     使用多进程获取所有模型的报告。
     """
     while True:
-        model_list = []
-        model_path = D_MODEL_PATH
-        # 获取所有模型的文件名
-        for root, ds, fs in os.walk(model_path):
+        # 获取MODEL_REPORT_PATH下所有模型的报告
+        report_list = []
+        for root, ds, fs in os.walk(MODEL_REPORT_PATH):
             for f in fs:
-                full_name = os.path.join(root, f)
-                if f.endswith('joblib'):
-                    model_list.append((full_name, f))
+                if f.endswith('report.json'):
+                    report_list.append(f.split('_report.json')[0])
+        model_list = []
+        for model_path in MODEL_PATH_LIST:
+        # 获取所有模型的文件名
+            for root, ds, fs in os.walk(model_path):
+                for f in fs:
+                    full_name = os.path.join(root, f)
+                    if f.endswith('joblib') and f not in report_list:
+                        model_list.append((full_name, f))
         # 随机打乱model_list
         # random.shuffle(model_list)
+        start_time = time.time()
         file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
         print(f"开始处理数据集: {file_path}")
         data = cudf.read_csv(file_path)
+        # data = low_memory_load(file_path)
+        # data = cudf.DataFrame(data)
         memory = data.memory_usage(deep=True).sum()
         print(f"原始数据集内存: {memory / 1024 ** 2:.2f} MB")
         data = downcast_dtypes(data)
@@ -324,6 +336,8 @@ def get_all_model_report():
         print(f"转换后数据集内存: {memory / 1024 ** 2:.2f} MB")
         signal_columns = [column for column in data.columns if '信号' in column]
         X_test = data[signal_columns]
+        data = data.drop(signal_columns, axis=1)
+        print(f"待训练的模型数量: {len(model_list)} 耗时: {time.time() - start_time:.2f}秒")
         for full_name, model_name in model_list:
             get_model_report(full_name, model_name, file_path, data, X_test)
 
