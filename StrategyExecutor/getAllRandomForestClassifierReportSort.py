@@ -24,6 +24,8 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
+from StrategyExecutor.CommonRandomForestClassifier import load_rf_model_new
+
 D_MODEL_PATH = 'D:\model/all_models'
 G_MODEL_PATH = 'G:\model/all_models'
 MODEL_PATH = '../model/all_models'
@@ -788,6 +790,7 @@ def deal_reports(report_list, min_unique_dates=3, sort_key='date_count', sort_ke
         if statistics_result:
             for k, v in statistics_result.items():
                 result[k] = v
+            result['true_stocks_set'] = report['true_stocks_set']
             result_list.append(result)
     # 先按照date_count降序排序，再按照middle_score降序排序
     result_list = sorted(result_list, key=lambda x: (x[sort_key], x[sort_key2]), reverse=True)
@@ -821,6 +824,7 @@ def sort_new():
                                     precision = 0
                                     abs_threshold = 0
                                     min_day = 0
+                                    true_stocks_set = []
                                     temp_dict['model_name'] = model_name
                                     for this_key, report_list in detail_report.items():
                                         result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
@@ -832,11 +836,13 @@ def sort_new():
                                                 precision = result_list[0]['true_num_score']
                                                 abs_threshold = result_list[0]['abs_threshold']
                                                 min_day = result_list[0]['min_day']
+                                                true_stocks_set = result_list[0]['true_stocks_set']
                                     temp_dict['max_score'] = max_score
                                     temp_dict['date_count'] = date_count
                                     temp_dict['precision'] = precision
                                     temp_dict['abs_threshold'] = abs_threshold
                                     temp_dict['min_day'] = min_day
+                                    temp_dict['true_stocks_set'] = true_stocks_set
                                     good_model_list.append(temp_dict)
                     except Exception as e:
                         traceback.print_exc()
@@ -855,3 +861,4 @@ def sort_new():
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     sort_new()
+    all_rf_model_list = load_rf_model_new(0, True)

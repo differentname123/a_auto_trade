@@ -106,7 +106,7 @@ def infer_dtype_convert(dtype):
     Helper function to convert data types for memory efficiency.
     """
     if dtype == 'float64':
-        return 'float16'
+        return 'float32'
     elif dtype == 'int64':
         return 'int8'
     else:
@@ -128,6 +128,9 @@ def low_memory_load(file_path):
 
     # Create a dictionary of column names and their optimized data types
     dtype_dict = {col: infer_dtype_convert(str(temp_df[col].dtype)) for col in temp_df.columns}
+    dtype = {'代码': 'str', '日期': 'str'}
+    for key, value in dtype_dict.items():
+        dtype_dict[key] = dtype.get(key, value)
 
     # Re-load the file with optimized data types
     df = pd.read_csv(file_path, dtype=dtype_dict)

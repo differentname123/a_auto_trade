@@ -176,7 +176,7 @@ def load_rf_model(need_load=True):
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     return all_rf_model_list
 
-def load_rf_model_new(date_count_threshold=100):
+def load_rf_model_new(date_count_threshold=100, need_filter=True):
     """
     加载随机森林模型
     :param model_path:
@@ -184,28 +184,51 @@ def load_rf_model_new(date_count_threshold=100):
     """
     all_rf_model_list = []
     output_filename = '../final_zuhe/other/all_model_reports_cuml.json'
+    final_output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
     model_file_list = []
     for model_path in MODEL_PATH_LIST:
         # 获取model_path下的所有文件的全路径，如果是目录还需要继续递归
         for root, dirs, files in os.walk(model_path):
             for file in files:
                 model_file_list.append(os.path.join(root, file))
+    exist_stocks_list = []
+    exist_stocks = set()
     # 加载output_filename，找到最好的模型
     with open(output_filename, 'r') as file:
         sorted_scores_list = json.load(file)
         for sorted_scores in sorted_scores_list:
             model_name = sorted_scores['model_name']
             model_file_path = None
+            if need_filter:
+                current_stocks = set(sorted_scores['true_stocks_set'])
+                # exist_flag = False
+                # # 判断current_stocks是否被包含在exist_stocks中
+                # for exist_stocks in exist_stocks_list:
+                #     if len(current_stocks - exist_stocks) == 0:
+                #         print(f"模型 {model_name} 已经有相似的模型，跳过。")
+                #         exist_flag = True
+                #         break
+                # if exist_flag:
+                #     continue
+                # exist_stocks_list.append(current_stocks)
+                if len(current_stocks - exist_stocks) == 0:
+                    print(f"模型 {model_name} 已经有相似的模型，跳过。")
+                    continue
+                exist_stocks = exist_stocks | current_stocks
             for model_path in model_file_list:
                 if model_name in model_path:
                     model_file_path = model_path
                     break
+            sorted_scores['true_stocks_set'] = []
             if model_file_path is not None:
                 if sorted_scores['date_count'] > date_count_threshold:
                     other_dict = sorted_scores
                     other_dict['model_path'] = model_file_path
                     all_rf_model_list.append(other_dict)
     print(f"加载了 {len(all_rf_model_list)} 个模型")
+    # 将all_rf_model_list存入final_output_filename
+    with open(final_output_filename, 'w') as file:
+        json.dump(all_rf_model_list, file)
     return all_rf_model_list
 
 def get_all_good_data(data):
@@ -396,12 +419,14 @@ def get_all_good_data_with_model_name_list(data, plus_threshold=0.05):
     return all_selected_samples
 
 def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
-    all_rf_model_list = load_rf_model_new(date_count_threshold)
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        all_rf_model_list = json.load(file)
+    print(f"加载了 {len(all_rf_model_list)} 个模型 date_count_threshold={date_count_threshold}")
     # for model in all_rf_model_list:
     #     print(process_model_new(model, data))
 
     # 使用Pool对象来并行处理
-    with Pool(processes=10) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
+    with Pool(processes=5) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
         results = pool.starmap(process_model_new, [(model, data) for model in all_rf_model_list])
 
     # 过滤掉None结果并合并DataFrame
@@ -432,9 +457,9 @@ if __name__ == '__main__':
     # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
     # get_all_good_data(data)
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    all_rf_model_list = load_rf_model_new(10)
+    # all_rf_model_list = load_rf_model_new(1, True)
     # 将all_rf_model_list按照score升序排序
-    all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
+    # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-13_real_time.csv', low_memory=False, dtype={'代码': str})
     data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
