@@ -221,7 +221,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True):
                     break
             sorted_scores['true_stocks_set'] = []
             if model_file_path is not None:
-                if sorted_scores['date_count'] > date_count_threshold:
+                if sorted_scores['max_score'] > date_count_threshold:
                     other_dict = sorted_scores
                     other_dict['model_path'] = model_file_path
                     all_rf_model_list.append(other_dict)

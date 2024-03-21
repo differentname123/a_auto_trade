@@ -28,6 +28,7 @@ G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/reports'
+DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/deleted_reports'
 MODEL_OTHER = '/mnt/w/project/python_project/a_auto_trade/model/other'
 TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 import warnings
@@ -286,6 +287,9 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         start_time = time.time()
         report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
         result_dict = load_existing_report(report_path)
+        if result_dict == {}:
+            report_path = os.path.join(DELETED_MODEL_REPORT_PATH, model_name + '_report.json')
+            result_dict = load_existing_report(report_path)
         thread_ratio = 0.9
         new_temp_dict = {}
         if is_report_exists(result_dict, model_name, file_path):
@@ -341,6 +345,10 @@ def get_all_model_report():
         # 获取MODEL_REPORT_PATH下所有模型的报告
         report_list = []
         for root, ds, fs in os.walk(MODEL_REPORT_PATH):
+            for f in fs:
+                if f.endswith('report.json'):
+                    report_list.append(f.split('_report.json')[0])
+        for root, ds, fs in os.walk(DELETED_MODEL_REPORT_PATH):
             for f in fs:
                 if f.endswith('report.json'):
                     report_list.append(f.split('_report.json')[0])

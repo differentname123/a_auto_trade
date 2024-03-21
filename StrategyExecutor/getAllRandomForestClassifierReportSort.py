@@ -10,6 +10,7 @@
 """
 import json
 import os
+import shutil
 import time
 import traceback
 from collections import Counter
@@ -26,11 +27,12 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 from StrategyExecutor.CommonRandomForestClassifier import load_rf_model_new
 
-D_MODEL_PATH = 'D:\model/all_models'
-G_MODEL_PATH = 'G:\model/all_models'
-MODEL_PATH = '../model/all_models'
+D_MODEL_PATH = '/mnt/d/model/all_models/'
+G_MODEL_PATH = '/mnt/g/model/all_models/'
+MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
-MODEL_REPORT_PATH = '../model/reports'
+MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/reports'
+DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/deleted_reports'
 MODEL_OTHER = '../model/other'
 TRAIN_DATA_PATH = '../train_data'
 import warnings
@@ -303,17 +305,31 @@ def maintain_scores(temp_score, value, min_unique_dates=4, is_false=False):
         return final_result
 
 def delete_model(model_name_list):
-    # 获取../model/all_models下的所有文件的路径，如果是目录则需要递归
-    for root, ds, fs in os.walk(MODEL_PATH):
-        for f in fs:
-            if f.endswith('joblib'):
-                fullname = os.path.join(root, f)
-                if f in model_name_list:
-                    os.remove(fullname)
-                    # 将fullname增量写入../model/other/deleted_model.txt
-                    with open('../model/all_models/deleted_model.txt', 'a') as file:
-                        file.write(fullname + '\n')
-                    print(f'{f}已删除')
+    # 将模型名称列表转换为集合，提高查找效率
+    model_name_set = set(model_name_list)
+    deleted_models = []  # 用于存储已删除模型的路径
+
+    # 遍历模型路径列表
+    for model_path in MODEL_PATH_LIST:
+        for root, dirs, files in os.walk(model_path):
+            for file_name in files:
+                if file_name.endswith('joblib') and file_name in model_name_set:
+                    full_path = os.path.join(root, file_name)
+                    try:
+                        os.remove(full_path)  # 尝试删除文件
+                        deleted_models.append(full_path)  # 记录删除的模型路径
+                        print(f'{file_name}已删除')
+                    except Exception as e:
+                        print(f'删除{file_name}时发生错误：{e}')
+
+    # 将删除的模型路径批量写入文件，减少文件操作次数
+    deleted_models_path = '../model/all_models/deleted_model.txt'
+    try:
+        with open(deleted_models_path, 'a') as file:
+            for model_path in deleted_models:
+                file.write(model_path + '\n')
+    except Exception as e:
+        print(f'写入删除模型日志时发生错误：{e}')
 
 def sort_all_report():
     """
@@ -854,11 +870,36 @@ def sort_new():
 
 
 
+def move_model_report(model_name_list):
+    # 将model_name_list每个元素增加一个后缀_report.json
+    model_name_list = [model_name + '_report.json' for model_name in model_name_list]
+
+    # 获取MODEL_REPORT_PATH下面的所有json
+    file_path = MODEL_REPORT_PATH
+    for root, ds, fs in os.walk(file_path):
+        for f in fs:
+            if f.endswith('.json'):
+                fullname = os.path.join(root, f)
+                if f in model_name_list:
+                    new_path = os.path.join(DELETED_MODEL_REPORT_PATH, f)
+                    shutil.move(fullname, new_path)
 
 
+def delete_bad_model():
+    with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'r') as file:
+        all_model_reports = json.load(file)
+    model_name_list = []
+    all_rf_model_list = load_rf_model_new(0, True)
+    good_model_name = [model['model_name'] for model in all_rf_model_list]
+    for model in all_model_reports:
+        if model['model_name'] not in good_model_name:
+            model_name_list.append(model['model_name'])
+    delete_model(model_name_list)
+    move_model_report(model_name_list)
 
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    sort_new()
-    all_rf_model_list = load_rf_model_new(0, True)
+    # delete_bad_model()
+    # sort_new()
+    all_rf_model_list = load_rf_model_new(200, True)
