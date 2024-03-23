@@ -426,7 +426,7 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     #     print(process_model_new(model, data))
 
     # 使用Pool对象来并行处理
-    with Pool(processes=5) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
+    with Pool(processes=10) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
         results = pool.starmap(process_model_new, [(model, data) for model in all_rf_model_list])
 
     # 过滤掉None结果并合并DataFrame

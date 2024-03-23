@@ -290,6 +290,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         if result_dict == {}:
             report_path = os.path.join(DELETED_MODEL_REPORT_PATH, model_name + '_report.json')
             result_dict = load_existing_report(report_path)
+        report_path = os.path.join(MODEL_REPORT_PATH, model_name + '_report.json')
         thread_ratio = 0.9
         new_temp_dict = {}
         if is_report_exists(result_dict, model_name, file_path):
@@ -328,8 +329,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         result_dict[model_name] = new_temp_dict
         save_report(report_path, result_dict)
         end_time = time.time()
-        print(f"整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name}，\n\n")
-
+        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}  整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name}，\n\n")
         return result_dict
     except Exception as e:
         traceback.print_exc()
@@ -360,6 +360,8 @@ def get_all_model_report():
                     full_name = os.path.join(root, f)
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
+        print(
+            f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)}")
         # 随机打乱model_list
         # random.shuffle(model_list)
         start_time = time.time()

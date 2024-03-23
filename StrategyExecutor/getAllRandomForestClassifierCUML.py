@@ -10,6 +10,7 @@
 """
 import json
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import random
 import time
 from math import ceil
@@ -31,6 +32,8 @@ MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_OTHER = '../model/other'
 MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/reports'
+DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/deleted_reports'
+
 
 def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path):
     """
@@ -46,14 +49,14 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_fil
     out_put_path = model_file_path
     if not os.path.exists(os.path.dirname(out_put_path)):
         os.makedirs(os.path.dirname(out_put_path))
-    print(f"开始训练模型: {model_name}")
+    print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, model_file_path)
     print(f"耗时 {time.time() - start_time} 模型已保存: {model_file_path}\n\n")
     with open(exist_model_file_path, 'a') as f:
         f.write(model_name + '\n')
 
-def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, origin_data_path_dir):
+def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, origin_data_path_dir, report_list):
     """
     训练指定类型的模型并处理类别不平衡
     :param X_train: 训练数据集特征
@@ -76,13 +79,16 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     }[model_type]
 
     params_list = list(ParameterGrid(param_grid))
-    random.shuffle(params_list)
+    # random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)}")
-    save_path = D_MODEL_PATH
+    save_path = MODEL_PATH
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
         flag = False
+        if model_name in report_list:
+            print(f"模型已存在，跳过: {model_name}")
+            continue
         for model_path in MODEL_PATH_LIST:
             exist_model_file_path = os.path.join(model_path, 'existed_model.txt')
             if is_skip and os.path.exists(exist_model_file_path):
@@ -99,7 +105,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         clf = RandomForestClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
-def train_all_model(file_path_path, profit=1, thread_day_list=None, is_skip=True):
+def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None, is_skip=True):
     """
     为file_path_path生成各种模型
     :param file_path_path: 数据集路径
@@ -138,7 +144,7 @@ def train_all_model(file_path_path, profit=1, thread_day_list=None, is_skip=True
                 json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir)
+        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir, report_list)
 
 
 def build_models():
@@ -146,16 +152,25 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        '../train_data/profit_1_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
+        # '../train_data/profit_1_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
+        # '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
+        # '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
         '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
+    report_list = []
+    for root, ds, fs in os.walk(MODEL_REPORT_PATH):
+        for f in fs:
+            if f.endswith('report.json'):
+                report_list.append(f.split('_report.json')[0])
+    for root, ds, fs in os.walk(DELETED_MODEL_REPORT_PATH):
+        for f in fs:
+            if f.endswith('report.json'):
+                report_list.append(f.split('_report.json')[0])
     for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path, profit=1, thread_day_list=[1,2], is_skip=True)
+        train_all_model(origin_data_path,report_list, profit=1, thread_day_list=[1,2], is_skip=True)
 
 if __name__ == '__main__':
     build_models()

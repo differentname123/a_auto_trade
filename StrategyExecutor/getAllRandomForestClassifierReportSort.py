@@ -6,7 +6,7 @@
 :last_date:
     2024-01-30 15:24
 :description:
-    
+
 """
 import json
 import os
@@ -900,6 +900,6 @@ def delete_bad_model():
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
+    sort_new()
+    all_rf_model_list = load_rf_model_new(0, True) # 200:49 100:248 0:575
     # delete_bad_model()
-    # sort_new()
-    all_rf_model_list = load_rf_model_new(200, True)
