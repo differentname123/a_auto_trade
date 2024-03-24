@@ -712,7 +712,8 @@ def statistics_first_matching(daily_precision, min_unique_dates=4):
     :return: 第一个满足条件的统计结果
     """
     min_day_list = sorted(set([0] + [precision['count'] for precision in daily_precision.values()]))
-
+    max_false_count = 0
+    kui_count = 0
     for min_day in min_day_list:
         best_date_count = middle_date_count = single_date_count = 0
         single_num_count = single_true_num_count = 0
@@ -724,6 +725,12 @@ def statistics_first_matching(daily_precision, min_unique_dates=4):
                 single_true_num_count += precision['true_count']
                 best_date_count += precision['precision'] >= 0.9
                 middle_date_count += precision['precision'] >= 0.9 or precision['false_count'] <= 1
+                # if precision['precision'] < 0.9:
+                #     max_false_count = max(max_false_count, precision['false_count'])
+                kui = 3 * precision['false_count'] - precision['true_count']
+                if kui > 0:
+                    kui_count += 1
+                max_false_count = kui_count
 
         if single_date_count >= min_unique_dates and best_date_count / single_date_count >= 0.9:
             return {
@@ -736,6 +743,7 @@ def statistics_first_matching(daily_precision, min_unique_dates=4):
                 'best_date_score': best_date_count / single_date_count if single_date_count else 0,
                 'middle_date_score': middle_date_count / single_date_count if single_date_count else 0,
                 'min_day': min_day,
+                'max_false_count': max_false_count,
             }
 
     # 如果没有找到任何满足条件的结果
@@ -824,6 +832,7 @@ def sort_new():
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
+                # f = 'RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.4_thread_day_1_true_ratio_0.3107309813750629_max_depth_40_min_samples_leaf_4_min_samples_split_3_n_estimators_500.joblib_report.json'
                 fullname = os.path.join(root, f)
                 # fullname = '../model/reports/RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.3_thread_day_1_true_ratio_0.2236552287808054_max_depth_400_min_samples_leaf_3_min_samples_split_2_n_estimators_250.joblib_report.json'
                 with open(fullname, 'r') as file:
@@ -853,12 +862,14 @@ def sort_new():
                                                 abs_threshold = result_list[0]['abs_threshold']
                                                 min_day = result_list[0]['min_day']
                                                 true_stocks_set = result_list[0]['true_stocks_set']
+                                                max_false_count = result_list[0]['max_false_count']
                                     temp_dict['max_score'] = max_score
                                     temp_dict['date_count'] = date_count
                                     temp_dict['precision'] = precision
                                     temp_dict['abs_threshold'] = abs_threshold
                                     temp_dict['min_day'] = min_day
                                     temp_dict['true_stocks_set'] = true_stocks_set
+                                    temp_dict['max_false_count'] = max_false_count
                                     good_model_list.append(temp_dict)
                     except Exception as e:
                         traceback.print_exc()
@@ -901,5 +912,5 @@ def delete_bad_model():
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     sort_new()
-    all_rf_model_list = load_rf_model_new(0, True) # 200:49 100:248 0:575
+    all_rf_model_list = load_rf_model_new(0, True) # 200:84 100:284 0:611
     # delete_bad_model()

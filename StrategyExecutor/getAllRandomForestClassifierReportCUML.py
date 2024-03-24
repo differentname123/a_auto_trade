@@ -22,6 +22,10 @@ from joblib import dump, load
 import numpy as np
 from StrategyExecutor.common import low_memory_load, downcast_dtypes
 from StrategyExecutor.getAllRandomForestClassifierReportSort import deal_reports
+import rmm
+import gc
+# 禁用 RMM 内存池
+rmm.reinitialize(pool_allocator=False)
 
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
@@ -101,6 +105,7 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
     date_false_precision = 0
     if precision >= thread_ratio:
         good_date_count = 0
+        kui_count = 0
         for date in unique_dates:
             date_mask = selected_data['日期'] == date
             date_selected_true = selected_true[high_confidence_true]
@@ -113,9 +118,12 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
                 'false_count': int(date_count - date_true_count),
                 'true_count': int(date_true_count)
             }
+            kui = 3 * daily_precision[str(date)]['false_count'] - daily_precision[str(date)]['true_count']
+            if kui > 0:
+                kui_count += 1
             if date_precision >= 0.9:
                 good_date_count += 1
-        if good_date_count / len(unique_dates) >= 0.9:
+        if (good_date_count / len(unique_dates) >= 0.9) and (kui_count / len(unique_dates) <= 0.05):
             date_precision = good_date_count / len(unique_dates) if len(unique_dates) > 0 else 0
             true_stocks_set = list((selected_data['代码'].to_pandas().astype(str) + selected_data['日期'].to_pandas()))
             find_true_flag = True
@@ -276,10 +284,9 @@ def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_
     print(f"abs 耗时 {time.time() - start_time:.2f}秒 模型 abs 的报告已生成 平均耗时: {(time.time() - start_time)/ len(abs_threshold_values):.2f}秒 阈值列表长度: {len(temp_dict_result[this_key])}")
     return temp_dict_result
 
-
 def get_model_report(abs_name, model_name, file_path, data, X_test):
     """
-    为单个模型生成报告，并更新模型报告文件
+    为单个模型生成报告,并更新模型报告文件
     :param model_path: 模型路径
     :param model_name: 当前正在处理的模型名称
     """
@@ -295,7 +302,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         new_temp_dict = {}
         if is_report_exists(result_dict, model_name, file_path):
             new_temp_dict[file_path] = result_dict[model_name][file_path]
-            print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在，跳过。")
+            print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在,跳过。")
             return
 
         model = load_model(abs_name, model_name)
@@ -315,8 +322,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         key_name = f'后续{thread_day}日最高价利润率'
         y_test = data[key_name] >= profit
         total_samples = len(y_test)
-        print(f"处理数据耗时: {time.time() - file_start_time:.2f}秒")
-
+        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 3:.2f}G {model_name}条数据")
 
         if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
             start = time.time()
@@ -329,9 +335,19 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         result_dict[model_name] = new_temp_dict
         save_report(report_path, result_dict)
         end_time = time.time()
-        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}  整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name}，\n\n")
+        print(
+            f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}  整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name},\n\n")
+        del model
+        del y_pred_proba
+        gc.collect()
+        # 如果abs_name的大小超过4G，则延时10s
+        if os.path.getsize(abs_name) > 2 * 1024 ** 3:
+            print(f"大小为 {os.path.getsize(abs_name) /1024 ** 3}G 模型 {abs_name} 大小超过2G，延时10s。")
+            time.sleep(10)
+            gc.collect()
+            time.sleep(10)
         return result_dict
-    except Exception as e:
+    except BaseException as e:
         traceback.print_exc()
         print(f"生成报告时出现异常: {e}")
         return {}
@@ -358,6 +374,10 @@ def get_all_model_report():
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
+                    # # 获取full_name文件的大小，如果大于4G，则跳过
+                    # if os.path.getsize(full_name) > 4 * 1024 ** 3:
+                    #     print(f"模型 {full_name} 大小超过4G，跳过。")
+                    #     continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
         print(
