@@ -419,6 +419,7 @@ def get_all_good_data_with_model_name_list(data, plus_threshold=0.05):
     return all_selected_samples
 
 def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
+    start = time.time()
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         all_rf_model_list = json.load(file)
     print(f"加载了 {len(all_rf_model_list)} 个模型 date_count_threshold={date_count_threshold}")
@@ -426,12 +427,13 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     #     print(process_model_new(model, data))
 
     # 使用Pool对象来并行处理
-    with Pool(processes=10) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
+    with Pool(processes=5) as pool:  # 可以调整processes的数量以匹配你的CPU核心数量
         results = pool.starmap(process_model_new, [(model, data) for model in all_rf_model_list])
 
     # 过滤掉None结果并合并DataFrame
     all_selected_samples = pd.concat([res for res in results if res is not None])
     all_selected_samples.to_csv(f'../temp/all_selected_samples_{date_count_threshold}.csv', index=False)
+    print(f"总耗时 {time.time() - start}")
     return all_selected_samples
 def write_joblib_files_to_txt(directory):
     # 获取目录下所有以joblib结尾的文件,如果是目录还需要继续递归
@@ -461,9 +463,9 @@ if __name__ == '__main__':
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-03-13_real_time.csv', low_memory=False, dtype={'代码': str})
-    data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../train_data/2024_data_all.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-03-22_real_time.csv')
+    # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
+    data = low_memory_load('../train_data/2024_data_all.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['日期'] >= '2024-03-01']
     # 截取data最后4000行

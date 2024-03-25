@@ -832,7 +832,7 @@ def sort_new():
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
-                # f = 'RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.4_thread_day_1_true_ratio_0.3107309813750629_max_depth_40_min_samples_leaf_4_min_samples_split_3_n_estimators_500.joblib_report.json'
+                # f = 'RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.4_thread_day_1_true_ratio_0.3107309813750629_max_depth_100_min_samples_leaf_1_min_samples_split_2_n_estimators_600.joblib_report.json'
                 fullname = os.path.join(root, f)
                 # fullname = '../model/reports/RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.3_thread_day_1_true_ratio_0.2236552287808054_max_depth_400_min_samples_leaf_3_min_samples_split_2_n_estimators_250.joblib_report.json'
                 with open(fullname, 'r') as file:
@@ -911,6 +911,6 @@ def delete_bad_model():
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    sort_new()
-    all_rf_model_list = load_rf_model_new(0, True) # 200:84 100:284 0:611
+    # sort_new()
+    all_rf_model_list = load_rf_model_new(100, True) # 200:108 100:310 0:634
     # delete_bad_model()
