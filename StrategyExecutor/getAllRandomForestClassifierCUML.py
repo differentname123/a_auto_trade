@@ -156,7 +156,7 @@ def build_models():
         # '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
         # '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']

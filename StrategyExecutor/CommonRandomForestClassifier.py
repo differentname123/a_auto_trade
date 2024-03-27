@@ -463,9 +463,9 @@ if __name__ == '__main__':
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-03-22_real_time.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-03-27_real_time.csv')
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../train_data/2024_data_all.csv')
+    # data = low_memory_load('../train_data/2024_data_all.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['日期'] >= '2024-03-01']
     # 截取data最后4000行

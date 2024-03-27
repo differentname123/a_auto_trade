@@ -69,7 +69,7 @@ def calculate_relative_amplitude(data, key_list):
             data[col_name].fillna(0, inplace=True)
 
 
-def calculate_window_relative_amplitude(data, windows=[1,3,5,10]):
+def calculate_window_relative_amplitude(data, windows=[1,3,5,10], prefix=''):
     """
     对于windows中的每个窗口大小，计算该窗口内的最高和最低价格相对于窗口开始的振幅。
 
@@ -81,16 +81,16 @@ def calculate_window_relative_amplitude(data, windows=[1,3,5,10]):
     - 无，函数将直接修改传入的DataFrame。
     """
     for window in windows:
-        high_col = f'窗口_{window}_天_最高'
-        low_col = f'窗口_{window}_天_最低'
-        amplitude_col = f'{window}_天_振幅_归一化_信号'
+        high_col = f'窗口_{window}_天_{prefix}最高'
+        low_col = f'窗口_{window}_天_{prefix}最低'
+        amplitude_col = f'{window}_天_{prefix}振幅_归一化_信号'
 
         # 计算窗口内最高和最低价
-        data[high_col] = data['最高'].rolling(window=window, min_periods=1).max()
-        data[low_col] = data['最低'].rolling(window=window, min_periods=1).min()
+        data[high_col] = data[prefix + '最高'].rolling(window=window, min_periods=1).max()
+        data[low_col] = data[prefix + '最低'].rolling(window=window, min_periods=1).min()
 
         # 计算相对振幅
-        data[amplitude_col] = ((data[high_col] - data[low_col]) / data['收盘'].shift(window - 1) * 100).round(2)
+        data[amplitude_col] = ((data[high_col] - data[low_col]) / data[prefix + '收盘'].shift(window - 1) * 100).round(2)
 
         # 替换NaN值为0
         data[amplitude_col].fillna(0, inplace=True)
@@ -98,7 +98,7 @@ def calculate_window_relative_amplitude(data, windows=[1,3,5,10]):
         # 可以选择删除临时列
         data.drop(columns=[high_col, low_col], inplace=True)
 
-def calculate_technical_indicators(data):
+def calculate_technical_indicators(data, prefix=''):
     """
     计算股票市场数据的常用技术分析指标。
 
@@ -109,26 +109,26 @@ def calculate_technical_indicators(data):
     - 无，函数将直接在传入的DataFrame中添加新列，每列代表一个技术指标。
     """
     # 计算随机振荡器（Stochastic Oscillator）
-    data['Stochastic_Oscillator_K_归一化_信号'], data['Stochastic_Oscillator_D_归一化_信号'] = talib.STOCH(
-        data['最高'], data['最低'], data['收盘'],
+    data[prefix + 'Stochastic_Oscillator_K_归一化_信号'], data[prefix + 'Stochastic_Oscillator_D_归一化_信号'] = talib.STOCH(
+        data[prefix + '最高'], data[prefix + '最低'], data[prefix + '收盘'],
         fastk_period=14, slowk_period=3, slowd_period=3
     )
 
     # 计算威廉姆斯%R指标，反映市场超买或超卖情况
-    data['Williams_R_归一化_信号'] = talib.WILLR(data['最高'], data['最低'], data['收盘'], timeperiod=14)
+    data[prefix + 'Williams_R_归一化_信号'] = talib.WILLR(data[prefix + '最高'], data[prefix + '最低'], data[prefix + '收盘'], timeperiod=14)
 
-    data['Bollinger_Upper_股价'], data['Bollinger_Middle_股价'], data['Bollinger_Lower_股价'] = talib.BBANDS(data['收盘'],
-                                                                                              timeperiod=20)
+    data[prefix + 'Bollinger_Upper_股价'], data[prefix + 'Bollinger_Middle_股价'], data[prefix + 'Bollinger_Lower_股价'] = talib.BBANDS(data[prefix + '收盘'],
+                                                                                                      timeperiod=20)
 
     # 可以考虑添加的其他重要技术指标
     # 计算相对强弱指数（Relative Strength Index，RSI），评估价格走势的速度和变化，以识别超买或超卖条件
-    data['RSI_归一化_信号'] = talib.RSI(data['收盘'], timeperiod=14)
+    data[prefix + 'RSI_归一化_信号'] = talib.RSI(data[prefix + '收盘'], timeperiod=14)
 
     # 计算移动平均收敛散度（Moving Average Convergence Divergence，MACD）
-    data['MACD'], data['MACD_signal'], data['MACD_hist'] = talib.MACD(
-        data['收盘'], fastperiod=12, slowperiod=26, signalperiod=9
+    data[prefix + 'MACD'], data[prefix + 'MACD_signal'], data[prefix + 'MACD_hist'] = talib.MACD(
+        data[prefix + '收盘'], fastperiod=12, slowperiod=26, signalperiod=9
     )
-    data['BAR_归一化_信号'] = (data['MACD'] - data['MACD_signal']) * 2
+    data[prefix + 'BAR_归一化_信号'] = (data[prefix + 'MACD'] - data[prefix + 'MACD_signal']) * 2
 
 def calculate_trend_changes(data, key_list):
     """
@@ -192,8 +192,6 @@ def calculate_rolling_stats_with_max_min_flags_optimized(data, key_list, windows
         for window in windows:
             # 计算滑动平均值、最大值、最小值
             avg_col_name = f'{key}_{window}日均值'
-            max_col_name = f'{key}_{window}日最大值'
-            min_col_name = f'{key}_{window}日最小值'
             new_columns[avg_col_name] = data[key].rolling(window=window).mean()
             max_values = data[key].rolling(window=window).max()
             min_values = data[key].rolling(window=window).min()
@@ -485,6 +483,62 @@ def get_data_feature(data):
 
     return data
 
+def get_index_data_feature(data):
+    """
+    计算大盘数据的特征。这些特征包括上证指数、深证指数、所有股票的平均涨跌幅、上涨比例等。
+    """
+
+    # Mark the days before and after holidays
+    mark_holiday_eve_and_post_v3(data, '指数日期')
+
+    # Calculate change percentages for close, open, high, and low prices over various periods
+    calculate_change_percentages(data, periods=[1, 3, 5], key_list=['深证指数收盘', '上证指数收盘'])
+
+    # Filter columns for change percentages
+    change_percentage_columns = [column for column in data.columns if '涨跌幅_1_' in column or '涨跌幅_3_' in column]
+
+    # Calculate crossover signals based on change percentages
+    data = calculate_crossovers(data, change_percentage_columns)
+
+    # Calculate technical indicators
+    calculate_technical_indicators(data, prefix='深证指数')
+    calculate_technical_indicators(data, prefix='上证指数')
+
+    # Calculate the relative amplitude for specified price types
+    calculate_window_relative_amplitude(data, windows=[1,3,5], prefix='上证指数')
+    calculate_window_relative_amplitude(data, windows=[1,3,5], prefix='深证指数')
+
+    # Filter columns excluding specific ones and those not containing signals
+    columns_for_analysis = [column for column in data.columns if (column in ['深证指数开盘', '深证指数收盘', '深证指数最高', '深证指数最低', '深证指数成交额', '上证指数开盘', '上证指数收盘', '上证指数最高', '上证指数最低', '上证指数成交额','深证指数收盘_涨跌幅_1_归一化_信号', '深证指数收盘_涨跌幅_3_归一化_信号', '深证指数收盘_涨跌幅_5_归一化_信号', '深证指数收盘_涨跌幅_10_归一化_信号', '上证指数收盘_涨跌幅_1_归一化_信号', '上证指数收盘_涨跌幅_3_归一化_信号', '上证指数收盘_涨跌幅_5_归一化_信号', '上证指数收盘_涨跌幅_10_归一化_信号'
+                                                                             , '上证指数Bollinger_Upper_股价', '上证指数Bollinger_Lower_股价','深证指数Bollinger_Upper_股价', '深证指数Bollinger_Lower_股价','深证指数RSI_归一化_信号','深证指数BAR_归一化_信号', '上证指数RSI_归一化_信号','上证指数BAR_归一化_信号','1_天_上证指数振幅_归一化_信号', '3_天_上证指数振幅_归一化_信号', '5_天_上证指数振幅_归一化_信号', '10_天_上证指数振幅_归一化_信号', '1_天_深证指数振幅_归一化_信号', '3_天_深证指数振幅_归一化_信号', '5_天_深证指数振幅_归一化_信号', '10_天_深证指数振幅_归一化_信号'])]
+    columns_for_analysis = [column for column in columns_for_analysis if '最' not in column and '5' not in column and '10' not in column]
+    # Calculate ratios and dynamic frequencies for selected columns
+    data = calculate_ratio_and_dynamic_frequency(data, columns_for_analysis)
+
+    # Calculate continuous rise or fall in selected columns and mark trend reversal points
+    data = calculate_trend_changes(data, columns_for_analysis)
+    data = calculate_rolling_stats_with_max_min_flags_optimized(data, columns_for_analysis, windows=[3, 5])
+
+    # Calculate crossovers for specific price types and Bollinger Bands over various windows
+    data = get_calculate_crossovers(data, key_list=['深证指数收盘', '深证指数Bollinger_Upper_股价', '深证指数Bollinger_Lower_股价'], windows=[3, 5])
+    data = get_calculate_crossovers(data, key_list=['上证指数收盘', '上证指数Bollinger_Upper_股价', '上证指数Bollinger_Lower_股价'], windows=[3, 5])
+
+    # Replace NaN values with 0
+    data.fillna(0, inplace=True)
+
+
+    # Logging the time taken to compute features
+    # print(f"名称{data['名称'].iloc[0]} 计算特征耗时 {time.time() - start_time}")
+
+    delete_column = [column for column in data.columns if '信号' not in column and '均值' in column]
+    # 将delete_column从data中删除
+    data.drop(columns=delete_column, inplace=True)
+
+
+    # sort_keys_by_max_min_diff(data,[column for column in data.columns if '信号' in column])
+
+    return data
+
 
 def get_all_data_performance():
     """
@@ -724,7 +778,7 @@ if __name__ == '__main__':
     # file_path = '../daily_data_exclude_new_can_buy'
     # out_path = '../feature_data_exclude_new_can_buy'
     # generate_features_for_all_files(file_path, out_path)
-    load_bad_data()
+    # load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
     # # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
@@ -738,6 +792,9 @@ if __name__ == '__main__':
     # data = load_data(file_path)
     # new_data = get_data_feature(data)
     # print(new_data)
+
+    data = pd.read_csv('../train_data/index_data.csv')
+    get_index_data_feature(data)
 
     # file_path = '../train_data/profit_1_day_1'
     #

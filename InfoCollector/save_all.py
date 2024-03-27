@@ -463,6 +463,8 @@ def save_index_data():
     index_data = pd.merge(sz_data, sh_data, on='日期')
     # 将index_data的日期改为datetime格式
     index_data['日期'] = pd.to_datetime(index_data['日期'])
+    index_data.rename(columns={'日期': '指数日期'}, inplace=True)
+    index_data.to_csv('../train_data/index_data.csv', index=False)
     return index_data
 
 def calculate_future_high_prices(data):
@@ -483,6 +485,7 @@ def calculate_future_high_prices(data):
     return data
 
 if __name__ == '__main__':
+    save_index_data()
     # price_data = get_price('002492', '20230101', '20290124', period='1')
     # print(price_data)
     #

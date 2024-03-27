@@ -912,5 +912,5 @@ def delete_bad_model():
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     sort_new()
-    all_rf_model_list = load_rf_model_new(100, True) # 200:171 100:369 0:691
+    all_rf_model_list = load_rf_model_new(100, True) # 200:195 100:434 0:715
     # delete_bad_model()
