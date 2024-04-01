@@ -344,7 +344,8 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return result_dict
     except BaseException as e:
         traceback.print_exc()
-        print(f"生成报告时出现异常: {e}")
+        os.remove(abs_name)
+        print(f"已删除生成报告时出现异常: {e}")
         return {}
 
 
@@ -369,10 +370,10 @@ def get_all_model_report():
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
-                    # # 获取full_name文件的大小，如果大于4G，则跳过
-                    # if os.path.getsize(full_name) > 4 * 1024 ** 3:
-                    #     print(f"模型 {full_name} 大小超过4G，跳过。")
-                    #     continue
+                    # 获取full_name文件的大小，如果大于4G，则跳过
+                    if os.path.getsize(full_name) > 5 * 1024 ** 3:
+                        print(f"模型 {full_name} 大小超过4G，跳过。")
+                        continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
         print(

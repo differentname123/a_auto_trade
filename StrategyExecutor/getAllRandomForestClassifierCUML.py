@@ -10,17 +10,10 @@
 """
 import json
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-import random
 import time
-from math import ceil
-from multiprocessing import Process, Pool
-
-import numpy as np
 from cuml.ensemble import RandomForestClassifier
 from cuml.preprocessing import train_test_split
-from joblib import dump, load
-import cupy as cp
+from joblib import dump
 import cudf
 from sklearn.model_selection import ParameterGrid
 
@@ -51,8 +44,8 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_fil
         os.makedirs(os.path.dirname(out_put_path))
     print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
-    dump(clf, model_file_path)
-    print(f"耗时 {time.time() - start_time} 模型已保存: {model_file_path}\n\n")
+    dump(clf, model_file_path, compress=1)
+    print(f"耗时 {time.time() - start_time} 大小为 {os.path.getsize(model_file_path) / 1024 ** 2:.2f} MB  模型已保存: {model_file_path} \n\n")
     with open(exist_model_file_path, 'a') as f:
         f.write(model_name + '\n')
 
@@ -157,7 +150,7 @@ def build_models():
         # '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
+        # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
     report_list = []
