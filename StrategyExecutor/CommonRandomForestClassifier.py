@@ -459,10 +459,11 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, min_day=0, abs_threshold=0):
 
 def get_proba_data(data, rf_classifier):
     signal_columns = [column for column in data.columns if '信号' in column]
+    drop_columns = [column for column in data.columns if '信号' in column or '股价' in column or 'MACD' in column]
     # 获取data中在signal_columns中的列
     X = data[signal_columns]
     # 获取data中去除signal_columns中的列
-    X1 = data.drop(signal_columns, axis=1)
+    X1 = data.drop(drop_columns, axis=1)
     y_pred_proba = rf_classifier.predict_proba(X)
     return y_pred_proba, X1
 
@@ -476,43 +477,61 @@ def process_model_new(rf_model_map, data):
     """
     start = time.time()
     all_selected_samples_list = []
+    code_list = []
+    if 'code_list' in rf_model_map:
+        code_list = rf_model_map['code_list']
     model_name = os.path.basename(rf_model_map['model_path'])
     load_time = 0
+    code_list_pred_proba = None
     try:
         rf_model = load(rf_model_map['model_path'])
         load_time = time.time() - start
 
         value = rf_model_map
-
         y_pred_proba, X1 = get_proba_data(data, rf_model)
+        if code_list == 'all':
+            code_list_pred_proba = pd.merge(y_pred_proba, X1, left_index=True, right_index=True)
+            code_list_pred_proba['param'] = str(value)
+        elif len(code_list) > 0:
+            code_index = X1['代码'].isin(code_list)
+            code_list_y_pred_proba = y_pred_proba[code_index]
+            code_list_X1 = X1[code_index]
+            # 将code_list_y_pred_proba和code_list_X1按照index merge,它们都是Dataframe类型的
+            code_list_pred_proba = pd.merge(code_list_y_pred_proba, code_list_X1, left_index=True, right_index=True)
+            code_list_pred_proba['param'] = str(value)
+
         selected_samples = get_thread_data_new_tree_0(y_pred_proba, X1, min_day=value['min_day'], abs_threshold=value['abs_threshold'])
         if selected_samples is not None:
             selected_samples['param'] = str(value)
             selected_samples['model_name'] = model_name
             all_selected_samples_list.append(selected_samples)
+
         if len(all_selected_samples_list) > 0:
-            return pd.concat(all_selected_samples_list)
+            return pd.concat(all_selected_samples_list), code_list_pred_proba
+        return None, code_list_pred_proba
     except Exception as e:
         traceback.print_exc()
         print(f"模型 {model_name} 加载失败 {e}")
-        # # 删除模型文件
-        # if os.path.exists(rf_model_map['model_path']):
-        #     os.remove(rf_model_map['model_path'])
-        #     print(f"删除模型 {model_name} 成功")
+        # 删除模型文件
+        if os.path.exists(rf_model_map['model_path']):
+            os.remove(rf_model_map['model_path'])
+            print(f"删除模型 {model_name} 成功")
     finally:
         elapsed_time = time.time() - start
         print(f"模型 {model_name} 耗时 {elapsed_time} 加载耗时 {load_time}")
 
-def model_worker(model_info_list, data, result_list):
+def model_worker(model_info_list, data, result_list, code_result_list):
     print(f"Process {current_process().name} started.")
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_model_new, model_info, data): model_info for model_info in model_info_list}
         for future in as_completed(futures):
             model_info = futures[future]
             try:
-                result = future.result()
+                result, code_result = future.result()
                 if result is not None:
                     result_list.append(result)
+                if code_result is not None:
+                    code_result_list.append(code_result)
             except Exception as exc:
                 error_message = f"Model {model_info['model_path']} generated an exception: {exc}"
                 print(error_message)
@@ -589,7 +608,7 @@ def interleave_lists(list1, list2):
     # zip_longest会在较短的列表结束后用None填充，chain.from_iterable将结果扁平化
     return [item for item in chain.from_iterable(zip_longest(list1, list2)) if item is not None]
 
-def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
+def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, code_list=[]):
     start = time.time()
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         all_model_info_list = json.load(file)
@@ -601,8 +620,12 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     # 将all_model_info_list_w和all_model_info_list_other交错合并为all_model_info_list
     print(f"all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
     all_model_info_list = interleave_lists(all_model_info_list_w, all_model_info_list_other)
+    # 将code_list加入到每个模型中
+    for model_info in all_model_info_list:
+        model_info['code_list'] = code_list
+    # all_model_info_list = all_model_info_list[-10:]
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
-    thread_count = 5
+    thread_count = 1
     # 分割模型列表以分配给每个进程
     chunk_size = len(all_model_info_list) // thread_count
     model_chunks = [all_model_info_list[i:i + chunk_size] for i in range(0, len(all_model_info_list), chunk_size)]
@@ -610,11 +633,12 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
     # 存储最终结果的列表
     manager = multiprocessing.Manager()
     result_list = manager.list()
+    code_result_list = manager.list()
 
     # 创建并启动进程
     processes = []
     for i in range(thread_count):
-        p = Process(target=model_worker, args=(model_chunks[i], data, result_list))
+        p = Process(target=model_worker, args=(model_chunks[i], data, result_list, code_result_list))
         processes.append(p)
         p.start()
 
@@ -624,6 +648,9 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50):
 
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
     all_selected_samples.to_csv(f'../temp/all_selected_samples_{date_count_threshold}.csv', index=False)
+
+    code_result_list_samples = pd.concat(code_result_list, ignore_index=True) if code_result_list else pd.DataFrame()
+    code_result_list_samples.to_csv(f'../temp/code_result_list_samples_{date_count_threshold}.csv', index=False)
 
     print(f"总耗时 {time.time() - start}")
     return all_selected_samples
@@ -671,7 +698,86 @@ def delete_bad_model():
             for model in all_model_list:
                 file.write(model + '\n')
 
+def analysis_model():
+    # 读取'../temp/cha_zhi_result.json'
+    with open('../temp/analysis_model/cha_zhi_result_2024-04-01.json', 'r', encoding='utf-8') as file:
+        result_dict_list = json.load(file)
+    # 将result_dict_list按照true_count_ratio降序排序
+    result_dict_list = sorted(result_dict_list, key=lambda x: x['true_count_50_ratio'], reverse=True)
+    # 将result_dict_list转换为DataFrame
+    result_df = pd.DataFrame(result_dict_list)
+
+
+    data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # 获取所有的日期
+    dates = data['日期'].unique()
+    print(f"共有 {len(dates)} 个日期")
+
+    thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+
+    for date in dates:
+        result_dict_list = []
+
+        # 筛选出当前日期的数据
+        data_by_date = data[data['日期'] == date]
+
+        # 将data_by_date按照 代码 分组
+        data_group = data_by_date.groupby(['代码'])
+
+        # 遍历data_group，获取每个分组的param列
+        for code, group in data_group:
+            cha_zhi = 0
+            temp_dict = {}
+            total_row = group.shape[0]
+            true_counts = {f'true_count_{int(t*100)}': 0 for t in thresholds}
+            code_name = group['名称'].values[0]
+
+            # 如果 '后续一日最高价利润率' 在group中，取第一个值
+            profit_cols = ['后续1日最高价利润率', '后续2日最高价利润率', '后续3日最高价利润率']
+            profit_values = [group[col].values[0] if col in group.columns else 0 for col in profit_cols]
+
+            # 遍历group中的param列和model_name列
+            for index, row in group.iterrows():
+                param = eval(row['param'])
+                abs_threshold = float(param['abs_threshold'])
+                true_ratio = float(row['1'])
+                for t in thresholds:
+                    if true_ratio > t:
+                        true_counts[f'true_count_{int(t*100)}'] += 1
+                cha_zhi += (true_ratio - abs_threshold)
+
+            for t in thresholds:
+                count_key = f'true_count_{int(t*100)}'
+                ratio_key = f'true_count_{int(t*100)}_ratio'
+                temp_dict[count_key] = true_counts[count_key]
+                temp_dict[ratio_key] = true_counts[count_key] / total_row if total_row != 0 else 0
+
+            temp_dict['code'] = code
+            temp_dict['name'] = code_name
+            temp_dict['cha_zhi'] = cha_zhi
+            temp_dict['date'] = date
+            for i, col in enumerate(profit_cols):
+                temp_dict[col] = profit_values[i]
+            result_dict_list.append(temp_dict)
+
+        # 将result_dict_list按照cha_zhi降序排序
+        result_dict_list = sorted(result_dict_list, key=lambda x: x['cha_zhi'], reverse=True)
+
+        # 创建日期目录，如果不存在
+        date_dir = f"../temp/analysis_model"
+        if not os.path.exists(date_dir):
+            os.makedirs(date_dir)
+
+        # 将result_dict_list写入文件，注意不要中文乱码
+        file_path = os.path.join(date_dir, f"cha_zhi_result_{date}.json")
+        with open(file_path, 'w', encoding='utf-8') as file:
+            json.dump(result_dict_list, file, ensure_ascii=False)
+        print(f"日期 {date} 分析完成")
+
+
+
 if __name__ == '__main__':
+    # analysis_model()
     # delete_bad_model()
     # print('删除完成')
     # compress_model()
@@ -690,15 +796,15 @@ if __name__ == '__main__':
     # all_rf_model_list = load_rf_model_new(1, True)
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
-    # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-01_real_time.csv')
+    # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-01_real_time.csv')
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../train_data/2024_data_all.csv')
+    data = low_memory_load('../train_data/2024_data.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['日期'] >= '2024-03-01']
     # 截取data最后4000行
     # data = data.iloc[-4000:]
     # data = {}
-    get_all_good_data_with_model_name_list_new(data, 50)
+    get_all_good_data_with_model_name_list_new(data, 50, 'all')
     # load_rf_model_new()
-

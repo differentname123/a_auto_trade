@@ -123,9 +123,10 @@ def low_memory_load(file_path):
     Returns:
     A pandas DataFrame with float64 and int64 columns converted to float32 and int32.
     """
+    start_time = datetime.datetime.now()
+    print(f'加载文件: {file_path}')
     # Read the first few rows to infer data type
     temp_df = pd.read_csv(file_path, nrows=100)
-
     # Create a dictionary of column names and their optimized data types
     dtype_dict = {col: infer_dtype_convert(str(temp_df[col].dtype)) for col in temp_df.columns}
     dtype = {'代码': 'str', '日期': 'str'}
@@ -134,6 +135,7 @@ def low_memory_load(file_path):
 
     # Re-load the file with optimized data types
     df = pd.read_csv(file_path, dtype=dtype_dict)
+    print(f'之后的内存GB: {sys.getsizeof(df) / 1024 ** 3:.2f} GB 耗时: {datetime.datetime.now() - start_time} s')
 
     return df
 

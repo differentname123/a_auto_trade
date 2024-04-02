@@ -775,10 +775,10 @@ if __name__ == '__main__':
     # all_data_df = load_and_merge_data(all_files)
     # print(all_data_df)
 
-    # file_path = '../daily_data_exclude_new_can_buy'
-    # out_path = '../feature_data_exclude_new_can_buy'
-    # generate_features_for_all_files(file_path, out_path)
-    # load_bad_data()
+    file_path = '../daily_data_exclude_new_can_buy'
+    out_path = '../feature_data_exclude_new_can_buy'
+    generate_features_for_all_files(file_path, out_path)
+    load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
     # # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
@@ -793,8 +793,8 @@ if __name__ == '__main__':
     # new_data = get_data_feature(data)
     # print(new_data)
 
-    data = pd.read_csv('../train_data/index_data.csv')
-    get_index_data_feature(data)
+    # data = pd.read_csv('../train_data/index_data.csv')
+    # get_index_data_feature(data)
 
     # file_path = '../train_data/profit_1_day_1'
     #
