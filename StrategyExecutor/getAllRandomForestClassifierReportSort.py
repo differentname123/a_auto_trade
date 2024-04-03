@@ -853,7 +853,13 @@ def sort_new():
                                     temp_dict['model_name'] = model_name
                                     for this_key, report_list in detail_report.items():
                                         result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
-                                        # temp_dict[this_key] = result_list
+                                        # 获取result_list中每个元素的abs_threshold，和precision，生成一个新的dict
+                                        precision_dict = {}
+                                        for result in report_list:
+                                            temp_abs_threshold = round(result['abs_threshold'], 2)
+                                            temp_precision = result['precision']
+                                            precision_dict[temp_abs_threshold] = temp_precision
+
                                         if result_list:
                                             if result_list[0][sort_key] > max_score:
                                                 max_score = result_list[0][sort_key]
@@ -870,6 +876,7 @@ def sort_new():
                                     temp_dict['min_day'] = min_day
                                     temp_dict['true_stocks_set'] = true_stocks_set
                                     temp_dict['max_false_count'] = max_false_count
+                                    temp_dict['precision_dict'] = precision_dict
                                     good_model_list.append(temp_dict)
                     except Exception as e:
                         traceback.print_exc()
@@ -911,6 +918,6 @@ def delete_bad_model():
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    # sort_new()
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=True, model_max_size=0.5) # 200:326 100:629 0:998
+    sort_new()
+    all_rf_model_list = load_rf_model_new(100, True, need_balance=True, model_max_size=500) # 200:326 100:629 0:998
     # delete_bad_model()

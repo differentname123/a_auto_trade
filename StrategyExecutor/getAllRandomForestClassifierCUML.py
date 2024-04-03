@@ -16,6 +16,7 @@ from cuml.preprocessing import train_test_split
 from joblib import dump
 import cudf
 from sklearn.model_selection import ParameterGrid
+import threading
 
 from StrategyExecutor.common import downcast_dtypes
 
@@ -140,6 +141,12 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
         train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir, report_list)
 
 
+def worker(origin_data_path, report_list):
+    """
+    作为线程工作的函数，调用 train_all_model 函数。
+    """
+    train_all_model(origin_data_path, report_list, profit=1, thread_day_list=[1,2], is_skip=True)
+
 def build_models():
     """
     训练所有模型
@@ -152,7 +159,8 @@ def build_models():
         # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
         '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv']
+        '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+    ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
         for f in fs:
@@ -162,8 +170,14 @@ def build_models():
         for f in fs:
             if f.endswith('report.json'):
                 report_list.append(f.split('_report.json')[0])
-    for origin_data_path in origin_data_path_list:
-        train_all_model(origin_data_path,report_list, profit=1, thread_day_list=[1,2], is_skip=True)
 
+    threads = []
+    for origin_data_path in origin_data_path_list:
+        thread = threading.Thread(target=worker, args=(origin_data_path, report_list))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
 if __name__ == '__main__':
     build_models()

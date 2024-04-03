@@ -18,7 +18,7 @@ from multiprocessing import Pool
 from multiprocessing import Process, current_process
 from itertools import chain, zip_longest
 import shutil
-
+import math
 from imblearn.over_sampling import SMOTE
 from joblib import dump, load
 import numpy as np
@@ -610,6 +610,9 @@ def interleave_lists(list1, list2):
 
 def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, code_list=[]):
     start = time.time()
+    # 获取data的最大和最小日期，保留到天,并且拼接为字符串
+    date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
+
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         all_model_info_list = json.load(file)
     # 将all_model_info_list按照model_path分类，包含‘/mnt/w’的为一类，其余为一类
@@ -623,7 +626,7 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, co
     # 将code_list加入到每个模型中
     for model_info in all_model_info_list:
         model_info['code_list'] = code_list
-    # all_model_info_list = all_model_info_list[-10:]
+    # all_model_info_list = all_model_info_list[-4:]
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
     thread_count = 1
     # 分割模型列表以分配给每个进程
@@ -646,11 +649,12 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, co
     for p in processes:
         p.join()
 
-    all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
-    all_selected_samples.to_csv(f'../temp/all_selected_samples_{date_count_threshold}.csv', index=False)
 
-    code_result_list_samples = pd.concat(code_result_list, ignore_index=True) if code_result_list else pd.DataFrame()
-    code_result_list_samples.to_csv(f'../temp/code_result_list_samples_{date_count_threshold}.csv', index=False)
+    all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
+    all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
+    if code_list != []:
+        code_result_list_samples = pd.concat(code_result_list, ignore_index=True) if code_result_list else pd.DataFrame()
+        code_result_list_samples.to_csv(f'../temp/data/code_result_list_samples_{date_str}.csv', index=False)
 
     print(f"总耗时 {time.time() - start}")
     return all_selected_samples
@@ -698,81 +702,142 @@ def delete_bad_model():
             for model in all_model_list:
                 file.write(model + '\n')
 
-def analysis_model():
-    # 读取'../temp/cha_zhi_result.json'
-    with open('../temp/analysis_model/cha_zhi_result_2024-04-01.json', 'r', encoding='utf-8') as file:
-        result_dict_list = json.load(file)
-    # 将result_dict_list按照true_count_ratio降序排序
-    result_dict_list = sorted(result_dict_list, key=lambda x: x['true_count_50_ratio'], reverse=True)
-    # 将result_dict_list转换为DataFrame
-    result_df = pd.DataFrame(result_dict_list)
-
-
+def fix_param():
     data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # 获取所有的日期
-    dates = data['日期'].unique()
-    print(f"共有 {len(dates)} 个日期")
 
+
+def process_group(group):
     thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
 
-    for date in dates:
-        result_dict_list = []
+    cha_zhi_all = 0
+    cha_zhi_thread_day_1 = 0
+    cha_zhi_others = 0
+    temp_dict = {}
+    total_row_thread_day_1 = 0
+    total_row_others = 0
+    true_counts_all = {f'true_count_{int(t * 100)}': 0 for t in thresholds}
+    true_counts_thread_day_1 = {f'true_count_{int(t * 100)}': 0 for t in thresholds}
+    true_counts_others = {f'true_count_{int(t * 100)}': 0 for t in thresholds}
+    code_name = group['名称'].values[0]
+    total_true_ratio_all = 0
+    total_true_ratio_thread_day_1 = 0
+    total_true_ratio_others = 0
 
-        # 筛选出当前日期的数据
-        data_by_date = data[data['日期'] == date]
+    # 如果 '后续一日最高价利润率' 在group中，取第一个值
+    profit_cols = ['后续1日最高价利润率', '后续2日最高价利润率', '后续3日最高价利润率']
+    profit_values = [group[col].values[0] if col in group.columns else 0 for col in profit_cols]
 
-        # 将data_by_date按照 代码 分组
-        data_group = data_by_date.groupby(['代码'])
+    def process_row(row):
+        param = eval(row['param'])
+        abs_threshold = float(param['abs_threshold'])
+        true_ratio = float(row['1'])
+        model_name = param['model_name']
 
-        # 遍历data_group，获取每个分组的param列
-        for code, group in data_group:
-            cha_zhi = 0
-            temp_dict = {}
-            total_row = group.shape[0]
-            true_counts = {f'true_count_{int(t*100)}': 0 for t in thresholds}
-            code_name = group['名称'].values[0]
+        # 将true_ratio保留两位小数，向下取整
+        true_ratio = math.floor(true_ratio * 100) / 100
+        precision_dict = param['precision_dict']
+        # 尝试获取true_ratio对应的precision
+        precision = precision_dict.get(str(true_ratio), 0)
+        if true_ratio > 0.5 and precision == 0:
+            precision = 1
 
-            # 如果 '后续一日最高价利润率' 在group中，取第一个值
-            profit_cols = ['后续1日最高价利润率', '后续2日最高价利润率', '后续3日最高价利润率']
-            profit_values = [group[col].values[0] if col in group.columns else 0 for col in profit_cols]
+        nonlocal total_true_ratio_all, total_true_ratio_thread_day_1, total_true_ratio_others, cha_zhi_all, cha_zhi_thread_day_1, cha_zhi_others
+        nonlocal total_row_thread_day_1, total_row_others
 
-            # 遍历group中的param列和model_name列
-            for index, row in group.iterrows():
-                param = eval(row['param'])
-                abs_threshold = float(param['abs_threshold'])
-                true_ratio = float(row['1'])
-                for t in thresholds:
-                    if true_ratio > t:
-                        true_counts[f'true_count_{int(t*100)}'] += 1
-                cha_zhi += (true_ratio - abs_threshold)
+        total_true_ratio_all += precision
+        if 'thread_day_1' in model_name:
+            total_true_ratio_thread_day_1 += precision
+            total_row_thread_day_1 += 1
+        else:
+            total_true_ratio_others += precision
+            total_row_others += 1
 
-            for t in thresholds:
-                count_key = f'true_count_{int(t*100)}'
-                ratio_key = f'true_count_{int(t*100)}_ratio'
-                temp_dict[count_key] = true_counts[count_key]
-                temp_dict[ratio_key] = true_counts[count_key] / total_row if total_row != 0 else 0
+        for t in thresholds:
+            if true_ratio > t:
+                true_counts_all[f'true_count_{int(t * 100)}'] += 1
+                if 'thread_day_1' in model_name:
+                    true_counts_thread_day_1[f'true_count_{int(t * 100)}'] += 1
+                else:
+                    true_counts_others[f'true_count_{int(t * 100)}'] += 1
 
-            temp_dict['code'] = code
-            temp_dict['name'] = code_name
-            temp_dict['cha_zhi'] = cha_zhi
-            temp_dict['date'] = date
-            for i, col in enumerate(profit_cols):
-                temp_dict[col] = profit_values[i]
-            result_dict_list.append(temp_dict)
+        cha_zhi = true_ratio - abs_threshold
+        cha_zhi_all += cha_zhi
+        if 'thread_day_1' in model_name:
+            cha_zhi_thread_day_1 += cha_zhi
+        else:
+            cha_zhi_others += cha_zhi
 
-        # 将result_dict_list按照cha_zhi降序排序
-        result_dict_list = sorted(result_dict_list, key=lambda x: x['cha_zhi'], reverse=True)
+    group.apply(process_row, axis=1)
 
-        # 创建日期目录，如果不存在
-        date_dir = f"../temp/analysis_model"
-        if not os.path.exists(date_dir):
-            os.makedirs(date_dir)
+    for t in thresholds:
+        count_key = f'true_count_{int(t * 100)}'
+        ratio_key = f'true_count_{int(t * 100)}_ratio'
+        temp_dict[count_key] = true_counts_all[count_key]
+        temp_dict[ratio_key] = true_counts_all[count_key] / group.shape[0] if group.shape[0] != 0 else 0
+        temp_dict[f'{count_key}_thread_day_1'] = true_counts_thread_day_1[count_key]
+        temp_dict[f'{ratio_key}_thread_day_1'] = true_counts_thread_day_1[
+                                                     count_key] / total_row_thread_day_1 if total_row_thread_day_1 != 0 else 0
+        temp_dict[f'{count_key}_others'] = true_counts_others[count_key]
+        temp_dict[f'{ratio_key}_others'] = true_counts_others[
+                                               count_key] / total_row_others if total_row_others != 0 else 0
 
-        # 将result_dict_list写入文件，注意不要中文乱码
-        file_path = os.path.join(date_dir, f"cha_zhi_result_{date}.json")
-        with open(file_path, 'w', encoding='utf-8') as file:
-            json.dump(result_dict_list, file, ensure_ascii=False)
-        print(f"日期 {date} 分析完成")
+    temp_dict['code'] = group['代码'].values[0]
+    temp_dict['name'] = code_name
+    temp_dict['cha_zhi_all'] = cha_zhi_all
+    temp_dict['cha_zhi_thread_day_1'] = cha_zhi_thread_day_1
+    temp_dict['cha_zhi_others'] = cha_zhi_others
+    temp_dict['date'] = group['日期'].values[0]
+    temp_dict['total_true_ratio_all'] = total_true_ratio_all
+    temp_dict['total_true_ratio_thread_day_1'] = total_true_ratio_thread_day_1
+    temp_dict['total_true_ratio_others'] = total_true_ratio_others
+    for i, col in enumerate(profit_cols):
+        temp_dict[col] = profit_values[i]
+
+    return temp_dict
+
+def analysis_model():
+    # # 读取'../temp/cha_zhi_result.json'
+    # with open('../temp/analysis_model/cha_zhi_result_2024-04-01.json', 'r', encoding='utf-8') as file:
+    #     result_dict_list = json.load(file)
+    # # 将result_dict_list按照true_count_ratio降序排序
+    # result_dict_list = sorted(result_dict_list, key=lambda x: x['true_count_50_ratio'], reverse=True)
+    # # 将result_dict_list转换为DataFrame
+    # result_df = pd.DataFrame(result_dict_list)
+    # data = pd.read_csv('../temp/analysis_model/cha_zhi_result_2024-01-02.csv', low_memory=False, dtype={'code': str})
+
+    # 遍历../temp/data目录下的所有文件，筛选出以code_result_list_samples_开头的文件
+    data_files = []
+    for root, dirs, files in os.walk('../temp/data'):
+        for file in files:
+            if file.startswith('code_result_list_samples_'):
+                full_name = os.path.join(root, file)
+                data_files.append(full_name)
+    for data_file in data_files:
+        data = pd.read_csv(data_file, low_memory=False, dtype={'代码': str})
+        # 获取所有的日期
+        dates = data['日期'].unique()
+        print(f"共有 {len(dates)} 个日期")
+
+        for date in dates:
+            # 筛选出当前日期的数据
+            data_by_date = data[data['日期'] == date]
+
+            # 将data_by_date按照 代码 分组，并对每个分组应用process_group函数
+            result_dict_list = data_by_date.groupby(['代码']).apply(process_group).tolist()
+
+            # 将result_dict_list按照cha_zhi_all降序排序
+            result_dict_list = sorted(result_dict_list, key=lambda x: x['cha_zhi_all'], reverse=True)
+
+            # 创建日期目录，如果不存在
+            date_dir = f"../temp/analysis_model"
+            if not os.path.exists(date_dir):
+                os.makedirs(date_dir)
+            # 将result_dict_list转换为DataFrame
+            result_df = pd.DataFrame(result_dict_list)
+            # 将result_dict_list写入文件，注意不要中文乱码
+            file_path = os.path.join(date_dir, f"cha_zhi_result_{date}.csv")
+            result_df.to_csv(file_path, index=False, encoding='utf-8')
+            print(f"日期 {date} 分析完成")
 
 
 
@@ -798,13 +863,34 @@ if __name__ == '__main__':
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-01_real_time.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-03_real_time.csv')
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
     data = low_memory_load('../train_data/2024_data.csv')
     data['日期'] = pd.to_datetime(data['日期'])
-    data = data[data['日期'] >= '2024-03-01']
-    # 截取data最后4000行
-    # data = data.iloc[-4000:]
-    # data = {}
-    get_all_good_data_with_model_name_list_new(data, 50, 'all')
+    # get_all_good_data_with_model_name_list_new(data, 50)
+
+
+    data = data[data['日期'] >= '2024-03-13']
+    # 按照日期分组
+    data_group = data.groupby(['日期'])
+    # 初始化一个临时列表用于存储五个分组
+    temp_group_list = []
+    # 初始化一个计数器
+    counter = 0
+
+    # 迭代每个分组
+    for date, group in data_group:
+        # 将分组添加到临时列表
+        temp_group_list.append(group)
+        # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+        if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+            # 将五个分组的数据合并为一个DataFrame
+            batch_data = pd.concat(temp_group_list)
+            # 对这批数据执行函数
+            get_all_good_data_with_model_name_list_new(batch_data, 50, 'all')
+            # 清空临时列表，为下一个批次做准备
+            temp_group_list = []
+            # break
+        # 更新计数器
+        counter += 1
     # load_rf_model_new()
