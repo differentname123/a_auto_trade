@@ -173,11 +173,12 @@ def build_models():
 
     threads = []
     for origin_data_path in origin_data_path_list:
-        thread = threading.Thread(target=worker, args=(origin_data_path, report_list))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
+        worker(origin_data_path, report_list)
+    #     thread = threading.Thread(target=worker, args=(origin_data_path, report_list))
+    #     threads.append(thread)
+    #     thread.start()
+    #
+    # for thread in threads:
+    #     thread.join()
 if __name__ == '__main__':
     build_models()

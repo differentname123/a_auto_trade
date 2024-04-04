@@ -371,7 +371,7 @@ def get_all_model_report():
                 for f in fs:
                     full_name = os.path.join(root, f)
                     # 获取full_name文件的大小，如果大于4G，则跳过
-                    if os.path.getsize(full_name) > 0.5 * 1024 ** 3:
+                    if os.path.getsize(full_name) > 5 * 1024 ** 3:
                         print(f"模型 {full_name} 大小超过4G，跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:

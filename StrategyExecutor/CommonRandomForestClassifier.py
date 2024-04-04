@@ -522,7 +522,7 @@ def process_model_new(rf_model_map, data):
 
 def model_worker(model_info_list, data, result_list, code_result_list):
     print(f"Process {current_process().name} started.")
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(process_model_new, model_info, data): model_info for model_info in model_info_list}
         for future in as_completed(futures):
             model_info = futures[future]
