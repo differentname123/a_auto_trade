@@ -10,6 +10,7 @@
 """
 import json
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
 import time
 from cuml.ensemble import RandomForestClassifier
 from cuml.preprocessing import train_test_split
@@ -19,6 +20,7 @@ from sklearn.model_selection import ParameterGrid
 import threading
 
 from StrategyExecutor.common import downcast_dtypes
+
 
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
@@ -158,7 +160,7 @@ def build_models():
         # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        # '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []

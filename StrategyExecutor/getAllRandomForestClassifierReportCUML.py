@@ -9,8 +9,11 @@
 :description:
 
 """
+import concurrent.futures
+
 import json
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第一张GPU（2080），索引从0开始
 import time
 import traceback
 import cudf
@@ -398,8 +401,14 @@ def get_all_model_report():
         signal_columns = [column for column in data.columns if '信号' in column]
         X_test = data[signal_columns]
         print(f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
-        for full_name, model_name in model_list:
-            get_model_report(full_name, model_name, file_path, final_data, X_test)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            futures = []
+            for full_name, model_name in model_list:
+                future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
+                futures.append(future)
+
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
 
 
 if __name__ == '__main__':
