@@ -11,6 +11,7 @@
 import json
 import multiprocessing
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
 import time
 import traceback
 import warnings

@@ -13,7 +13,7 @@ import concurrent.futures
 
 import json
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第一张GPU（2080），索引从0开始
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第一张GPU（2080），索引从0开始
 import time
 import traceback
 import cudf
@@ -352,7 +352,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return {}
 
 
-def get_all_model_report():
+def get_all_model_report(max_size=0.5, min_size=0):
     """
     使用多进程获取所有模型的报告。
     """
@@ -374,8 +374,8 @@ def get_all_model_report():
                 for f in fs:
                     full_name = os.path.join(root, f)
                     # 获取full_name文件的大小，如果大于4G，则跳过
-                    if os.path.getsize(full_name) > 5 * 1024 ** 3:
-                        print(f"模型 {full_name} 大小超过4G，跳过。")
+                    if os.path.getsize(full_name) > max_size * 1024 ** 3 or os.path.getsize(full_name) < min_size * 1024 ** 3:
+                        # print(f"模型 {full_name} 大小超过4G，跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
@@ -412,4 +412,4 @@ def get_all_model_report():
 
 
 if __name__ == '__main__':
-    get_all_model_report()
+    get_all_model_report(0.3, 0)

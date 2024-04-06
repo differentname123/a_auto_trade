@@ -260,7 +260,7 @@ def calculate_ratio_and_dynamic_frequency(data, key_list, ratio_windows=[5, 10],
     return data  # 确保函数返回更新后的DataFrame
 
 
-def mark_holiday_eve_and_post_v3(data, date_column):
+def mark_holiday_eve_and_post_v3(data, date_column, next_saturday=False):
     """
     标记节前和节后的第一天、第二天和第三天，考虑到连续工作日小于3天的情况。
 
@@ -303,6 +303,23 @@ def mark_holiday_eve_and_post_v3(data, date_column):
                 next_idx = idx + i - 1
                 if next_idx <= data.index[-1]:
                     data.at[next_idx, f'是否_信号_节假日_{-i}天'] = True
+
+    last_date = data[date_column].max()
+    if next_saturday:
+        # 将next_saturday转换为时间格式
+        next_saturday = pd.to_datetime(next_saturday)
+    else:
+        next_saturday = last_date + pd.Timedelta(days=(5 - last_date.weekday()) % 7)
+    days_diff = (next_saturday - last_date).days
+
+    # 如果最近的星期六距离最后一天在3天之内，将其标记
+    if days_diff <= 3:
+        last_date_index = data.index[data[date_column] == last_date].tolist()  # Find the indices of the last date
+        for i in range(days_diff, 4):
+            idx = last_date_index[0] - i + days_diff
+            if idx in data.index:
+                data.at[idx, f'是否_信号_节假日_{i}天'] = True
+
 
     data.drop(columns=['date_diff'], inplace=True)
 
@@ -412,7 +429,7 @@ def calculate_future_high_prices(data):
 
     return data
 
-def get_data_feature(data):
+def get_data_feature(data, next_saturday=False):
     """
     Generate features for a given dataset. The dataset includes open, close, high, low prices,
     volume, date, ticker symbol, and turnover rate. This function adds technical indicators,
@@ -431,7 +448,7 @@ def get_data_feature(data):
         return None
 
     # Mark the days before and after holidays
-    mark_holiday_eve_and_post_v3(data, '日期')
+    mark_holiday_eve_and_post_v3(data, '日期', next_saturday=next_saturday)
 
     # Calculate change percentages for close, open, high, and low prices over various periods
     calculate_change_percentages(data, periods=[3, 5, 10], key_list=['收盘'])
@@ -775,10 +792,10 @@ if __name__ == '__main__':
     # all_data_df = load_and_merge_data(all_files)
     # print(all_data_df)
 
-    file_path = '../daily_data_exclude_new_can_buy'
-    out_path = '../feature_data_exclude_new_can_buy'
-    generate_features_for_all_files(file_path, out_path)
-    load_bad_data()
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # out_path = '../feature_data_exclude_new_can_buy'
+    # generate_features_for_all_files(file_path, out_path)
+    # load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
     # # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
@@ -788,10 +805,12 @@ if __name__ == '__main__':
     # # 找到data比new_data多的数据
     # print(data[~data.isin(new_data).all(1)])
 
-    # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
-    # data = load_data(file_path)
-    # new_data = get_data_feature(data)
-    # print(new_data)
+    file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
+    data = load_data(file_path)
+    # 除去data最后一行
+    # data = data[:-1]
+    new_data = get_data_feature(data, '2024-01-01')
+    print(new_data)
 
     # data = pd.read_csv('../train_data/index_data.csv')
     # get_index_data_feature(data)

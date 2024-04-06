@@ -10,7 +10,10 @@
 """
 import json
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
+
+from StrategyExecutor.getAllRandomForestClassifierReport import get_all_model_report
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU（2060），索引从0开始
 import time
 from cuml.ensemble import RandomForestClassifier
 from cuml.preprocessing import train_test_split
@@ -176,6 +179,7 @@ def build_models():
     threads = []
     for origin_data_path in origin_data_path_list:
         worker(origin_data_path, report_list)
+    # get_all_model_report(500, 0.5)
     #     thread = threading.Thread(target=worker, args=(origin_data_path, report_list))
     #     threads.append(thread)
     #     thread.start()
