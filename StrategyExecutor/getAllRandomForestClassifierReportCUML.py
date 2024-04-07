@@ -10,7 +10,6 @@
 
 """
 import concurrent.futures
-
 import json
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第一张GPU（2080），索引从0开始
@@ -20,11 +19,7 @@ import cudf
 from joblib import dump, load
 import numpy as np
 from StrategyExecutor.common import low_memory_load, downcast_dtypes
-import rmm
 import gc
-# 禁用 RMM 内存池
-rmm.reinitialize(pool_allocator=False)
-
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
@@ -34,7 +29,6 @@ DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/de
 MODEL_OTHER = '/mnt/w/project/python_project/a_auto_trade/model/other'
 TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 import warnings
-
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
 def load_existing_report(report_path):
@@ -46,7 +40,6 @@ def load_existing_report(report_path):
         except json.JSONDecodeError:
             result_dict = {}
     return result_dict
-
 
 def load_model(abs_name, model_name):
     try:
@@ -61,20 +54,11 @@ def load_model(abs_name, model_name):
         print(f"模型 {model_name} 不存在，跳过。")
         return None
 
-
 def is_report_exists(result_dict, model_name, file_path):
     if model_name in result_dict and file_path in result_dict[model_name]:
         if result_dict[model_name][file_path] != {}:
             return True
     return False
-
-
-def load_data(file_path):
-    start = time.time()
-    data = low_memory_load(file_path)
-    print(f"加载数据 {file_path} 耗时: {time.time() - start:.2f}秒")
-    return data
-
 
 def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_threshold, tree_threshold, thread_ratio,
                           this_key, temp_dict_result):
@@ -159,27 +143,9 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
     temp_dict_result[this_key].append(temp_dict)
     return temp_dict_result, find_true_flag
 
-
-def update_this_key_map(temp_dict_result, this_key_map, file_path, model_name):
-    for key, value in temp_dict_result.items():
-        temp_dict_list = sorted(value, key=lambda x: x['false_score'], reverse=True)
-        false_flag = True
-        true_flag = True
-        if temp_dict_list[0]['false_score'] > 0:
-            false_flag = False
-        temp_dict_list = sorted(value, key=lambda x: x['score'], reverse=True)
-        if temp_dict_list[0]['score'] > 0:
-            true_flag = False
-        temp_dict_result[key] = temp_dict_list
-        if false_flag and true_flag:
-            print(f"分数全为0 {key} 对于文件 {file_path} 模型 {model_name}的，跳过后续")
-            this_key_map[key] = False
-
-
 def save_report(report_path, result_dict):
     with open(report_path, 'w') as f:
         json.dump(result_dict, f)
-
 
 def create_temp_dict(tree_threshold, cha_zhi_threshold, abs_threshold, unique_dates, precision, predicted_true_samples,
                      total_samples, unique_dates_false, precision_false, predicted_false_samples_false, thread_ratio,
@@ -207,65 +173,6 @@ def create_temp_dict(tree_threshold, cha_zhi_threshold, abs_threshold, unique_da
     for key, value in other_dict.items():
         temp_dict[key] = value
     return temp_dict
-
-
-def process_cha_zhi_threshold(data, y_pred_proba, y_test, total_samples, cha_zhi_threshold, tree_threshold,
-                              thread_ratio, this_key, temp_dict_result):
-    proba_diff = y_pred_proba[1] - y_pred_proba[0]
-    high_confidence_diff = (proba_diff > cha_zhi_threshold)
-    proba_diff_neg = y_pred_proba[0] - y_pred_proba[1]
-    high_confidence_diff_neg = (proba_diff_neg > cha_zhi_threshold)
-    if np.sum(high_confidence_diff) == 0 and np.sum(high_confidence_diff_neg) == 0:
-        return temp_dict_result
-
-    selected_data_diff = data[high_confidence_diff]
-    unique_dates_diff = selected_data_diff['日期'].unique().to_pandas()
-    selected_true_diff = high_confidence_diff & y_test
-    precision_diff = np.sum(selected_true_diff) / np.sum(high_confidence_diff) if np.sum(
-        high_confidence_diff) > 0 else 0
-    predicted_true_samples_diff = np.sum(high_confidence_diff)
-
-    selected_data_diff_neg = data[high_confidence_diff_neg]
-    unique_dates_diff_neg = selected_data_diff_neg['日期'].unique().to_pandas()
-    selected_false_diff_neg = high_confidence_diff_neg & ~y_test
-    precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
-        high_confidence_diff_neg) > 0 else 0
-    predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
-
-    daily_precision_diff = {}
-    daily_precision_diff_neg = {}
-    if precision_diff >= thread_ratio or precision_false >= thread_ratio:
-        for date in unique_dates_diff:
-            date_mask = selected_data_diff['日期'] == date
-            date_selected_true_diff = selected_true_diff[high_confidence_diff]
-            date_true_count = np.sum(date_selected_true_diff[date_mask])
-            date_count = np.sum(date_mask)
-            daily_precision_diff[str(date)] = {
-                'precision': date_true_count / date_count if date_count > 0 else 0,
-                'count': int(date_count),
-                'false_count': int(date_count - date_true_count),
-                'true_count': int(date_true_count)
-            }
-        for date in unique_dates_diff_neg:
-            date_mask_neg = selected_data_diff_neg['日期'] == date
-            date_selected_false_diff_neg = selected_false_diff_neg[high_confidence_diff_neg]
-            date_false_count = np.sum(date_selected_false_diff_neg[date_mask_neg])
-            date_count_neg = np.sum(date_mask_neg)
-            daily_precision_diff_neg[str(date)] = {
-                'precision': date_false_count / date_count_neg if date_count_neg > 0 else 0,
-                'count': int(date_count_neg),
-                'false_count': int(date_false_count),
-                'true_count': int(date_count_neg - date_false_count)
-            }
-
-    temp_dict = create_temp_dict(tree_threshold, cha_zhi_threshold, 0, unique_dates_diff, precision_diff,
-                                 predicted_true_samples_diff, total_samples, unique_dates_diff_neg, precision_false,
-                                 predicted_false_samples_diff_neg, thread_ratio, daily_precision_diff,
-                                 daily_precision_diff_neg)
-    if this_key not in temp_dict_result:
-        temp_dict_result[this_key] = []
-    temp_dict_result[this_key].append(temp_dict)
-    return temp_dict_result
 
 def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values, cha_zhi_values, thread_ratio,
                        this_key_map, temp_dict_result):
@@ -302,7 +209,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             new_temp_dict[file_path] = result_dict[model_name][file_path]
             print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在,跳过。")
             return
-
+        file_start_time = time.time()
         model = load_model(abs_name, model_name)
         if model is None:
             return
@@ -312,7 +219,6 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             'tree_1_abs_1': False, 'tree_0_abs_1': True,
             'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
         }
-        file_start_time = time.time()
         temp_dict_result = {}
         print("加载数据{}...".format(file_path))
         profit = int(model_name.split('profit_')[1].split('_')[0])
@@ -338,17 +244,11 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         del model
         del y_pred_proba
         gc.collect()
-        # 如果abs_name的大小超过4G，则延时10s
-        if os.path.getsize(abs_name) > 2 * 1024 ** 3:
-            print(f"大小为 {os.path.getsize(abs_name) /1024 ** 3}G 模型 {abs_name} 大小超过2G，延时10s。")
-            time.sleep(10)
-            gc.collect()
-            time.sleep(10)
         return result_dict
     except BaseException as e:
         traceback.print_exc()
-        os.remove(abs_name)
-        print(f"已删除生成报告时出现异常: {e}")
+        # os.remove(abs_name)
+        # print(f"已删除生成报告时出现异常: {e}")
         return {}
 
 
@@ -368,17 +268,30 @@ def get_all_model_report(max_size=0.5, min_size=0):
                 if f.endswith('report.json'):
                     report_list.append(f.split('_report.json')[0])
         model_list = []
+        size_list = []
+
         for model_path in MODEL_PATH_LIST:
-        # 获取所有模型的文件名
+            # 获取所有模型的文件名
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
                     # 获取full_name文件的大小，如果大于4G，则跳过
-                    if os.path.getsize(full_name) > max_size * 1024 ** 3 or os.path.getsize(full_name) < min_size * 1024 ** 3:
+                    file_size = os.path.getsize(full_name)
+                    if file_size > max_size * 1024 ** 3 or file_size < min_size * 1024 ** 3:
                         # print(f"模型 {full_name} 大小超过4G，跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
+                        size_list.append(file_size)
+
+        # 根据文件大小对索引进行排序
+        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=False)
+
+        # 根据排序后的索引重新生成model_list
+        sorted_model_list = [model_list[i] for i in sorted_indices]
+
+        # 将排序后的列表赋值给model_list
+        model_list = sorted_model_list
         print(
             f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)}")
         # 随机打乱model_list
@@ -401,15 +314,16 @@ def get_all_model_report(max_size=0.5, min_size=0):
         signal_columns = [column for column in data.columns if '信号' in column]
         X_test = data[signal_columns]
         print(f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = []
-            for full_name, model_name in model_list:
-                future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
-                futures.append(future)
-
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
-
+        for full_name, model_name in model_list:
+            result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        #     futures = []
+        #     for full_name, model_name in model_list:
+        #         future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
+        #         futures.append(future)
+        #
+        #     for future in concurrent.futures.as_completed(futures):
+        #         future.result()
 
 if __name__ == '__main__':
     get_all_model_report(0.3, 0)

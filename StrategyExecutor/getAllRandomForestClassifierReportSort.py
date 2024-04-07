@@ -882,7 +882,7 @@ def sort_new():
                         traceback.print_exc()
                         pass
     # 将good_model_list先按照date_count降序排序再按照max_score降序排序
-    good_model_list = sorted(good_model_list, key=lambda x: (x['max_score'], x['date_count']), reverse=True) # 10个好的 最大46
+    good_model_list = sorted(good_model_list, key=lambda x: (-x['abs_threshold'], x['date_count']), reverse=True) # 10个好的 最大46
     with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'w') as outfile:
         json.dump(good_model_list, outfile, indent=4)
 
@@ -915,9 +915,63 @@ def delete_bad_model():
     delete_model(model_name_list)
     move_model_report(model_name_list)
 
+def find_small_abs(thread_count=100, need_filter=True):
+    file_path_list = ['../model/deleted_reports', '../model/reports']
+    good_model_list = []
+    for file_path in file_path_list:
+        for root, ds, fs in os.walk(file_path):
+            for f in fs:
+                if f.endswith('.json'):
+                    # f = 'RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.4_thread_day_1_true_ratio_0.3107309813750629_max_depth_100_min_samples_leaf_1_min_samples_split_2_n_estimators_600.joblib_report.json'
+                    fullname = os.path.join(root, f)
+                    with open(fullname, 'r') as file:
+                        try:
+                            result_dict = json.load(file)
+                            for model_name, report_value in result_dict.items():
+                                # if 'thread_day_1' not in model_name:
+                                #     continue
+                                for test_data_path, detail_report in report_value.items():
+                                    if 'all' in test_data_path:
+                                        abs_detail = detail_report['tree_0_abs_1'][-1]
+                                        if abs_detail['unique_dates'] > thread_count:
+                                            temp_dict = {}
+                                            temp_dict['model_name'] = model_name
+                                            temp_dict['abs_threshold'] = abs_detail['abs_threshold']
+                                            temp_dict['unique_dates'] = abs_detail['unique_dates']
+                                            temp_dict['true_stocks_set'] = abs_detail['true_stocks_set']
+                                            good_model_list.append(temp_dict)
+                        except Exception as e:
+                            pass
+
+    # 将good_model_list写入文件
+    good_model_list = sorted(good_model_list, key=lambda x: (-x['abs_threshold'], x['unique_dates']), reverse=True) # 10个好的 最大46
+    exist_stocks = set()
+    result_dict_list = []
+    for sorted_scores in good_model_list:
+        if need_filter:
+            current_stocks = set(sorted_scores['true_stocks_set'])
+            # exist_flag = False
+            # # 判断current_stocks是否被包含在exist_stocks中
+            # for exist_stocks in exist_stocks_list:
+            #     if len(current_stocks - exist_stocks) == 0:
+            #         print(f"模型 {model_name} 已经有相似的模型，跳过。")
+            #         exist_flag = True
+            #         break
+            # if exist_flag:
+            #     continue
+            # exist_stocks_list.append(current_stocks)
+            if len(current_stocks - exist_stocks) == 0:
+                print(f"模型 {sorted_scores['model_name']} 已经有相似的模型，跳过。")
+                continue
+            exist_stocks = exist_stocks | current_stocks
+            sorted_scores['true_stocks_set'] = []
+            result_dict_list.append(sorted_scores)
+    with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_reports_cuml.json', 'w') as outfile:
+        json.dump(result_dict_list, outfile, indent=4)
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    sort_new()
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=True, model_max_size=500) # 200:326 100:629 0:998
+    find_small_abs()
+    # sort_new()
+    # all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=500) # 200:326 100:938 0:998
     # delete_bad_model()

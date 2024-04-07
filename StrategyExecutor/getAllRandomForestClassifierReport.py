@@ -20,10 +20,7 @@ import cudf
 from joblib import dump, load
 import numpy as np
 from StrategyExecutor.common import low_memory_load, downcast_dtypes
-import rmm
-import gc
-# 禁用 RMM 内存池
-rmm.reinitialize(pool_allocator=False)
+from cuml import Handle
 
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
@@ -302,7 +299,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             new_temp_dict[file_path] = result_dict[model_name][file_path]
             print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在,跳过。")
             return
-
+        file_start_time = time.time()
         model = load_model(abs_name, model_name)
         if model is None:
             return
@@ -312,7 +309,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             'tree_1_abs_1': False, 'tree_0_abs_1': True,
             'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
         }
-        file_start_time = time.time()
+
         temp_dict_result = {}
         print("加载数据{}...".format(model_name))
         profit = int(model_name.split('profit_')[1].split('_')[0])
@@ -324,7 +321,9 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
 
         if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
             start = time.time()
+            model.handle = Handle()
             y_pred_proba = model.predict_proba(X_test)
+            model.handle.sync()
             print(f" 预测耗时: {time.time() - start:.2f}秒 {model_name}")
             temp_dict_result = process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values,
                                                   cha_zhi_values, thread_ratio, this_key_map, temp_dict_result)
@@ -339,8 +338,8 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return result_dict
     except BaseException as e:
         traceback.print_exc()
-        os.remove(abs_name)
-        print(f"已删除生成报告时出现异常: {e}")
+        # os.remove(abs_name)
+        # print(f"已删除生成报告时出现异常: {e}")
         return {}
 
 
@@ -360,17 +359,30 @@ def get_all_model_report(max_size=0.5, min_size=0):
                 if f.endswith('report.json'):
                     report_list.append(f.split('_report.json')[0])
         model_list = []
+        size_list = []
+
         for model_path in MODEL_PATH_LIST:
-        # 获取所有模型的文件名
+            # 获取所有模型的文件名
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
                     # 获取full_name文件的大小，如果大于4G，则跳过
-                    if os.path.getsize(full_name) > max_size * 1024 ** 3 or os.path.getsize(full_name) < min_size * 1024 ** 3:
+                    file_size = os.path.getsize(full_name)
+                    if file_size > max_size * 1024 ** 3 or file_size < min_size * 1024 ** 3:
                         # print(f"模型 {full_name} 大小超过4G，跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
+                        size_list.append(file_size)
+
+        # 根据文件大小对索引进行排序
+        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=False)
+
+        # 根据排序后的索引重新生成model_list
+        sorted_model_list = [model_list[i] for i in sorted_indices]
+
+        # 将排序后的列表赋值给model_list
+        model_list = sorted_model_list
         print(
             f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)}")
         # 随机打乱model_list
@@ -393,14 +405,16 @@ def get_all_model_report(max_size=0.5, min_size=0):
         signal_columns = [column for column in data.columns if '信号' in column]
         X_test = data[signal_columns]
         print(f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            futures = []
-            for full_name, model_name in model_list:
-                future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
-                futures.append(future)
-
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
+        for full_name, model_name in model_list:
+            result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        #     futures = []
+        #     for full_name, model_name in model_list:
+        #         future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
+        #         futures.append(future)
+        #
+        #     for future in concurrent.futures.as_completed(futures):
+        #         future.result()
 
 
 if __name__ == '__main__':

@@ -8,12 +8,12 @@
 :description:
 
 """
-import json
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
+import json
+import re
 
-from StrategyExecutor.getAllRandomForestClassifierReport import get_all_model_report
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU（2060），索引从0开始
 import time
 from cuml.ensemble import RandomForestClassifier
 from cuml.preprocessing import train_test_split
@@ -24,7 +24,7 @@ import threading
 
 from StrategyExecutor.common import downcast_dtypes
 
-
+TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
@@ -186,5 +186,110 @@ def build_models():
     #
     # for thread in threads:
     #     thread.join()
+
+
+def parse_filename(input_string):
+    # 使用正则表达式匹配需要提取的部分
+    file_name_pattern = r'(profit_\d+_day_\d+_bad_\d+\.\d+)'
+    thread_day_pattern = r'thread_day_(\d+)'
+    max_depth_pattern = r'max_depth_(\d+)'
+    min_samples_leaf_pattern = r'min_samples_leaf_(\d+)'
+    min_samples_split_pattern = r'min_samples_split_(\d+)'
+    n_estimators_pattern = r'n_estimators_(\d+)'
+    true_ratio_pattern = r'true_ratio_([\d\.]+)'  # 新增解析true_ratio的模式
+
+    # 从输入字符串中搜索匹配的模式
+    file_name_match = re.search(file_name_pattern, input_string)
+    thread_day_match = re.search(thread_day_pattern, input_string)
+    max_depth_match = re.search(max_depth_pattern, input_string)
+    min_samples_leaf_match = re.search(min_samples_leaf_pattern, input_string)
+    min_samples_split_match = re.search(min_samples_split_pattern, input_string)
+    n_estimators_match = re.search(n_estimators_pattern, input_string)
+    true_ratio_match = re.search(true_ratio_pattern, input_string)  # 新增匹配true_ratio的代码
+
+    # 提取匹配的结果并构造输出字典
+    parsed_data = {
+        'file_name': file_name_match.group() if file_name_match else None,
+        'thread_day': thread_day_match.group(1) if thread_day_match else None,
+        'max_depth': max_depth_match.group(1) if max_depth_match else None,
+        'min_samples_leaf': min_samples_leaf_match.group(1) if min_samples_leaf_match else None,
+        'min_samples_split': min_samples_split_match.group(1) if min_samples_split_match else None,
+        'n_estimators': n_estimators_match.group(1) if n_estimators_match else None,
+        'true_ratio': true_ratio_match.group(1) if true_ratio_match else None,  # 新增true_ratio的输出
+    }
+
+    return parsed_data
+
+
+def construct_final_path(file_name):
+    # 从file_name中提取 bad 部分的值
+    bad_value_pattern = r'bad_(\d+\.\d+)'
+    bad_match = re.search(bad_value_pattern, file_name)
+
+    # 如果匹配到了bad值，构造最终路径
+    if bad_match:
+        bad_value = bad_match.group(1)
+        final_path = os.path.join(file_name, f'bad_{bad_value}_data_batch_count.csv')
+        return final_path
+    else:
+        raise ValueError("The file_name does not contain a 'bad' value.")
+def train_target_model():
+    # 读取参数列表
+    output_filename = '/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_reports_cuml.json'
+    with open(output_filename, 'r') as file:
+        sorted_scores_list = json.load(file)
+    # 获取sorted_scores_list中的model_name的列表
+    model_name_list = [item['model_name'] for item in sorted_scores_list]
+    # 读取模型参数
+    param_list = []
+    for model_name in model_name_list:
+        param = parse_filename(model_name)
+        param_list.append(param)
+    save_path = MODEL_PATH
+    model_list = []
+    for model_path in MODEL_PATH_LIST:
+        # 获取所有模型的文件名
+        for root, ds, fs in os.walk(model_path):
+            for f in fs:
+                if f.endswith('joblib'):
+                    model_list.append(f)
+
+    # param_list的每个元素都是一个字典，包含了模型的参数，现在需要将param_list按照file_name的值进行分组
+    file_name_dict = {}
+    for param in param_list:
+        file_name = param['file_name']
+        if file_name in file_name_dict:
+            file_name_dict[file_name].append(param)
+        else:
+            file_name_dict[file_name] = [param]
+    for file_name, param_group in file_name_dict.items():
+        # 读取数据集
+        data_path = os.path.join(TRAIN_DATA_PATH, construct_final_path(file_name))
+        data = cudf.read_csv(data_path)
+        signal_columns = [column for column in data.columns if '信号' in column]
+        X = data[signal_columns]
+        X = downcast_dtypes(X)
+        for params in param_group:
+            # 读取标签
+            thread_day = params['thread_day']
+            y = data[f'后续{thread_day}日最高价利润率'] >= 1
+            true_ratio = params['true_ratio']
+            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}.joblib"
+            if model_name in model_list:
+                print(f"模型已存在，跳过: {model_name}")
+                continue
+            model_file_path = os.path.join(save_path, file_name, model_name)
+            exist_model_file_path = os.path.join(save_path, 'existed_model.txt')
+            final_param = {
+                'max_depth': int(params['max_depth']),
+                'min_samples_leaf': int(params['min_samples_leaf']),
+                'min_samples_split': int(params['min_samples_split']),
+                'n_estimators': int(params['n_estimators'])
+            }
+            clf = RandomForestClassifier(**final_param)
+            train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
+
 if __name__ == '__main__':
-    build_models()
+    # build_models()
+
+    train_target_model()
