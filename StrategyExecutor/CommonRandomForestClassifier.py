@@ -8,10 +8,11 @@
 :description:
     通用的一些关于随机森林模型的代码
 """
-import json
-import multiprocessing
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
+import json
+import multiprocessing
+
 import time
 import traceback
 import warnings
@@ -226,7 +227,7 @@ def balance_disk(class_key='/mnt/w'):
         json.dump(all_model_info_list, file)
     return all_model_info_list
 
-def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100):
+def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, abs_threshold=0.71):
     """
     加载随机森林模型
     :param model_path:
@@ -247,6 +248,9 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
     with open(output_filename, 'r') as file:
         sorted_scores_list = json.load(file)
         for sorted_scores in sorted_scores_list:
+            if sorted_scores['abs_threshold'] > abs_threshold:
+                print(f"模型 {model_name} 的阈值大于{abs_threshold}，跳过。")
+                continue
             model_name = sorted_scores['model_name']
             model_file_path = None
             if need_filter:
@@ -281,6 +285,8 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                     other_dict['model_path'] = model_file_path
                     other_dict['model_size'] = model_size
                     all_rf_model_list.append(other_dict)
+            else:
+                print(f"模型 {model_name} 不存在，跳过。")
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     # 将all_rf_model_list存入final_output_filename
     with open(final_output_filename, 'w') as file:
@@ -523,7 +529,7 @@ def process_model_new(rf_model_map, data):
 
 def model_worker(model_info_list, data, result_list, code_result_list):
     print(f"Process {current_process().name} started.")
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_model_new, model_info, data): model_info for model_info in model_info_list}
         for future in as_completed(futures):
             model_info = futures[future]
@@ -629,7 +635,7 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, co
         model_info['code_list'] = code_list
     # all_model_info_list = all_model_info_list[-4:]
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
-    thread_count = 1
+    thread_count = 4
     # 分割模型列表以分配给每个进程
     chunk_size = len(all_model_info_list) // thread_count
     model_chunks = [all_model_info_list[i:i + chunk_size] for i in range(0, len(all_model_info_list), chunk_size)]
@@ -864,34 +870,35 @@ if __name__ == '__main__':
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-03_real_time.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-08_real_time.csv')
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../train_data/2024_data.csv')
+    # data = low_memory_load('../train_data/2024_data.csv')
     data['日期'] = pd.to_datetime(data['日期'])
-    # get_all_good_data_with_model_name_list_new(data, 50)
+    get_all_good_data_with_model_name_list_new(data, 50)
 
 
-    data = data[data['日期'] >= '2024-03-13']
-    # 按照日期分组
-    data_group = data.groupby(['日期'])
-    # 初始化一个临时列表用于存储五个分组
-    temp_group_list = []
-    # 初始化一个计数器
-    counter = 0
-
-    # 迭代每个分组
-    for date, group in data_group:
-        # 将分组添加到临时列表
-        temp_group_list.append(group)
-        # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
-        if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
-            # 将五个分组的数据合并为一个DataFrame
-            batch_data = pd.concat(temp_group_list)
-            # 对这批数据执行函数
-            get_all_good_data_with_model_name_list_new(batch_data, 50, 'all')
-            # 清空临时列表，为下一个批次做准备
-            temp_group_list = []
-            # break
-        # 更新计数器
-        counter += 1
-    # load_rf_model_new()
+    #
+    # data = data[data['日期'] >= '2024-03-13']
+    # # 按照日期分组
+    # data_group = data.groupby(['日期'])
+    # # 初始化一个临时列表用于存储五个分组
+    # temp_group_list = []
+    # # 初始化一个计数器
+    # counter = 0
+    #
+    # # 迭代每个分组
+    # for date, group in data_group:
+    #     # 将分组添加到临时列表
+    #     temp_group_list.append(group)
+    #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+    #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+    #         # 将五个分组的数据合并为一个DataFrame
+    #         batch_data = pd.concat(temp_group_list)
+    #         # 对这批数据执行函数
+    #         get_all_good_data_with_model_name_list_new(batch_data, 50, 'all')
+    #         # 清空临时列表，为下一个批次做准备
+    #         temp_group_list = []
+    #         # break
+    #     # 更新计数器
+    #     counter += 1
+    # # load_rf_model_new()

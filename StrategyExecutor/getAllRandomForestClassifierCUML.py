@@ -88,16 +88,16 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         if model_name in report_list:
             print(f"模型已存在，跳过: {model_name}")
             continue
-        for model_path in MODEL_PATH_LIST:
-            exist_model_file_path = os.path.join(model_path, 'existed_model.txt')
-            if is_skip and os.path.exists(exist_model_file_path):
-                with open(exist_model_file_path, 'r') as f:
-                     # 读取每一行存入existed_model_list，去除换行符
-                    existed_model_list = [line.strip() for line in f]
-                    if model_name in existed_model_list:
-                        print(f"模型已存在，跳过: {model_name}")
-                        flag = True
-                        break
+        # for model_path in MODEL_PATH_LIST:
+        #     exist_model_file_path = os.path.join(model_path, 'existed_model.txt')
+        #     if is_skip and os.path.exists(exist_model_file_path):
+        #         with open(exist_model_file_path, 'r') as f:
+        #              # 读取每一行存入existed_model_list，去除换行符
+        #             existed_model_list = [line.strip() for line in f]
+        #             if model_name in existed_model_list:
+        #                 print(f"模型已存在，跳过: {model_name}")
+        #                 flag = True
+        #                 break
         if flag:
             continue
         exist_model_file_path = os.path.join(save_path, 'existed_model.txt')
@@ -163,7 +163,7 @@ def build_models():
         # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
         '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []
@@ -175,6 +175,15 @@ def build_models():
         for f in fs:
             if f.endswith('report.json'):
                 report_list.append(f.split('_report.json')[0])
+
+    model_list = []
+    for model_path in MODEL_PATH_LIST:
+        # 获取所有模型的文件名
+        for root, ds, fs in os.walk(model_path):
+            for f in fs:
+                if f.endswith('joblib'):
+                    model_list.append(f)
+    report_list.extend(model_list)
 
     threads = []
     for origin_data_path in origin_data_path_list:
@@ -290,6 +299,6 @@ def train_target_model():
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    # build_models()
+    build_models()
 
-    train_target_model()
+    # train_target_model()

@@ -915,7 +915,7 @@ def delete_bad_model():
     delete_model(model_name_list)
     move_model_report(model_name_list)
 
-def find_small_abs(thread_count=100, need_filter=True):
+def find_small_abs(thread_count=100, need_filter=True, abs_threshold=0.8):
     file_path_list = ['../model/deleted_reports', '../model/reports']
     good_model_list = []
     for file_path in file_path_list:
@@ -948,6 +948,9 @@ def find_small_abs(thread_count=100, need_filter=True):
     exist_stocks = set()
     result_dict_list = []
     for sorted_scores in good_model_list:
+        if sorted_scores['abs_threshold'] > abs_threshold:
+            print(f"模型 {model_name} 的阈值大于{abs_threshold}，跳过。")
+            continue
         if need_filter:
             current_stocks = set(sorted_scores['true_stocks_set'])
             # exist_flag = False
@@ -971,7 +974,7 @@ def find_small_abs(thread_count=100, need_filter=True):
 
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
-    find_small_abs()
+    # find_small_abs()
     # sort_new()
-    # all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=500) # 200:326 100:938 0:998
+    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=100, abs_threshold=0.8) # 200:326 100:938 0:998
     # delete_bad_model()
