@@ -907,15 +907,15 @@ def delete_bad_model():
     with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'r') as file:
         all_model_reports = json.load(file)
     model_name_list = []
-    all_rf_model_list = load_rf_model_new(0, True)
+    all_rf_model_list = load_rf_model_new(100, True)
     good_model_name = [model['model_name'] for model in all_rf_model_list]
     for model in all_model_reports:
         if model['model_name'] not in good_model_name:
             model_name_list.append(model['model_name'])
     delete_model(model_name_list)
-    move_model_report(model_name_list)
+    # move_model_report(model_name_list)
 
-def find_small_abs(thread_count=100, need_filter=True, abs_threshold=0.8):
+def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
     file_path_list = ['../model/deleted_reports', '../model/reports']
     good_model_list = []
     for file_path in file_path_list:
@@ -976,5 +976,10 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=0.8):
 if __name__ == '__main__':
     # find_small_abs()
     # sort_new()
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=100, abs_threshold=0.8) # 200:326 100:938 0:998
+
+    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=0.1, abs_threshold=1) # 200:326 100:938 0:998
     # delete_bad_model()
+
+    # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]
+    # for model_max_size in model_max_size_list:
+    #     all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=model_max_size, abs_threshold=1)

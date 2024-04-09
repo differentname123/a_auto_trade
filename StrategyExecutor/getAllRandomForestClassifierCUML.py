@@ -9,7 +9,7 @@
 
 """
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU（2060），索引从0开始
 import json
 import re
 
@@ -244,11 +244,17 @@ def construct_final_path(file_name):
         raise ValueError("The file_name does not contain a 'bad' value.")
 def train_target_model():
     # 读取参数列表
-    output_filename = '/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_reports_cuml.json'
-    with open(output_filename, 'r') as file:
-        sorted_scores_list = json.load(file)
-    # 获取sorted_scores_list中的model_name的列表
-    model_name_list = [item['model_name'] for item in sorted_scores_list]
+    # output_filename = '/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_reports_cuml.json'
+    # with open(output_filename, 'r') as file:
+    #     sorted_scores_list = json.load(file)
+    # # 获取sorted_scores_list中的model_name的列表
+    # model_name_list = [item['model_name'] for item in sorted_scores_list]
+    model_name_list = []
+    file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
+    with open(file_path, 'r') as lines:
+        for line in lines:
+            model_name_list.append(line.strip())
+
     # 读取模型参数
     param_list = []
     for model_name in model_name_list:
@@ -299,6 +305,6 @@ def train_target_model():
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    build_models()
+    # build_models()
 
-    # train_target_model()
+    train_target_model()

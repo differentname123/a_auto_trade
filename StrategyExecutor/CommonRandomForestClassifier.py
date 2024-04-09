@@ -9,6 +9,10 @@
     通用的一些关于随机森林模型的代码
 """
 import os
+import random
+import sys
+import psutil
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
 import json
 import multiprocessing
@@ -227,7 +231,7 @@ def balance_disk(class_key='/mnt/w'):
         json.dump(all_model_info_list, file)
     return all_model_info_list
 
-def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, abs_threshold=0.71):
+def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, abs_threshold=1):
     """
     加载随机森林模型
     :param model_path:
@@ -236,6 +240,9 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
     all_rf_model_list = []
     output_filename = '../final_zuhe/other/all_model_reports_cuml.json'
     final_output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
+    final_output_filename_back = f'../final_zuhe/other/good_model_list_thread_1/good_all_model_reports_cuml_{date_count_threshold}_{model_max_size}.json'
+    not_estimated_model_list = []
+    not_estimated_model_list_back = f'../final_zuhe/other/not_estimated_model_list.txt'
     model_file_list = []
     for model_path in MODEL_PATH_LIST:
         # 获取model_path下的所有文件的全路径，如果是目录还需要继续递归
@@ -248,11 +255,19 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
     with open(output_filename, 'r') as file:
         sorted_scores_list = json.load(file)
         for sorted_scores in sorted_scores_list:
+            if sorted_scores['date_count'] <= date_count_threshold:
+                print(f"模型 {sorted_scores['model_name']} 的date_count小于{date_count_threshold}，跳过。")
+                continue
             if sorted_scores['abs_threshold'] > abs_threshold:
                 print(f"模型 {model_name} 的阈值大于{abs_threshold}，跳过。")
                 continue
             model_name = sorted_scores['model_name']
             model_file_path = None
+            for model_path in model_file_list:
+                if model_name in model_path:
+                    model_file_path = model_path
+                    break
+
             if need_filter:
                 current_stocks = set(sorted_scores['true_stocks_set'])
                 # exist_flag = False
@@ -269,28 +284,31 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                     print(f"模型 {model_name} 已经有相似的模型，跳过。")
                     continue
                 exist_stocks = exist_stocks | current_stocks
-            for model_path in model_file_list:
-                if model_name in model_path:
-                    model_file_path = model_path
-                    break
-            sorted_scores['true_stocks_set'] = []
             if model_file_path is not None:
                 # 判断model_file_path大小是否大于model_max_size
                 model_size = round(os.path.getsize(model_file_path) / (1024 ** 3), 2)
                 if model_size > model_max_size:
                     print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
                     continue
-                if sorted_scores['max_score'] > date_count_threshold:
+                if sorted_scores['date_count'] > date_count_threshold:
+                    sorted_scores['true_stocks_set'] = []
                     other_dict = sorted_scores
                     other_dict['model_path'] = model_file_path
                     other_dict['model_size'] = model_size
                     all_rf_model_list.append(other_dict)
             else:
+                not_estimated_model_list.append(model_name)
                 print(f"模型 {model_name} 不存在，跳过。")
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     # 将all_rf_model_list存入final_output_filename
     with open(final_output_filename, 'w') as file:
         json.dump(all_rf_model_list, file)
+    # 将all_rf_model_list存入final_output_filename
+    with open(final_output_filename_back, 'w') as file:
+        json.dump(all_rf_model_list, file)
+    with open(not_estimated_model_list_back, 'w') as file:
+        for model_name in not_estimated_model_list:
+            file.write(model_name + '\n')
     if need_balance:
         all_rf_model_list = balance_disk()
     return all_rf_model_list
@@ -491,7 +509,12 @@ def process_model_new(rf_model_map, data):
     load_time = 0
     code_list_pred_proba = None
     try:
-        rf_model = load(rf_model_map['model_path'])
+        # 如果rf_model_map['model_path']是文件路径，则加载模型
+        if 'model' not in rf_model_map:
+            rf_model = load(rf_model_map['model_path'])
+        else:
+            rf_model = rf_model_map['model']
+            print(f"模型 {model_name} 已经加载")
         load_time = time.time() - start
 
         value = rf_model_map
@@ -615,30 +638,97 @@ def interleave_lists(list1, list2):
     # zip_longest会在较短的列表结束后用None填充，chain.from_iterable将结果扁平化
     return [item for item in chain.from_iterable(zip_longest(list1, list2)) if item is not None]
 
-def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, code_list=[]):
+def pre_load_model(max_memory=40000):
+    """
+    提前加载一部分模型到内存中，以便于加速选股
+    :return:
+    """
     start = time.time()
+    base_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+    now_memory = base_memory
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        all_model_info_list = json.load(file)
+    count = 0
+    all_model_info_list = all_model_info_list[:20]
+    for model_info in all_model_info_list:
+        if (now_memory - base_memory) > max_memory:
+            break
+        model = load(model_info['model_path'])
+        model_info['model'] = model
+        # 获取model的内存占用,单位为MB，如果内存占用超过max_memory，则不再加载
+        # 获取模型的内存占用，单位为MB
+        count += 1
+        now_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+        print(f"加载了 {count}个 模型，内存占用 {now_memory:.2f}MB")
+    print(f"加载了 {count} 个模型，总耗时 {time.time() - start}")
+    return all_model_info_list
+
+def get_all_good_data_with_model_name_list_new_pre(data, date_count_threshold=50, code_list=[]):
+
     # 获取data的最大和最小日期，保留到天,并且拼接为字符串
     date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
 
-    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-        all_model_info_list = json.load(file)
+    all_model_info_list = pre_load_model()
+    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    #     all_model_info_list = json.load(file)
+    start = time.time()
+    # 将code_list加入到每个模型中
+    for model_info in all_model_info_list:
+        model_info['code_list'] = code_list
     # 将all_model_info_list按照model_path分类，包含‘/mnt/w’的为一类，其余为一类
     all_model_info_list_w = [model_info for model_info in all_model_info_list if '/mnt/w' in model_info['model_path']]
     all_model_info_list_other = [model_info for model_info in all_model_info_list if '/mnt/w' not in model_info['model_path']]
     all_model_info_list_w.sort(key=lambda x: x['model_size'], reverse=True)
     all_model_info_list_other.sort(key=lambda x: x['model_size'], reverse=False)
-    # 将all_model_info_list_w和all_model_info_list_other交错合并为all_model_info_list
-    print(f"all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
+    # 将all_model_info_list_w和all_model_info_list_other交叉合并
     all_model_info_list = interleave_lists(all_model_info_list_w, all_model_info_list_other)
+    print(f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
+
+    print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
+    # 存储最终结果的列表
+    result_list = []
+    code_result_list = []
+
+    model_worker(all_model_info_list, data, result_list, code_result_list)
+
+    all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
+    all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
+    if code_list != []:
+        code_result_list_samples = pd.concat(code_result_list, ignore_index=True) if code_result_list else pd.DataFrame()
+        code_result_list_samples.to_csv(f'../temp/data/code_result_list_samples_{date_str}.csv', index=False)
+
+    print(f"总耗时 {time.time() - start}")
+    return all_selected_samples
+
+def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, code_list=[]):
+
+    # 获取data的最大和最小日期，保留到天,并且拼接为字符串
+    date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
+
+    all_model_info_list = pre_load_model()
+    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    #     all_model_info_list = json.load(file)
+    start = time.time()
     # 将code_list加入到每个模型中
     for model_info in all_model_info_list:
         model_info['code_list'] = code_list
-    # all_model_info_list = all_model_info_list[-4:]
+    # 将all_model_info_list按照model_path分类，包含‘/mnt/w’的为一类，其余为一类
+    all_model_info_list_w = [model_info for model_info in all_model_info_list if '/mnt/w' in model_info['model_path']]
+    all_model_info_list_other = [model_info for model_info in all_model_info_list if '/mnt/w' not in model_info['model_path']]
+    # 打乱两个列表的顺序
+    random.shuffle(all_model_info_list_w)
+    random.shuffle(all_model_info_list_other)
+    # all_model_info_list_w.sort(key=lambda x: x['model_size'], reverse=True)
+    # all_model_info_list_other.sort(key=lambda x: x['model_size'], reverse=False)
+    print(f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
+
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
-    thread_count = 4
+    thread_count = 1
     # 分割模型列表以分配给每个进程
-    chunk_size = len(all_model_info_list) // thread_count
-    model_chunks = [all_model_info_list[i:i + chunk_size] for i in range(0, len(all_model_info_list), chunk_size)]
+    chunk_size = len(all_model_info_list_w) // thread_count
+    model_chunks_w = [all_model_info_list_w[i:i + chunk_size] for i in range(0, len(all_model_info_list_w), chunk_size)]
+    chunk_size = len(all_model_info_list_other) // thread_count
+    model_chunks_other = [all_model_info_list_other[i:i + chunk_size] for i in range(0, len(all_model_info_list_other), chunk_size)]
 
     # 存储最终结果的列表
     manager = multiprocessing.Manager()
@@ -648,10 +738,16 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, co
     # 创建并启动进程
     processes = []
     for i in range(thread_count):
-        p = Process(target=model_worker, args=(model_chunks[i], data, result_list, code_result_list))
+        model_chunks_w[i].sort(key=lambda x: x['model_size'], reverse=True)
+        p = Process(target=model_worker, args=(model_chunks_w[i], data, result_list, code_result_list))
         processes.append(p)
         p.start()
 
+    for i in range(thread_count):
+        model_chunks_other[i].sort(key=lambda x: x['model_size'], reverse=False)
+        p = Process(target=model_worker, args=(model_chunks_other[i], data, result_list, code_result_list))
+        processes.append(p)
+        p.start()
     # 等待所有进程完成
     for p in processes:
         p.join()
@@ -854,7 +950,22 @@ if __name__ == '__main__':
     # print('删除完成')
     # compress_model()
 
+
     # balance_disk()
+    # output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
+    # with open(output_filename, 'r') as file:
+    #     sorted_scores_list = json.load(file)
+    #
+    # all_output_filename = '../final_zuhe/other/all_reports_cuml.json'
+    # with open(output_filename, 'r') as file:
+    #     all_sorted_scores_list = json.load(file)
+    #
+    # model_name_list = [item['model_name'] for item in sorted_scores_list]
+    # all_model_name_list = [item['model_name'] for item in all_sorted_scores_list]
+    #
+    # # 找出all_sorted_scores_list比sorted_scores_list多出来的模型
+    # bad_model_list = list(set(all_model_name_list) - set(model_name_list))
+
 
 
     # write_joblib_files_to_txt('/mnt/d/model/all_models/')
@@ -870,11 +981,16 @@ if __name__ == '__main__':
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-08_real_time.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-09_real_time.csv')
+    # # 获取data中包含'信号'的列
+    # signal_columns = [column for column in data.columns if '节假日' in column]
+    # signal_data = data[signal_columns]
+    # print(signal_data)
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
     # data = low_memory_load('../train_data/2024_data.csv')
     data['日期'] = pd.to_datetime(data['日期'])
-    get_all_good_data_with_model_name_list_new(data, 50)
+    get_all_good_data_with_model_name_list_new_pre(data, 50)
+
 
 
     #

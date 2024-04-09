@@ -311,6 +311,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         }
 
         temp_dict_result = {}
+        temp_dict_result['model_size'] = round(os.path.getsize(abs_name) / (1024 ** 3), 2)
         print("加载数据{}...".format(model_name))
         profit = int(model_name.split('profit_')[1].split('_')[0])
         thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
