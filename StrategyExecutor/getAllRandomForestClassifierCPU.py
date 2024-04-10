@@ -251,16 +251,17 @@ def train_target_model():
     # model_name_list = [item['model_name'] for item in sorted_scores_list]
     exist_model_name_list = []
     other_model_name_list = []
-    file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
-    with open(file_path, 'r') as lines:
-        for line in lines:
-            exist_model_name_list.append(line.strip())
+    # file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
+    # with open(file_path, 'r') as lines:
+    #     for line in lines:
+    #         exist_model_name_list.append(line.strip())
 
     file_path = f'../final_zuhe/other/not_estimated_model_list_1.txt'
     with open(file_path, 'r') as lines:
         for line in lines:
             other_model_name_list.append(line.strip())
-    model_name_list = list(set(other_model_name_list) - set(exist_model_name_list))
+    model_name_list = list(set(other_model_name_list))
+    print(f"模型数量: {len(model_name_list)}")
 
     # 读取模型参数
     param_list = []

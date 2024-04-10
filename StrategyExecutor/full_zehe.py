@@ -2422,6 +2422,10 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     """
     start = time.time()
     out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        model_info_list = json.load(file)
+    # # 筛选出model_size在0.08到0.2之间的模型
+    all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
 
     stock_data_df = ak.stock_zh_a_spot_em()
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
@@ -2463,7 +2467,8 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     print('待处理的数据量：{} 更新数据耗时{}'.format(len(all_result_df), time.time() - start))
 
     try:
-        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, plus_threshold)
+        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list, process_count=4,
+                                                                          thread_count=3)
         if all_selected_samples is not None and not all_selected_samples.empty:
             # 打印all_selected_samples的 code 收盘价
             # # 筛选出数量大于等于2的条目
@@ -3615,7 +3620,7 @@ if __name__ == '__main__':
     # gen_all_back()
     # load_all_data_performance()
     # while True:
-    save_and_analyse_all_data_mul_real_time_RF('2024-04-09')
+    save_and_analyse_all_data_mul_real_time_RF('2024-04-10')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')

@@ -9,11 +9,17 @@
     通用的一些关于随机森林模型的代码
 """
 import os
+from datetime import datetime
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
 import random
 import sys
 import psutil
+import gc  # 引入垃圾回收模块
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
+
+import concurrent.futures
+
 import json
 import multiprocessing
 
@@ -231,7 +237,7 @@ def balance_disk(class_key='/mnt/w'):
         json.dump(all_model_info_list, file)
     return all_model_info_list
 
-def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, abs_threshold=1):
+def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, model_min_size=0, abs_threshold=1):
     """
     加载随机森林模型
     :param model_path:
@@ -287,7 +293,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
             if model_file_path is not None:
                 # 判断model_file_path大小是否大于model_max_size
                 model_size = round(os.path.getsize(model_file_path) / (1024 ** 3), 2)
-                if model_size > model_max_size:
+                if model_size > model_max_size or model_size < model_min_size:
                     print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
                     continue
                 if sorted_scores['date_count'] > date_count_threshold:
@@ -300,6 +306,8 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                 not_estimated_model_list.append(model_name)
                 print(f"模型 {model_name} 不存在，跳过。")
     print(f"加载了 {len(all_rf_model_list)} 个模型")
+    # 将all_rf_model_list按照model_size从小到大排序
+    all_rf_model_list.sort(key=lambda x: x['model_size'], reverse=False)
     # 将all_rf_model_list存入final_output_filename
     with open(final_output_filename, 'w') as file:
         json.dump(all_rf_model_list, file)
@@ -542,17 +550,17 @@ def process_model_new(rf_model_map, data):
     except Exception as e:
         traceback.print_exc()
         print(f"模型 {model_name} 加载失败 {e}")
-        # 删除模型文件
-        if os.path.exists(rf_model_map['model_path']):
-            os.remove(rf_model_map['model_path'])
-            print(f"删除模型 {model_name} 成功")
+        # # 删除模型文件
+        # if os.path.exists(rf_model_map['model_path']):
+        #     os.remove(rf_model_map['model_path'])
+        #     print(f"删除模型 {model_name} 成功")
     finally:
         elapsed_time = time.time() - start
         print(f"模型 {model_name} 耗时 {elapsed_time} 加载耗时 {load_time}")
 
-def model_worker(model_info_list, data, result_list, code_result_list):
+def model_worker(model_info_list, data, result_list, code_result_list,max_workers=1):
     print(f"Process {current_process().name} started.")
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_model_new, model_info, data): model_info for model_info in model_info_list}
         for future in as_completed(futures):
             model_info = futures[future]
@@ -638,7 +646,7 @@ def interleave_lists(list1, list2):
     # zip_longest会在较短的列表结束后用None填充，chain.from_iterable将结果扁平化
     return [item for item in chain.from_iterable(zip_longest(list1, list2)) if item is not None]
 
-def pre_load_model(max_memory=40000):
+def pre_load_model(max_memory=50000):
     """
     提前加载一部分模型到内存中，以便于加速选股
     :return:
@@ -646,10 +654,12 @@ def pre_load_model(max_memory=40000):
     start = time.time()
     base_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
     now_memory = base_memory
-    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    with open('../final_zuhe/other/good_all_model_reports_cuml_0.1.json', 'r') as file:
         all_model_info_list = json.load(file)
+    # 将all_model_info_list按照model_size从小到大排序
+    all_model_info_list.sort(key=lambda x: x['model_size'], reverse=False)
     count = 0
-    all_model_info_list = all_model_info_list[:20]
+    all_model_info_list = all_model_info_list[:10]
     for model_info in all_model_info_list:
         if (now_memory - base_memory) > max_memory:
             break
@@ -661,14 +671,15 @@ def pre_load_model(max_memory=40000):
         now_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
         print(f"加载了 {count}个 模型，内存占用 {now_memory:.2f}MB")
     print(f"加载了 {count} 个模型，总耗时 {time.time() - start}")
+    # time.sleep(50)
     return all_model_info_list
 
-def get_all_good_data_with_model_name_list_new_pre(data, date_count_threshold=50, code_list=[]):
+def get_all_good_data_with_model_name_list_new_pre(data, all_model_info_list, date_count_threshold=50, code_list=[]):
 
     # 获取data的最大和最小日期，保留到天,并且拼接为字符串
     date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
 
-    all_model_info_list = pre_load_model()
+    # all_model_info_list = pre_load_model()
     # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
     #     all_model_info_list = json.load(file)
     start = time.time()
@@ -689,7 +700,7 @@ def get_all_good_data_with_model_name_list_new_pre(data, date_count_threshold=50
     result_list = []
     code_result_list = []
 
-    model_worker(all_model_info_list, data, result_list, code_result_list)
+    model_worker(all_model_info_list, data, result_list, code_result_list, 10)
 
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
     all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
@@ -700,14 +711,10 @@ def get_all_good_data_with_model_name_list_new_pre(data, date_count_threshold=50
     print(f"总耗时 {time.time() - start}")
     return all_selected_samples
 
-def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, code_list=[]):
-
+def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_count_threshold=50, code_list=[], process_count=1, thread_count=1):
+    print(f'当前时间 {datetime.now()}')
     # 获取data的最大和最小日期，保留到天,并且拼接为字符串
     date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
-
-    all_model_info_list = pre_load_model()
-    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    #     all_model_info_list = json.load(file)
     start = time.time()
     # 将code_list加入到每个模型中
     for model_info in all_model_info_list:
@@ -723,35 +730,33 @@ def get_all_good_data_with_model_name_list_new(data, date_count_threshold=50, co
     print(f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
 
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
-    thread_count = 1
     # 分割模型列表以分配给每个进程
-    chunk_size = len(all_model_info_list_w) // thread_count
+    chunk_size = len(all_model_info_list_w) // process_count
     model_chunks_w = [all_model_info_list_w[i:i + chunk_size] for i in range(0, len(all_model_info_list_w), chunk_size)]
-    chunk_size = len(all_model_info_list_other) // thread_count
+    chunk_size = len(all_model_info_list_other) // process_count
     model_chunks_other = [all_model_info_list_other[i:i + chunk_size] for i in range(0, len(all_model_info_list_other), chunk_size)]
 
-    # 存储最终结果的列表
-    manager = multiprocessing.Manager()
-    result_list = manager.list()
-    code_result_list = manager.list()
+    # 创建进程池
+    with concurrent.futures.ProcessPoolExecutor(max_workers=process_count * 2) as executor:
+        # 存储最终结果的列表
+        manager = multiprocessing.Manager()
+        result_list = manager.list()
+        code_result_list = manager.list()
 
-    # 创建并启动进程
-    processes = []
-    for i in range(thread_count):
-        model_chunks_w[i].sort(key=lambda x: x['model_size'], reverse=True)
-        p = Process(target=model_worker, args=(model_chunks_w[i], data, result_list, code_result_list))
-        processes.append(p)
-        p.start()
+        # 提交任务到进程池
+        futures = []
+        for model_chunk in model_chunks_w:
+            model_chunk.sort(key=lambda x: x['model_size'], reverse=True)
+            future = executor.submit(model_worker, model_chunk, data, result_list, code_result_list, thread_count)
+            futures.append(future)
 
-    for i in range(thread_count):
-        model_chunks_other[i].sort(key=lambda x: x['model_size'], reverse=False)
-        p = Process(target=model_worker, args=(model_chunks_other[i], data, result_list, code_result_list))
-        processes.append(p)
-        p.start()
-    # 等待所有进程完成
-    for p in processes:
-        p.join()
+        for model_chunk in model_chunks_other:
+            model_chunk.sort(key=lambda x: x['model_size'], reverse=False)
+            future = executor.submit(model_worker, model_chunk, data, result_list, code_result_list, thread_count)
+            futures.append(future)
 
+        # 等待所有任务完成
+        concurrent.futures.wait(futures)
 
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
     all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
@@ -943,12 +948,59 @@ def analysis_model():
             print(f"日期 {date} 分析完成")
 
 
+def test_load_memory_ratio(retries=3):
+    """
+    统计占用内存和加载时间的比例
+    :param retries: 每个模型加载的次数
+    :return:
+    """
+    result_dict_list = []
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        all_model_info_list = json.load(file)
+
+    for model_info in all_model_info_list:
+        temp_dict = {'model_name': model_info['model_name'], 'elapsed_time': [], 'memory_use': [], 'ratio': []}
+        for _ in range(retries):
+            gc.collect()  # 强制进行垃圾回收
+            before_load_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+            start = time.time()
+            model = load(model_info['model_path'])
+            elapsed_time = time.time() - start
+            gc.collect()  # 再次进行垃圾回收，确保内存使用是由加载模型引起的
+            memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+            memory_use = max(memory - before_load_memory, 0)  # 防止内存使用为负数
+            ratio = elapsed_time / memory_use if memory_use else float('inf')
+
+            temp_dict['elapsed_time'].append(elapsed_time)
+            temp_dict['memory_use'].append(memory_use)
+            temp_dict['ratio'].append(ratio)
+
+        # Calculate the average of the retries
+        avg_elapsed_time = sum(temp_dict['elapsed_time']) / retries
+        avg_memory_use = sum(temp_dict['memory_use']) / retries
+        avg_ratio = sum(temp_dict['ratio']) / retries
+
+        print(
+            f"模型 {model_info['model_name']} 平均加载耗时 {avg_elapsed_time:.2f}秒, 平均内存占用 {avg_memory_use:.2f}MB")
+
+        # Save the averages
+        temp_dict['elapsed_time'] = avg_elapsed_time
+        temp_dict['memory_use'] = avg_memory_use
+        temp_dict['ratio'] = avg_ratio
+
+        result_dict_list.append(temp_dict)
+
+    result_df = pd.DataFrame(result_dict_list)
+    result_df.to_csv('../temp/load_memory_ratio.csv', index=False)
 
 if __name__ == '__main__':
     # analysis_model()
     # delete_bad_model()
     # print('删除完成')
     # compress_model()
+    # test_load_memory_ratio()
+    # pre_load_model()
+
 
 
     # balance_disk()
@@ -981,40 +1033,52 @@ if __name__ == '__main__':
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-09_real_time.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-10_real_time.csv')
+    # data['日期'] = pd.to_datetime(data['日期'])
+    # start = time.time()
+    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    #     model_info_list = json.load(file)
+    # # # 筛选出model_size在0.08到0.2之间的模型
+    # all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
+    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=4, thread_count=3)
+    # print(f"总耗时 {time.time() - start}")
+    # del all_selected_samples
+    # gc.collect()
     # # 获取data中包含'信号'的列
     # signal_columns = [column for column in data.columns if '节假日' in column]
     # signal_data = data[signal_columns]
     # print(signal_data)
     # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../train_data/2024_data.csv')
+    data = low_memory_load('../train_data/2024_data.csv')
     data['日期'] = pd.to_datetime(data['日期'])
-    get_all_good_data_with_model_name_list_new_pre(data, 50)
+    # get_all_good_data_with_model_name_list_new_pre(data, 50)
 
 
 
-    #
-    # data = data[data['日期'] >= '2024-03-13']
-    # # 按照日期分组
-    # data_group = data.groupby(['日期'])
-    # # 初始化一个临时列表用于存储五个分组
-    # temp_group_list = []
-    # # 初始化一个计数器
-    # counter = 0
-    #
-    # # 迭代每个分组
-    # for date, group in data_group:
-    #     # 将分组添加到临时列表
-    #     temp_group_list.append(group)
-    #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
-    #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
-    #         # 将五个分组的数据合并为一个DataFrame
-    #         batch_data = pd.concat(temp_group_list)
-    #         # 对这批数据执行函数
-    #         get_all_good_data_with_model_name_list_new(batch_data, 50, 'all')
-    #         # 清空临时列表，为下一个批次做准备
-    #         temp_group_list = []
-    #         # break
-    #     # 更新计数器
-    #     counter += 1
-    # # load_rf_model_new()
+
+    data = data[data['日期'] >= '2024-01-23']
+    # 按照日期分组
+    data_group = data.groupby(['日期'])
+    # 初始化一个临时列表用于存储五个分组
+    temp_group_list = []
+    # 初始化一个计数器
+    counter = 0
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        all_model_info_list = json.load(file)
+
+    # 迭代每个分组
+    for date, group in data_group:
+        # 将分组添加到临时列表
+        temp_group_list.append(group)
+        # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+        if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+            # 将五个分组的数据合并为一个DataFrame
+            batch_data = pd.concat(temp_group_list)
+            # 对这批数据执行函数
+            all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=1, thread_count=2, code_list='all')
+            # 清空临时列表，为下一个批次做准备
+            temp_group_list = []
+            # break
+        # 更新计数器
+        counter += 1
+    # load_rf_model_new()
