@@ -168,73 +168,94 @@ def load_rf_model(need_load=True):
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     return all_rf_model_list
 
+def split_model_info_list(all_model_info_list, split_count):
+    # 先对列表按照model_size降序排序
+    sorted_model_info_list = sorted(all_model_info_list, key=lambda x: x['model_size'], reverse=True)
+
+    # 初始化split_count个子列表
+    split_lists = [[] for _ in range(split_count)]
+    # 初始化每个子列表的model_size之和
+    size_sums = [0] * split_count
+
+    # 遍历所有模型信息
+    for model_info in sorted_model_info_list:
+        # 找出当前model_size之和最小的子列表
+        min_size_index = size_sums.index(min(size_sums))
+        # 将当前模型信息添加到该子列表中
+        split_lists[min_size_index].append(model_info)
+        # 更新该子列表的model_size之和
+        size_sums[min_size_index] += model_info['model_size']
+
+    # 打印每组的大小和model_size之和
+    for i, split_list in enumerate(split_lists):
+        group_size = len(split_list)
+        group_size_sum = size_sums[i]
+        print(f"Group {i + 1}: {group_size} models, total model_size: {group_size_sum:.2f}")
+
+    return split_lists
 
 def balance_disk(class_key='/mnt/w'):
     """
     平衡两个磁盘中的数据大小
-    :param all_rf_model_list:
-    :return:
+    :param class_key: 用于识别模型路径的关键字
+    :return: 更新后的模型信息列表
     """
     final_output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
+
+    # 读取模型信息
     with open(final_output_filename, 'r') as file:
         all_model_info_list = json.load(file)
-    w_model_path = MODEL_PATH
-    other_model_path = D_MODEL_PATH
-    all_model_info_list_w = [model_info for model_info in all_model_info_list if class_key in model_info['model_path']]
-    all_model_info_list_other = [model_info for model_info in all_model_info_list if
-                                 class_key not in model_info['model_path']]
 
-    # 计算两个列表中model_size的总和
-    total_size_w = sum(model_info['model_size'] for model_info in all_model_info_list_w)
-    total_size_other = sum(model_info['model_size'] for model_info in all_model_info_list_other)
-    print(f"all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
-    # 确定需要移动的方向和数量
-    if total_size_w > total_size_other:
-        move_from = all_model_info_list_w
-        move_to = all_model_info_list_other
-        move_path = other_model_path
-    else:
-        move_from = all_model_info_list_other
-        move_to = all_model_info_list_w
-        move_path = w_model_path
-    initial_sign = 1 if total_size_w > total_size_other else -1
-    current_sign = initial_sign
-    # 按照model_size从大到小排序
-    move_from.sort(key=lambda x: x['model_size'], reverse=True)
-    # 移动模型直到两个列表的大小尽量相当
-    while initial_sign == current_sign:
-        model_info = move_from.pop(0)
-        src_path = model_info['model_path']
-        dst_dir = os.path.join(move_path, os.path.dirname(
-            os.path.relpath(src_path, start=w_model_path if move_path == other_model_path else other_model_path)))
+    # 将模型信息列表按照model_size排序
+    all_model_info_list_sorted = sorted(all_model_info_list, key=lambda x: x['model_size'], reverse=True)
 
-        # 检查目标目录是否存在,不存在则创建
-        if not os.path.exists(dst_dir):
-            os.makedirs(dst_dir)
+    # 初始化两个组的总大小
+    total_size_w = 0
+    total_size_other = 0
 
-        dst_path = os.path.join(dst_dir, os.path.basename(src_path))
-
-        # 移动文件
-        shutil.move(src_path, dst_path)
-
-        model_info['model_path'] = dst_path
-        move_to.append(model_info)
-
-        if move_path == other_model_path:
-            total_size_w -= model_info['model_size']
-            total_size_other += model_info['model_size']
-        else:
+    # 分配模型到两个组，尽量保持总size相等
+    w_models = []
+    other_models = []
+    for model_info in all_model_info_list_sorted:
+        if total_size_w <= total_size_other:
+            w_models.append(model_info)
             total_size_w += model_info['model_size']
-            total_size_other -= model_info['model_size']
+        else:
+            other_models.append(model_info)
+            total_size_other += model_info['model_size']
 
+    # 移动文件的函数
+    def move_file(model_info, target_path):
+        src_path = model_info['model_path']
+        dst_dir = os.path.join(target_path, os.path.dirname(
+            os.path.relpath(src_path, start=MODEL_PATH if target_path == D_MODEL_PATH else D_MODEL_PATH)))
+        os.makedirs(dst_dir, exist_ok=True)
+        dst_path = os.path.join(dst_dir, os.path.basename(src_path))
+        shutil.move(src_path, dst_path)
+        model_info['model_path'] = dst_path
         print(f"Moved {src_path} to {dst_path}")
-        current_sign = 1 if total_size_w > total_size_other else -1
 
-    print(f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} size {total_size_w} all_model_info_list_other {len(all_model_info_list_other)} size {total_size_other}")
-    all_model_info_list_w.extend(all_model_info_list_other)
-    all_model_info_list = all_model_info_list_w
+    # 创建线程池进行文件移动操作
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # 移动w_models中的文件
+        for model_info in w_models:
+            if class_key not in model_info['model_path']:
+                executor.submit(move_file, model_info, MODEL_PATH)
+
+        # 移动other_models中的文件
+        for model_info in other_models:
+            if class_key in model_info['model_path']:
+                executor.submit(move_file, model_info, D_MODEL_PATH)
+
+    # 合并两个列表
+    all_model_info_list = w_models + other_models
+    # 输出平衡后的每组模型大小和模型个数
+    print(f"Total size of w_models: {total_size_w:.2f} GB, {len(w_models)} models in w_models Total size of other_models: {total_size_other:.2f} GB, {len(other_models)} models in other_models")
+
+    # 将更新后的列表写回文件
     with open(final_output_filename, 'w') as file:
         json.dump(all_model_info_list, file)
+
     return all_model_info_list
 
 def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, model_min_size=0, abs_threshold=1):
@@ -307,7 +328,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                 print(f"模型 {model_name} 不存在，跳过。")
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     # 将all_rf_model_list按照model_size从小到大排序
-    all_rf_model_list.sort(key=lambda x: x['model_size'], reverse=False)
+    all_rf_model_list.sort(key=lambda x: x['date_count'], reverse=False)
     # 将all_rf_model_list存入final_output_filename
     with open(final_output_filename, 'w') as file:
         json.dump(all_rf_model_list, file)
@@ -731,10 +752,10 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
 
     print(f"总共加载了 {len(all_model_info_list)} 个模型，date_count_threshold={date_count_threshold}")
     # 分割模型列表以分配给每个进程
-    chunk_size = len(all_model_info_list_w) // process_count
-    model_chunks_w = [all_model_info_list_w[i:i + chunk_size] for i in range(0, len(all_model_info_list_w), chunk_size)]
-    chunk_size = len(all_model_info_list_other) // process_count
-    model_chunks_other = [all_model_info_list_other[i:i + chunk_size] for i in range(0, len(all_model_info_list_other), chunk_size)]
+    model_chunks_w = split_model_info_list(all_model_info_list_w, process_count)
+    model_chunks_other = split_model_info_list(all_model_info_list_other, process_count)
+    # 将model_chunks_w和model_chunks_other合并
+    model_chunks = model_chunks_w + model_chunks_other
 
     # 创建进程池
     with concurrent.futures.ProcessPoolExecutor(max_workers=process_count * 2) as executor:
@@ -745,13 +766,14 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
 
         # 提交任务到进程池
         futures = []
-        for model_chunk in model_chunks_w:
-            model_chunk.sort(key=lambda x: x['model_size'], reverse=True)
-            future = executor.submit(model_worker, model_chunk, data, result_list, code_result_list, thread_count)
-            futures.append(future)
-
-        for model_chunk in model_chunks_other:
-            model_chunk.sort(key=lambda x: x['model_size'], reverse=False)
+        jishu = 0
+        for model_chunk in model_chunks:
+            if jishu == 0:
+                model_chunk.sort(key=lambda x: x['model_size'], reverse=True)
+                jishu = 1
+            else:
+                model_chunk.sort(key=lambda x: x['model_size'], reverse=False)
+                jishu = 0
             future = executor.submit(model_worker, model_chunk, data, result_list, code_result_list, thread_count)
             futures.append(future)
 
@@ -947,7 +969,6 @@ def analysis_model():
             result_df.to_csv(file_path, index=False, encoding='utf-8')
             print(f"日期 {date} 分析完成")
 
-
 def test_load_memory_ratio(retries=3):
     """
     统计占用内存和加载时间的比例
@@ -993,92 +1014,157 @@ def test_load_memory_ratio(retries=3):
     result_df = pd.DataFrame(result_dict_list)
     result_df.to_csv('../temp/load_memory_ratio.csv', index=False)
 
+def analyze_data(df, key_list, target_key, top_n=10, abs_threshold_values=np.arange(0.5, 1, 0.01)):
+    results = {}
+
+    for key in key_list:
+        # 对DataFrame中的key列进行降序排序
+        sorted_df = df.sort_values(by=key, ascending=False)
+
+        # 选出前[1,2,3,4,5,6]个数据，并计算target_key的相关统计数据
+        for n in range(1, top_n + 1):
+            top_n = sorted_df.head(n)
+            count_greater_than_1 = (top_n[target_key] > 1).sum()
+            count_less_or_equal_1 = (top_n[target_key] <= 1).sum()
+            total_count = n
+
+            key_name = f"{key}_top{n}"
+            results[key_name] = {
+                'success_ratio': round(count_greater_than_1 / total_count if total_count != 0 else 0, 2),
+                'success_count': count_greater_than_1,
+                'total_count': total_count,
+                'fail_count': count_less_or_equal_1
+            }
+
+        # 选出值大于[0.8,0.9,0.95]的数据，并计算target_key的相关统计数据
+        # 从0.8开始，每次增加0.01
+        for threshold in abs_threshold_values:
+            filtered_df = sorted_df[sorted_df[key] >= threshold]
+            count_greater_than_1 = (filtered_df[target_key] > 1).sum()
+            count_less_or_equal_1 = (filtered_df[target_key] <= 1).sum()
+            total_count = filtered_df.shape[0]
+
+            key_name = f"{key}_greater_than_{threshold}"
+            results[key_name] = {
+                'success_ratio': round(count_greater_than_1 / total_count if total_count != 0 else 0, 2),
+                'success_count': count_greater_than_1,
+                'total_count': total_count,
+                'fail_count': count_less_or_equal_1
+            }
+
+    # 将results先按照total_count降序排序，再按照success_ratio降序排序
+    results = {k: v for k, v in sorted(results.items(), key=lambda item: (item[1]['success_ratio'], item[1]['total_count']),
+                                     reverse=True)}
+    return results
+def get_thread():
+    """
+    获取相应的选股阈值 绝对值，相对值
+    :return:
+    """
+    data_list = []
+    for root, dirs, files in os.walk('../temp/analysis_model'):
+        for file in files:
+            if file.startswith('cha_zhi_result_'):
+                full_name = os.path.join(root, file)
+                data = pd.read_csv(full_name, low_memory=False, dtype={'code': str})
+                # 找出列名中包含ratio的列
+                ratio_columns = [column for column in data.columns if 'ratio' in column]
+                # 其它的列名
+                other_columns = [column for column in data.columns if 'chazhi' in column]
+                # 从0.8开始，每次增加0.01
+                abs_threshold_values = np.arange(0.5, 1, 0.01)
+                result = analyze_data(data, ratio_columns, '后续1日最高价利润率')
+                data_list.append(result)
+
 if __name__ == '__main__':
-    # analysis_model()
-    # delete_bad_model()
-    # print('删除完成')
-    # compress_model()
-    # test_load_memory_ratio()
-    # pre_load_model()
-
-
-
-    # balance_disk()
-    # output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
-    # with open(output_filename, 'r') as file:
-    #     sorted_scores_list = json.load(file)
+    analysis_model()
     #
-    # all_output_filename = '../final_zuhe/other/all_reports_cuml.json'
-    # with open(output_filename, 'r') as file:
-    #     all_sorted_scores_list = json.load(file)
+    # # delete_bad_model()
+    # # print('删除完成')
+    # # compress_model()
+    # # test_load_memory_ratio()
+    # # pre_load_model()
     #
-    # model_name_list = [item['model_name'] for item in sorted_scores_list]
-    # all_model_name_list = [item['model_name'] for item in all_sorted_scores_list]
     #
-    # # 找出all_sorted_scores_list比sorted_scores_list多出来的模型
-    # bad_model_list = list(set(all_model_name_list) - set(model_name_list))
-
-
-
-    # write_joblib_files_to_txt('/mnt/d/model/all_models/')
-    # write_joblib_files_to_txt('/mnt/g/model/all_models/')
-    # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
-
-    # origin_data_path = '../temp/real_time_price.csv'
-    # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
-    # get_all_good_data(data)
-    # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    # all_rf_model_list = load_rf_model_new(1, True)
-    # 将all_rf_model_list按照score升序排序
-    # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
-    # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-10_real_time.csv')
+    #
+    # # balance_disk()
+    # # output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
+    # # with open(output_filename, 'r') as file:
+    # #     sorted_scores_list = json.load(file)
+    # #
+    # # all_output_filename = '../final_zuhe/other/all_reports_cuml.json'
+    # # with open(output_filename, 'r') as file:
+    # #     all_sorted_scores_list = json.load(file)
+    # #
+    # # model_name_list = [item['model_name'] for item in sorted_scores_list]
+    # # all_model_name_list = [item['model_name'] for item in all_sorted_scores_list]
+    # #
+    # # # 找出all_sorted_scores_list比sorted_scores_list多出来的模型
+    # # bad_model_list = list(set(all_model_name_list) - set(model_name_list))
+    #
+    #
+    #
+    # # write_joblib_files_to_txt('/mnt/d/model/all_models/')
+    # # write_joblib_files_to_txt('/mnt/g/model/all_models/')
+    # # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
+    #
+    # # origin_data_path = '../temp/real_time_price.csv'
+    # # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
+    # # get_all_good_data(data)
+    # # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
+    # # all_rf_model_list = load_rf_model_new(1, True)
+    # # 将all_rf_model_list按照score升序排序
+    # # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
+    # # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-11_real_time.csv')
+    # # data['日期'] = pd.to_datetime(data['日期'])
+    # # start = time.time()
+    # # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    # #     model_info_list = json.load(file)
+    # # # # 筛选出model_size在0.08到0.2之间的模型
+    # # all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
+    # # all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=4, thread_count=3)
+    #
+    #
+    # # print(f"总耗时 {time.time() - start}")
+    # # del all_selected_samples
+    # # gc.collect()
+    # # # 获取data中包含'信号'的列
+    # # signal_columns = [column for column in data.columns if '节假日' in column]
+    # # signal_data = data[signal_columns]
+    # # print(signal_data)
+    # # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../train_data/2024_data.csv')
     # data['日期'] = pd.to_datetime(data['日期'])
-    # start = time.time()
+    # # get_all_good_data_with_model_name_list_new_pre(data, 50)
+    #
+    #
+    #
+    #
+    # data = data[data['日期'] >= '2024-03-20']
+    # # 按照日期分组
+    # data_group = data.groupby(['日期'])
+    # # 初始化一个临时列表用于存储五个分组
+    # temp_group_list = []
+    # # 初始化一个计数器
+    # counter = 0
     # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    #     model_info_list = json.load(file)
-    # # # 筛选出model_size在0.08到0.2之间的模型
-    # all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
-    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=4, thread_count=3)
-    # print(f"总耗时 {time.time() - start}")
-    # del all_selected_samples
-    # gc.collect()
-    # # 获取data中包含'信号'的列
-    # signal_columns = [column for column in data.columns if '节假日' in column]
-    # signal_data = data[signal_columns]
-    # print(signal_data)
-    # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../train_data/2024_data.csv')
-    data['日期'] = pd.to_datetime(data['日期'])
-    # get_all_good_data_with_model_name_list_new_pre(data, 50)
-
-
-
-
-    data = data[data['日期'] >= '2024-01-23']
-    # 按照日期分组
-    data_group = data.groupby(['日期'])
-    # 初始化一个临时列表用于存储五个分组
-    temp_group_list = []
-    # 初始化一个计数器
-    counter = 0
-    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-        all_model_info_list = json.load(file)
-
-    # 迭代每个分组
-    for date, group in data_group:
-        # 将分组添加到临时列表
-        temp_group_list.append(group)
-        # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
-        if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
-            # 将五个分组的数据合并为一个DataFrame
-            batch_data = pd.concat(temp_group_list)
-            # 对这批数据执行函数
-            all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=1, thread_count=2, code_list='all')
-            # 清空临时列表，为下一个批次做准备
-            temp_group_list = []
-            # break
-        # 更新计数器
-        counter += 1
-    # load_rf_model_new()
+    #     all_model_info_list = json.load(file)
+    # all_model_info_list = [model_info for model_info in all_model_info_list if 0 < model_info['model_size'] < 0.3]
+    # # 迭代每个分组
+    # for date, group in data_group:
+    #     # 将分组添加到临时列表
+    #     temp_group_list.append(group)
+    #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+    #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+    #         # 将五个分组的数据合并为一个DataFrame
+    #         batch_data = pd.concat(temp_group_list)
+    #         # 对这批数据执行函数
+    #         all_selected_samples = get_all_good_data_with_model_name_list_new(batch_data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
+    #         # 清空临时列表，为下一个批次做准备
+    #         temp_group_list = []
+    #         # break
+    #     # 更新计数器
+    #     counter += 1
+    # # load_rf_model_new()z

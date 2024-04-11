@@ -256,7 +256,7 @@ def train_target_model():
     #     for line in lines:
     #         exist_model_name_list.append(line.strip())
 
-    file_path = f'../final_zuhe/other/not_estimated_model_list_1.txt'
+    file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
     with open(file_path, 'r') as lines:
         for line in lines:
             other_model_name_list.append(line.strip())
