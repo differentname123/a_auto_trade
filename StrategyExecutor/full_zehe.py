@@ -2425,7 +2425,7 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         model_info_list = json.load(file)
     # # 筛选出model_size在0.08到0.2之间的模型
-    all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
+    all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
 
     stock_data_df = ak.stock_zh_a_spot_em()
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
@@ -2467,6 +2467,7 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     print('待处理的数据量：{} 更新数据耗时{}'.format(len(all_result_df), time.time() - start))
 
     try:
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list, process_count=4,
                                                                           thread_count=3)
         if all_selected_samples is not None and not all_selected_samples.empty:
@@ -2474,12 +2475,24 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
             # # 筛选出数量大于等于2的条目
             # all_selected_samples = selected_samples_with_count[selected_samples_with_count['选中数量'] >= 2]
             # 处理合并后的DataFrame
-            grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'), current_price=('current_price', 'min'))
+            grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
+                                                               current_price=('current_price', 'min'),
+                                                               count=('code', 'count'))
+            # 获取当前时间
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 按照数量降序排列
+            grouped = grouped.sort_values(by='count', ascending=False)
             # 将结果保存到out_put_path
+
             with open(out_put_path, 'a') as f:
+                f.write('\n')  # 写入一行空行
                 for code, row in grouped.iterrows():
-                    f.write('{}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'], row['current_price']))
-                    print('{}, {}, {}, {}'.format(code, row['min_close'], row['max_close'], row['current_price']))
+                    f.write('{}, {}, {}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'],
+                                                              row['current_price'], row['count'], current_time))
+                    print(
+                        '{}, {}, {}, {}, {}, {}'.format(code, row['min_close'], row['max_close'], row['current_price'],
+                                                        row['count'], current_time))
+
     except Exception as e:
         print('处理文件失败：{}'.format(e))
 
@@ -3619,8 +3632,8 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    # while True:
-    save_and_analyse_all_data_mul_real_time_RF('2024-04-11')
+    while True:
+        save_and_analyse_all_data_mul_real_time_RF('2024-04-15')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')

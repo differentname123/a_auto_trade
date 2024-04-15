@@ -227,8 +227,7 @@ def balance_disk(class_key='/mnt/w'):
     # 移动文件的函数
     def move_file(model_info, target_path):
         src_path = model_info['model_path']
-        dst_dir = os.path.join(target_path, os.path.dirname(
-            os.path.relpath(src_path, start=MODEL_PATH if target_path == D_MODEL_PATH else D_MODEL_PATH)))
+        dst_dir = os.path.join(target_path, os.path.dirname(src_path.split('all_models')[1]).replace('/', ''))
         os.makedirs(dst_dir, exist_ok=True)
         dst_path = os.path.join(dst_dir, os.path.basename(src_path))
         shutil.move(src_path, dst_path)
@@ -236,7 +235,7 @@ def balance_disk(class_key='/mnt/w'):
         print(f"Moved {src_path} to {dst_path}")
 
     # 创建线程池进行文件移动操作
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         # 移动w_models中的文件
         for model_info in w_models:
             if class_key not in model_info['model_path']:
@@ -744,8 +743,8 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
     all_model_info_list_w = [model_info for model_info in all_model_info_list if '/mnt/w' in model_info['model_path']]
     all_model_info_list_other = [model_info for model_info in all_model_info_list if '/mnt/w' not in model_info['model_path']]
     # 打乱两个列表的顺序
-    random.shuffle(all_model_info_list_w)
-    random.shuffle(all_model_info_list_other)
+    # random.shuffle(all_model_info_list_w)
+    # random.shuffle(all_model_info_list_other)
     # all_model_info_list_w.sort(key=lambda x: x['model_size'], reverse=True)
     # all_model_info_list_other.sort(key=lambda x: x['model_size'], reverse=False)
     print(f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
@@ -1077,7 +1076,10 @@ def get_thread():
                 data_list.append(result)
 
 if __name__ == '__main__':
+    # balance_disk()
     analysis_model()
+    # get_thread()
+
     #
     # # delete_bad_model()
     # # print('删除完成')
@@ -1117,54 +1119,54 @@ if __name__ == '__main__':
     # # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-11_real_time.csv')
-    # # data['日期'] = pd.to_datetime(data['日期'])
-    # # start = time.time()
-    # # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    # #     model_info_list = json.load(file)
-    # # # # 筛选出model_size在0.08到0.2之间的模型
-    # # all_model_info_list = [model_info for model_info in model_info_list if 0 < model_info['model_size'] < 0.3]
-    # # all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=4, thread_count=3)
-    #
-    #
-    # # print(f"总耗时 {time.time() - start}")
-    # # del all_selected_samples
-    # # gc.collect()
-    # # # 获取data中包含'信号'的列
-    # # signal_columns = [column for column in data.columns if '节假日' in column]
-    # # signal_data = data[signal_columns]
-    # # print(signal_data)
-    # # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../train_data/2024_data.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-15_real_time.csv')
     # data['日期'] = pd.to_datetime(data['日期'])
-    # # get_all_good_data_with_model_name_list_new_pre(data, 50)
-    #
-    #
-    #
-    #
-    # data = data[data['日期'] >= '2024-03-20']
-    # # 按照日期分组
-    # data_group = data.groupby(['日期'])
-    # # 初始化一个临时列表用于存储五个分组
-    # temp_group_list = []
-    # # 初始化一个计数器
-    # counter = 0
+    # start = time.time()
     # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    #     all_model_info_list = json.load(file)
-    # all_model_info_list = [model_info for model_info in all_model_info_list if 0 < model_info['model_size'] < 0.3]
-    # # 迭代每个分组
-    # for date, group in data_group:
-    #     # 将分组添加到临时列表
-    #     temp_group_list.append(group)
-    #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
-    #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
-    #         # 将五个分组的数据合并为一个DataFrame
-    #         batch_data = pd.concat(temp_group_list)
-    #         # 对这批数据执行函数
-    #         all_selected_samples = get_all_good_data_with_model_name_list_new(batch_data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
-    #         # 清空临时列表，为下一个批次做准备
-    #         temp_group_list = []
-    #         # break
-    #     # 更新计数器
-    #     counter += 1
-    # # load_rf_model_new()z
+    #     model_info_list = json.load(file)
+    # # # 筛选出model_size在0.08到0.2之间的模型
+    # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
+    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
+    #
+    # #
+    # # # print(f"总耗时 {time.time() - start}")
+    # # # del all_selected_samples
+    # # # gc.collect()
+    # # # # 获取data中包含'信号'的列
+    # # # signal_columns = [column for column in data.columns if '节假日' in column]
+    # # # signal_data = data[signal_columns]
+    # # # print(signal_data)
+    # # # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
+    # # data = low_memory_load('../train_data/2024_data.csv')
+    # # data['日期'] = pd.to_datetime(data['日期'])
+    # # # get_all_good_data_with_model_name_list_new_pre(data, 50)
+    # #
+    # #
+    # #
+    # #
+    # # data = data[data['日期'] >= '2024-03-20']
+    # # # 按照日期分组
+    # # data_group = data.groupby(['日期'])
+    # # # 初始化一个临时列表用于存储五个分组
+    # # temp_group_list = []
+    # # # 初始化一个计数器
+    # # counter = 0
+    # # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    # #     all_model_info_list = json.load(file)
+    # # all_model_info_list = [model_info for model_info in all_model_info_list if 0 < model_info['model_size'] < 0.3]
+    # # # 迭代每个分组
+    # # for date, group in data_group:
+    # #     # 将分组添加到临时列表
+    # #     temp_group_list.append(group)
+    # #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+    # #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+    # #         # 将五个分组的数据合并为一个DataFrame
+    # #         batch_data = pd.concat(temp_group_list)
+    # #         # 对这批数据执行函数
+    # #         all_selected_samples = get_all_good_data_with_model_name_list_new(batch_data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
+    # #         # 清空临时列表，为下一个批次做准备
+    # #         temp_group_list = []
+    # #         # break
+    # #     # 更新计数器
+    # #     counter += 1
+    # # # load_rf_model_new()z
