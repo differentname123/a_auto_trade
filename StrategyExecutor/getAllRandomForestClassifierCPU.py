@@ -80,7 +80,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     params_list = list(ParameterGrid(param_grid))
     # random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)}")
-    save_path = MODEL_PATH
+    save_path = D_MODEL_PATH
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
@@ -157,14 +157,14 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        # '../train_data/profit_1_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        # '../train_data/profit_2_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
+        # '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
+        # '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        # '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
+        '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
@@ -249,19 +249,11 @@ def train_target_model():
     #     sorted_scores_list = json.load(file)
     # # 获取sorted_scores_list中的model_name的列表
     # model_name_list = [item['model_name'] for item in sorted_scores_list]
-    exist_model_name_list = []
-    other_model_name_list = []
-    # file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
-    # with open(file_path, 'r') as lines:
-    #     for line in lines:
-    #         exist_model_name_list.append(line.strip())
-
+    model_name_list = []
     file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
     with open(file_path, 'r') as lines:
         for line in lines:
-            other_model_name_list.append(line.strip())
-    model_name_list = list(set(other_model_name_list))
-    print(f"模型数量: {len(model_name_list)}")
+            model_name_list.append(line.strip())
 
     # 读取模型参数
     param_list = []
@@ -313,6 +305,6 @@ def train_target_model():
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    # build_models()
+    build_models()
 
-    train_target_model()
+    # train_target_model()

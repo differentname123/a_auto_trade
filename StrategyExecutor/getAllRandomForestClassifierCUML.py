@@ -9,7 +9,7 @@
 
 """
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU（2060），索引从0开始
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
 import json
 import re
 
@@ -157,14 +157,14 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        # '../train_data/profit_1_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_1_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_1_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        '../train_data/profit_1_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        '../train_data/profit_2_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
+        '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
+        '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
+        '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
@@ -305,6 +305,6 @@ def train_target_model():
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    # build_models()
+    build_models()
 
-    train_target_model()
+    # train_target_model()

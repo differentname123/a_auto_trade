@@ -977,7 +977,7 @@ if __name__ == '__main__':
     # find_small_abs()
     # sort_new()
 
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=True, model_max_size=0.3,model_min_size=0, abs_threshold=1) # 200:326 100:938 0:998
+    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=0.3,model_min_size=0, abs_threshold=1) # 200:326 100:938 0:998
     # delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]
