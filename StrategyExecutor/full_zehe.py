@@ -2422,7 +2422,7 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     """
     start = time.time()
     out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
-    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
         model_info_list = json.load(file)
     # # 筛选出model_size在0.08到0.2之间的模型
     all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]

@@ -847,11 +847,14 @@ def sort_new():
                                     max_score = 0
                                     date_count = 0
                                     precision = 0
-                                    abs_threshold = 0
+                                    abs_threshold = 1
                                     min_day = 0
                                     true_stocks_set = []
                                     temp_dict['model_name'] = model_name
+                                    max_false_count = 0
                                     for this_key, report_list in detail_report.items():
+                                        if 'model_size' in this_key:
+                                            continue
                                         result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
                                         # 获取result_list中每个元素的abs_threshold，和precision，生成一个新的dict
                                         precision_dict = {}
@@ -975,9 +978,9 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     # find_small_abs()
-    # sort_new()
+    sort_new()
 
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=0.3,model_min_size=0, abs_threshold=1) # 200:326 100:938 0:998
+    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=100000,model_min_size=0, abs_threshold=1) # 200:326 100:938 0:998
     # delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]

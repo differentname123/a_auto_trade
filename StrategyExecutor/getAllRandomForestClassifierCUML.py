@@ -22,7 +22,7 @@ import cudf
 from sklearn.model_selection import ParameterGrid
 import threading
 
-from StrategyExecutor.common import downcast_dtypes
+from StrategyExecutor.common import downcast_dtypes, low_memory_load
 
 TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 D_MODEL_PATH = '/mnt/d/model/all_models/'
@@ -80,7 +80,7 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     params_list = list(ParameterGrid(param_grid))
     # random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)}")
-    save_path = MODEL_PATH
+    save_path = D_MODEL_PATH
     for params in params_list:
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
@@ -104,6 +104,23 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
         clf = RandomForestClassifier(**params)
         train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
+def load_test_data(file_path):
+    print(f"开始处理数据集: {file_path}")
+    data = low_memory_load(file_path)
+    data = cudf.DataFrame(data)
+
+    key_signal_columns = [column for column in data.columns if '最高价利润率' in column]
+    key_signal_columns.extend(['日期', '代码'])
+    final_data = data[key_signal_columns]
+    memory = data.memory_usage(deep=True).sum()
+    print(f"原始数据集内存: {memory / 1024 ** 2:.2f} MB")
+    data = downcast_dtypes(data)
+    memory = data.memory_usage(deep=True).sum()
+    print(f"转换后数据集内存: {memory / 1024 ** 2:.2f} MB")
+    signal_columns = [column for column in data.columns if '信号' in column]
+    X_test = data[signal_columns]
+    return final_data, X_test
+
 def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None, is_skip=True):
     """
     为file_path_path生成各种模型
@@ -116,14 +133,7 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
     origin_data_path_dir = os.path.dirname(file_path_path)
     origin_data_path_dir = origin_data_path_dir.split('/')[-1]
     print("加载数据{}...".format(file_path_path))
-    data = cudf.read_csv(file_path_path)
-    memory = data.memory_usage(deep=True).sum()
-    print(f"原始数据集内存: {memory / 1024 ** 2:.2f} MB")
-    signal_columns = [column for column in data.columns if '信号' in column]
-    X = data[signal_columns]
-    X = downcast_dtypes(X)
-    memory = X.memory_usage(deep=True).sum()
-    print(f"转换后数据集内存: {memory / 1024 ** 2:.2f} MB")
+    final_data, X = load_test_data(file_path_path)
     ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
     try:
         with open(ratio_result_path, 'r') as f:
@@ -132,7 +142,7 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
         ratio_result = {}
     for thread_day in thread_day_list:
         key_name = f'后续{thread_day}日最高价利润率'
-        y = data[key_name] >= profit
+        y = final_data[key_name] >= profit
         ratio_key = origin_data_path_dir + '_' + str(thread_day)
         if ratio_key in ratio_result:
             true_ratio = ratio_result[ratio_key]
@@ -159,12 +169,12 @@ def build_models():
     origin_data_path_list = [
         '../train_data/profit_2_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
         '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
         '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        # '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        # '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
+        # '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
+        # '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):

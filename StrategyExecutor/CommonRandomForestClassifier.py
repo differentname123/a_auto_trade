@@ -317,7 +317,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                     print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
                     continue
                 if sorted_scores['date_count'] > date_count_threshold:
-                    sorted_scores['true_stocks_set'] = []
+                    # sorted_scores['true_stocks_set'] = []
                     other_dict = sorted_scores
                     other_dict['model_path'] = model_file_path
                     other_dict['model_size'] = model_size
@@ -1118,7 +1118,7 @@ if __name__ == '__main__':
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # data = pd.read_csv('../temp/code_result_list_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
     data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-15_real_time.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     start = time.time()
