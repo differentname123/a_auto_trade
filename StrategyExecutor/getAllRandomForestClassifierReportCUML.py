@@ -228,7 +228,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         key_name = f'后续{thread_day}日最高价利润率'
         y_test = data[key_name] >= profit
         total_samples = len(y_test)
-        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 3:.2f}G {model_name}条数据")
+        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 2:.2f}M {model_name}条数据")
 
         if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
             start = time.time()

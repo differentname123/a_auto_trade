@@ -852,8 +852,10 @@ def sort_new():
                                     true_stocks_set = []
                                     temp_dict['model_name'] = model_name
                                     max_false_count = 0
+                                    model_size = 0
                                     for this_key, report_list in detail_report.items():
                                         if 'model_size' in this_key:
+                                            model_size = report_list
                                             continue
                                         result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
                                         # 获取result_list中每个元素的abs_threshold，和precision，生成一个新的dict
@@ -880,6 +882,7 @@ def sort_new():
                                     temp_dict['true_stocks_set'] = true_stocks_set
                                     temp_dict['max_false_count'] = max_false_count
                                     temp_dict['precision_dict'] = precision_dict
+                                    temp_dict['model_size'] = model_size
                                     good_model_list.append(temp_dict)
                     except Exception as e:
                         traceback.print_exc()

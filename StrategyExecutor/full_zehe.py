@@ -2478,8 +2478,6 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
             grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
                                                                current_price=('current_price', 'min'),
                                                                count=('code', 'count'))
-            # 获取当前时间
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             # 按照数量降序排列
             grouped = grouped.sort_values(by='count', ascending=False)
             # 将结果保存到out_put_path
@@ -3633,7 +3631,7 @@ if __name__ == '__main__':
     # gen_all_back()
     # load_all_data_performance()
     while True:
-        save_and_analyse_all_data_mul_real_time_RF('2024-04-15')
+        save_and_analyse_all_data_mul_real_time_RF('2024-04-16')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
