@@ -9,19 +9,17 @@
 :description:
 
 """
-import concurrent.futures
 
-import json
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第一张GPU（2080），索引从0开始
+import json
 import time
 import traceback
 import cudf
 from joblib import dump, load
 import numpy as np
 from StrategyExecutor.common import low_memory_load, downcast_dtypes
-from cuml import Handle
-
+import gc
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
@@ -31,7 +29,6 @@ DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/de
 MODEL_OTHER = '/mnt/w/project/python_project/a_auto_trade/model/other'
 TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 import warnings
-
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
 def load_existing_report(report_path):
@@ -43,7 +40,6 @@ def load_existing_report(report_path):
         except json.JSONDecodeError:
             result_dict = {}
     return result_dict
-
 
 def load_model(abs_name, model_name):
     try:
@@ -58,26 +54,18 @@ def load_model(abs_name, model_name):
         print(f"模型 {model_name} 不存在，跳过。")
         return None
 
-
 def is_report_exists(result_dict, model_name, file_path):
     if model_name in result_dict and file_path in result_dict[model_name]:
         if result_dict[model_name][file_path] != {}:
             return True
     return False
 
-
-def load_data(file_path):
-    start = time.time()
-    data = low_memory_load(file_path)
-    print(f"加载数据 {file_path} 耗时: {time.time() - start:.2f}秒")
-    return data
-
-
 def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_threshold, tree_threshold, thread_ratio,
                           this_key, temp_dict_result):
     high_confidence_true = (y_pred_proba[1] > abs_threshold)
     high_confidence_false = (y_pred_proba[0] > abs_threshold)
-    if np.sum(high_confidence_true) == 0 and np.sum(high_confidence_false) == 0:
+    if np.sum(high_confidence_true) == 0:
+        print(f"abs_threshold {abs_threshold} 无预测值")
         return temp_dict_result, False
 
     selected_true = high_confidence_true & y_test
@@ -124,27 +112,27 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
             find_true_flag = True
         else:
             daily_precision = {}
-    if precision_false >= thread_ratio:
-        good_date_count = 0
-        for date in unique_dates_false:
-            date_mask_false = selected_data_false['日期'] == date
-            date_selected_false = selected_false[high_confidence_false]
-            date_false_count = np.sum(date_selected_false[date_mask_false])
-            date_count_false = np.sum(date_mask_false)
-            date_false_precision = date_false_count / date_count_false if date_count_false > 0 else 0
-            daily_precision_false[str(date)] = {
-                'precision': date_false_precision,
-                'count': int(date_count_false),
-                'false_count': int(date_false_count),
-                'true_count': int(date_count_false - date_false_count)
-            }
-            if date_false_precision >= 0.9:
-                good_date_count += 1
-        if good_date_count / len(unique_dates_false) >= 0.9:
-            date_false_precision = good_date_count / len(unique_dates_false) if len(unique_dates_false) > 0 else 0
-            false_stocks_set = list((selected_data_false['代码'].to_pandas().astype(str) + selected_data_false['日期'].to_pandas()))
-        else:
-            daily_precision_false = {}
+    # if precision_false >= thread_ratio:
+    #     good_date_count = 0
+    #     for date in unique_dates_false:
+    #         date_mask_false = selected_data_false['日期'] == date
+    #         date_selected_false = selected_false[high_confidence_false]
+    #         date_false_count = np.sum(date_selected_false[date_mask_false])
+    #         date_count_false = np.sum(date_mask_false)
+    #         date_false_precision = date_false_count / date_count_false if date_count_false > 0 else 0
+    #         daily_precision_false[str(date)] = {
+    #             'precision': date_false_precision,
+    #             'count': int(date_count_false),
+    #             'false_count': int(date_false_count),
+    #             'true_count': int(date_count_false - date_false_count)
+    #         }
+    #         if date_false_precision >= 0.9:
+    #             good_date_count += 1
+    #     if good_date_count / len(unique_dates_false) >= 0.9:
+    #         date_false_precision = good_date_count / len(unique_dates_false) if len(unique_dates_false) > 0 else 0
+    #         false_stocks_set = list((selected_data_false['代码'].to_pandas().astype(str) + selected_data_false['日期'].to_pandas()))
+    #     else:
+    daily_precision_false = {}
     other_dict = {}
     other_dict['date_precision'] = date_precision
     other_dict['date_false_precision'] = date_false_precision
@@ -156,27 +144,9 @@ def process_abs_threshold(data, y_pred_proba, y_test, total_samples, abs_thresho
     temp_dict_result[this_key].append(temp_dict)
     return temp_dict_result, find_true_flag
 
-
-def update_this_key_map(temp_dict_result, this_key_map, file_path, model_name):
-    for key, value in temp_dict_result.items():
-        temp_dict_list = sorted(value, key=lambda x: x['false_score'], reverse=True)
-        false_flag = True
-        true_flag = True
-        if temp_dict_list[0]['false_score'] > 0:
-            false_flag = False
-        temp_dict_list = sorted(value, key=lambda x: x['score'], reverse=True)
-        if temp_dict_list[0]['score'] > 0:
-            true_flag = False
-        temp_dict_result[key] = temp_dict_list
-        if false_flag and true_flag:
-            print(f"分数全为0 {key} 对于文件 {file_path} 模型 {model_name}的，跳过后续")
-            this_key_map[key] = False
-
-
 def save_report(report_path, result_dict):
     with open(report_path, 'w') as f:
         json.dump(result_dict, f)
-
 
 def create_temp_dict(tree_threshold, cha_zhi_threshold, abs_threshold, unique_dates, precision, predicted_true_samples,
                      total_samples, unique_dates_false, precision_false, predicted_false_samples_false, thread_ratio,
@@ -205,65 +175,6 @@ def create_temp_dict(tree_threshold, cha_zhi_threshold, abs_threshold, unique_da
         temp_dict[key] = value
     return temp_dict
 
-
-def process_cha_zhi_threshold(data, y_pred_proba, y_test, total_samples, cha_zhi_threshold, tree_threshold,
-                              thread_ratio, this_key, temp_dict_result):
-    proba_diff = y_pred_proba[1] - y_pred_proba[0]
-    high_confidence_diff = (proba_diff > cha_zhi_threshold)
-    proba_diff_neg = y_pred_proba[0] - y_pred_proba[1]
-    high_confidence_diff_neg = (proba_diff_neg > cha_zhi_threshold)
-    if np.sum(high_confidence_diff) == 0 and np.sum(high_confidence_diff_neg) == 0:
-        return temp_dict_result
-
-    selected_data_diff = data[high_confidence_diff]
-    unique_dates_diff = selected_data_diff['日期'].unique().to_pandas()
-    selected_true_diff = high_confidence_diff & y_test
-    precision_diff = np.sum(selected_true_diff) / np.sum(high_confidence_diff) if np.sum(
-        high_confidence_diff) > 0 else 0
-    predicted_true_samples_diff = np.sum(high_confidence_diff)
-
-    selected_data_diff_neg = data[high_confidence_diff_neg]
-    unique_dates_diff_neg = selected_data_diff_neg['日期'].unique().to_pandas()
-    selected_false_diff_neg = high_confidence_diff_neg & ~y_test
-    precision_false = np.sum(selected_false_diff_neg) / np.sum(high_confidence_diff_neg) if np.sum(
-        high_confidence_diff_neg) > 0 else 0
-    predicted_false_samples_diff_neg = np.sum(high_confidence_diff_neg)
-
-    daily_precision_diff = {}
-    daily_precision_diff_neg = {}
-    if precision_diff >= thread_ratio or precision_false >= thread_ratio:
-        for date in unique_dates_diff:
-            date_mask = selected_data_diff['日期'] == date
-            date_selected_true_diff = selected_true_diff[high_confidence_diff]
-            date_true_count = np.sum(date_selected_true_diff[date_mask])
-            date_count = np.sum(date_mask)
-            daily_precision_diff[str(date)] = {
-                'precision': date_true_count / date_count if date_count > 0 else 0,
-                'count': int(date_count),
-                'false_count': int(date_count - date_true_count),
-                'true_count': int(date_true_count)
-            }
-        for date in unique_dates_diff_neg:
-            date_mask_neg = selected_data_diff_neg['日期'] == date
-            date_selected_false_diff_neg = selected_false_diff_neg[high_confidence_diff_neg]
-            date_false_count = np.sum(date_selected_false_diff_neg[date_mask_neg])
-            date_count_neg = np.sum(date_mask_neg)
-            daily_precision_diff_neg[str(date)] = {
-                'precision': date_false_count / date_count_neg if date_count_neg > 0 else 0,
-                'count': int(date_count_neg),
-                'false_count': int(date_false_count),
-                'true_count': int(date_count_neg - date_false_count)
-            }
-
-    temp_dict = create_temp_dict(tree_threshold, cha_zhi_threshold, 0, unique_dates_diff, precision_diff,
-                                 predicted_true_samples_diff, total_samples, unique_dates_diff_neg, precision_false,
-                                 predicted_false_samples_diff_neg, thread_ratio, daily_precision_diff,
-                                 daily_precision_diff_neg)
-    if this_key not in temp_dict_result:
-        temp_dict_result[this_key] = []
-    temp_dict_result[this_key].append(temp_dict)
-    return temp_dict_result
-
 def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values, cha_zhi_values, thread_ratio,
                        this_key_map, temp_dict_result):
     start_time = time.time()
@@ -276,7 +187,7 @@ def process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_
                                                  thread_ratio, this_key, temp_dict_result)
         if find_true_flag:
             break
-    print(f"abs 耗时 {time.time() - start_time:.2f}秒 模型 abs 的报告已生成 平均耗时: {(time.time() - start_time)/ len(abs_threshold_values):.2f}秒 阈值列表长度: {len(temp_dict_result[this_key])}")
+    print(f"find_true_flag {find_true_flag} abs 耗时 {time.time() - start_time:.2f}秒 模型 abs 的报告已生成 平均耗时: {(time.time() - start_time)/ len(abs_threshold_values):.2f}秒 阈值列表长度: {len(temp_dict_result[this_key])}")
     return temp_dict_result
 
 def get_model_report(abs_name, model_name, file_path, data, X_test):
@@ -309,22 +220,19 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             'tree_1_abs_1': False, 'tree_0_abs_1': True,
             'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
         }
-
         temp_dict_result = {}
-        temp_dict_result['model_size'] = round(os.path.getsize(abs_name) / (1024 ** 3), 2)
-        print("加载数据{}...".format(model_name))
+        temp_dict_result['model_size'] = round(os.path.getsize(abs_name) / (1024 ** 2), 2)
+        print("加载数据{}...".format(file_path))
         profit = int(model_name.split('profit_')[1].split('_')[0])
         thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
         key_name = f'后续{thread_day}日最高价利润率'
         y_test = data[key_name] >= profit
         total_samples = len(y_test)
-        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 3:.2f}G {model_name}条数据")
+        print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 2:.2f}M {model_name}条数据")
 
         if this_key_map['tree_0_abs_1'] or this_key_map["tree_0_cha_zhi_1"]:
             start = time.time()
-            model.handle = Handle()
             y_pred_proba = model.predict_proba(X_test)
-            model.handle.sync()
             print(f" 预测耗时: {time.time() - start:.2f}秒 {model_name}")
             temp_dict_result = process_pred_proba(data, y_pred_proba, y_test, total_samples, abs_threshold_values,
                                                   cha_zhi_values, thread_ratio, this_key_map, temp_dict_result)
@@ -335,7 +243,9 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         end_time = time.time()
         print(
             f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}  整体耗时 {end_time - start_time:.2f} 秒模型报告已生成: {model_name},\n\n")
-
+        del model
+        del y_pred_proba
+        gc.collect()
         return result_dict
     except BaseException as e:
         traceback.print_exc()
@@ -344,10 +254,30 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return {}
 
 
+def load_test_data():
+    file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
+    print(f"开始处理数据集: {file_path}")
+    data = low_memory_load(file_path)
+    data = cudf.DataFrame(data)
+
+    key_signal_columns = [column for column in data.columns if '最高价利润率' in column]
+    key_signal_columns.extend(['日期', '代码'])
+    final_data = data[key_signal_columns]
+    memory = data.memory_usage(deep=True).sum()
+    print(f"原始数据集内存: {memory / 1024 ** 2:.2f} MB")
+    data = downcast_dtypes(data)
+    memory = data.memory_usage(deep=True).sum()
+    print(f"转换后数据集内存: {memory / 1024 ** 2:.2f} MB")
+    signal_columns = [column for column in data.columns if '信号' in column]
+    X_test = data[signal_columns]
+    return final_data, X_test
+
+
 def get_all_model_report(max_size=0.5, min_size=0):
     """
     使用多进程获取所有模型的报告。
     """
+    final_data, X_test = None, None
     while True:
         # 获取MODEL_REPORT_PATH下所有模型的报告
         report_list = []
@@ -367,10 +297,12 @@ def get_all_model_report(max_size=0.5, min_size=0):
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
-                    # 获取full_name文件的大小，如果大于4G，则跳过
+                    if 'good_models' in full_name:
+                        continue
+                    # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
-                    if file_size > max_size * 1024 ** 3 or file_size < min_size * 1024 ** 3:
-                        # print(f"模型 {full_name} 大小超过4G，跳过。")
+                    if file_size > max_size * 1024 ** 2 or file_size < min_size * 1024 ** 2:
+                        # print(f"模型 {full_name} 大小超过4G,跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:
                         model_list.append((full_name, f))
@@ -386,37 +318,15 @@ def get_all_model_report(max_size=0.5, min_size=0):
         model_list = sorted_model_list
         print(
             f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)}")
-        # 随机打乱model_list
-        # random.shuffle(model_list)
-        start_time = time.time()
-        file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
-        print(f"开始处理数据集: {file_path}")
-        # data = cudf.read_csv(file_path, dtype={'代码': 'str', '日期': 'str'})
-        data = low_memory_load(file_path)
-        data = cudf.DataFrame(data)
 
-        key_signal_columns = [column for column in data.columns if '最高价利润率' in column]
-        key_signal_columns.extend(['日期', '代码'])
-        final_data = data[key_signal_columns]
-        memory = data.memory_usage(deep=True).sum()
-        print(f"原始数据集内存: {memory / 1024 ** 2:.2f} MB")
-        data = downcast_dtypes(data)
-        memory = data.memory_usage(deep=True).sum()
-        print(f"转换后数据集内存: {memory / 1024 ** 2:.2f} MB")
-        signal_columns = [column for column in data.columns if '信号' in column]
-        X_test = data[signal_columns]
-        print(f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
+        start_time = time.time()
+        if final_data is None or X_test is None:
+            final_data, X_test = load_test_data()
+        print(
+            f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
+        file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
         for full_name, model_name in model_list:
             result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
-        # with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        #     futures = []
-        #     for full_name, model_name in model_list:
-        #         future = executor.submit(get_model_report, full_name, model_name, file_path, final_data, X_test)
-        #         futures.append(future)
-        #
-        #     for future in concurrent.futures.as_completed(futures):
-        #         future.result()
-
 
 if __name__ == '__main__':
-    get_all_model_report(100, 0)
+    get_all_model_report(500000, 0)

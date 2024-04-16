@@ -301,7 +301,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
                         continue
                     # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
-                    if file_size > max_size * 1024 ** 3 or file_size < min_size * 1024 ** 3:
+                    if file_size > max_size * 1024 ** 2 or file_size < min_size * 1024 ** 2:
                         # print(f"模型 {full_name} 大小超过4G,跳过。")
                         continue
                     if f.endswith('joblib') and f not in report_list:
@@ -309,7 +309,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
                         size_list.append(file_size)
 
         # 根据文件大小对索引进行排序
-        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=False)
+        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=True)
 
         # 根据排序后的索引重新生成model_list
         sorted_model_list = [model_list[i] for i in sorted_indices]
@@ -329,4 +329,4 @@ def get_all_model_report(max_size=0.5, min_size=0):
             result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
 
 if __name__ == '__main__':
-    get_all_model_report(5, 0)
+    get_all_model_report(300, 0)

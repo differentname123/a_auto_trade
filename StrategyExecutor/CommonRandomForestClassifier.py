@@ -317,7 +317,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                     print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
                     continue
                 if sorted_scores['date_count'] > date_count_threshold:
-                    # sorted_scores['true_stocks_set'] = []
+                    sorted_scores['true_stocks_set'] = []
                     other_dict = sorted_scores
                     other_dict['model_path'] = model_file_path
                     other_dict['model_size'] = model_size
@@ -938,7 +938,7 @@ def analysis_model():
     data_files = []
     for root, dirs, files in os.walk('../temp/data'):
         for file in files:
-            if file.startswith('code_result_list_samples_') and '20240416' in file:
+            if file.startswith('code_result_list_samples_') and 'code_result_list_samples_20240401_20240416.csv' in file:
                 full_name = os.path.join(root, file)
                 data_files.append(full_name)
     for data_file in data_files:
@@ -1075,6 +1075,34 @@ def get_thread():
                 result = analyze_data(data, ratio_columns, '后续1日最高价利润率')
                 data_list.append(result)
 
+def save_all_selected_samples(all_selected_samples, min_count=6):
+    if 'code' not in all_selected_samples.columns:
+        all_selected_samples['code'] = all_selected_samples['代码']
+    if 'current_price' not in all_selected_samples.columns:
+        all_selected_samples['current_price'] = all_selected_samples['收盘']
+    #将all_selected_samples按照日期分组
+    first_grouped = all_selected_samples.groupby('日期')
+    for date, group in first_grouped:
+        grouped = group.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
+                                                           current_price=('current_price', 'min'),
+                                                           count=('code', 'count'), profit=('后续1日最高价利润率', 'mean'))
+        # 将date转换为datetime格式
+        date = pd.to_datetime(date)
+        # 按照数量降序排列
+        grouped = grouped.sort_values(by='count', ascending=False)
+        # target_date为date保留到天格式类似2023-01-01
+        target_date = date.strftime('%Y-%m-%d')
+        # 将结果保存到out_put_path
+        out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(out_put_path, 'a') as f:
+            f.write('\n')  # 写入一行空行
+            for code, row in grouped.iterrows():
+                if row['count'] >= min_count:
+                    line = '{}, {}, {}, {}, {}\n'.format(code, round(row['min_close'], 2), row['count'], row['profit'], current_time)
+                    f.write(line)
+                    print(line)
+
 if __name__ == '__main__':
     # balance_disk()
     # analysis_model()
@@ -1118,17 +1146,22 @@ if __name__ == '__main__':
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
-    data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-16_real_time.csv')
+    data = low_memory_load('../train_data/2024_data_all.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-15_real_time.csv')
     data['日期'] = pd.to_datetime(data['日期'])
+    data = data[data['日期'] >= '2024-04-01']
     start = time.time()
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         model_info_list = json.load(file)
     # with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
     #     model_info_list = json.load(file)
     # # 筛选出model_size在0.08到0.2之间的模型
-    all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4, thread_count=3)
+    # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=2, thread_count=3, code_list='all')
+
+
+    # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')
+    # save_all_selected_samples(all_selected_samples)
     # D:680G 15个 W:1440G 97个 20240415-23：26
     # D:641G 78个 W:1440G 187个 20240416-00：43
 
