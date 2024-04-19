@@ -257,7 +257,7 @@ def balance_disk(class_key='/mnt/w'):
 
     return all_model_info_list
 
-def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=100, model_min_size=0, abs_threshold=1):
+def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=10000000, model_min_size=0, abs_threshold=1):
     """
     加载随机森林模型
     :param model_path:
@@ -327,7 +327,7 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                 print(f"模型 {model_name} 不存在，跳过。")
     print(f"加载了 {len(all_rf_model_list)} 个模型")
     # 将all_rf_model_list按照model_size从小到大排序
-    all_rf_model_list.sort(key=lambda x: x['date_count'], reverse=True)
+    all_rf_model_list.sort(key=lambda x: x['model_size'], reverse=True)
     # 将all_rf_model_list存入final_output_filename
     with open(final_output_filename, 'w') as file:
         json.dump(all_rf_model_list, file)
@@ -932,13 +932,13 @@ def analysis_model():
     # result_dict_list = sorted(result_dict_list, key=lambda x: x['true_count_50_ratio'], reverse=True)
     # # 将result_dict_list转换为DataFrame
     # result_df = pd.DataFrame(result_dict_list)
-    # data = pd.read_csv('../temp/analysis_model/cha_zhi_result_2024-04-15.csv', low_memory=False, dtype={'code': str})
+    data = pd.read_csv('../temp/analysis_model/cha_zhi_result_2024-04-19.csv', low_memory=False, dtype={'code': str})
 
     # 遍历../temp/data目录下的所有文件，筛选出以code_result_list_samples_开头的文件
     data_files = []
     for root, dirs, files in os.walk('../temp/data'):
         for file in files:
-            if file.startswith('code_result_list_samples_') and 'code_result_list_samples_20240401_20240416.csv' in file:
+            if file.startswith('code_result_list_samples_') and '20240419.csv' in file:
                 full_name = os.path.join(root, file)
                 data_files.append(full_name)
     for data_file in data_files:
@@ -1146,10 +1146,11 @@ if __name__ == '__main__':
     # 将all_rf_model_list按照score升序排序
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
-    data = low_memory_load('../train_data/2024_data_all.csv')
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-15_real_time.csv')
+    # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../train_data/all_data.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-19_real_time.csv')
     data['日期'] = pd.to_datetime(data['日期'])
-    data = data[data['日期'] >= '2024-04-01']
+    data = data[data['日期'] >= '2023-01-01']
     start = time.time()
     with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
         model_info_list = json.load(file)
@@ -1157,7 +1158,7 @@ if __name__ == '__main__':
     #     model_info_list = json.load(file)
     # # 筛选出model_size在0.08到0.2之间的模型
     # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=2, thread_count=3, code_list='all')
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=1, thread_count=3, code_list='all')
 
 
     # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')

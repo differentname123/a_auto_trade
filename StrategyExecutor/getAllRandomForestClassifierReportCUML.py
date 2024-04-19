@@ -297,7 +297,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
-                    if 'good_models' in full_name:
+                    if 'good_models' in full_name or 'bad_1.0' in full_name:
                         continue
                     # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
@@ -329,4 +329,4 @@ def get_all_model_report(max_size=0.5, min_size=0):
             result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
 
 if __name__ == '__main__':
-    get_all_model_report(300, 0)
+    get_all_model_report(300000, 0)
