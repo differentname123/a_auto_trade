@@ -49,7 +49,7 @@ def load_model(abs_name, model_name):
     except Exception as e:
         traceback.print_exc()
         if os.path.exists(abs_name):
-            # os.remove(abs_name)
+            os.remove(abs_name)
             print(f"模型 {abs_name} 加载失败，跳过。")
         print(f"模型 {model_name} 不存在，跳过。")
         return None
@@ -249,8 +249,8 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return result_dict
     except BaseException as e:
         traceback.print_exc()
-        # os.remove(abs_name)
-        # print(f"已删除生成报告时出现异常: {e}")
+        os.remove(abs_name)
+        print(f"已删除生成报告时出现异常: {e}")
         return {}
 
 
@@ -297,7 +297,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
-                    if 'good_models' in full_name:
+                    if 'good_models' in full_name or 'bad_1.0' in full_name or 'profit_1' in full_name:
                         continue
                     # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
@@ -309,7 +309,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
                         size_list.append(file_size)
 
         # 根据文件大小对索引进行排序
-        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=False)
+        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=True)
 
         # 根据排序后的索引重新生成model_list
         sorted_model_list = [model_list[i] for i in sorted_indices]
@@ -329,4 +329,4 @@ def get_all_model_report(max_size=0.5, min_size=0):
             result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
 
 if __name__ == '__main__':
-    get_all_model_report(500000, 0)
+    get_all_model_report(300000, 0)

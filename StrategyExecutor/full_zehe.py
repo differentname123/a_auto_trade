@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
+from pandas import DataFrame
 
 from InfoCollector.save_all import save_all_data_mul, get_price, fix_st, save_index_data
 from StrategyExecutor.CommonRandomForestClassifier import load_rf_model, get_all_good_data_with_model_list, \
@@ -2148,7 +2149,11 @@ def save_and_analyse_stock_data_real_time_RF_thread_new(stock_data_list, exclude
             # code = '603985'
             # 开始计时
             start = time.time()
-            price_data = get_price(code, '20230101', '20291021', period='daily')
+            try:
+                price_data = get_price(code, '20230101', '20291021', period='daily')
+            except Exception as e:
+                print('code: {}, error: {}'.format(code, e))
+                price_data = DataFrame()
             price_data['code'] = code
             # price_data不为空才保存
             if not price_data.empty:
@@ -3631,7 +3636,7 @@ if __name__ == '__main__':
     # gen_all_back()
     # load_all_data_performance()
     while True:
-        save_and_analyse_all_data_mul_real_time_RF('2024-04-19')
+        save_and_analyse_all_data_mul_real_time_RF('2024-04-22')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
