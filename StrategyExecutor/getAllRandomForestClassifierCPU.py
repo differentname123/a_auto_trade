@@ -262,10 +262,18 @@ def train_target_model():
     # # 获取sorted_scores_list中的model_name的列表
     # model_name_list = [item['model_name'] for item in sorted_scores_list]
     model_name_list = []
-    file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
-    with open(file_path, 'r') as lines:
-        for line in lines:
-            model_name_list.append(line.strip())
+
+
+    # file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
+    # with open(file_path, 'r') as lines:
+    #     for line in lines:
+    #         model_name_list.append(line.strip())
+
+    with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
+        model_info_list = json.load(file)
+    for model_info in model_info_list:
+        model_name_list.append(model_info['model_name'])
+
     print(len(model_name_list))
 
     # 读取模型参数
@@ -279,6 +287,9 @@ def train_target_model():
         # 获取所有模型的文件名
         for root, ds, fs in os.walk(model_path):
             for f in fs:
+                full_name = os.path.join(root, f)
+                if 'good_models' in full_name or 'bad_1.0' in full_name or 'profit_2' in full_name:
+                    continue
                 if f.endswith('joblib'):
                     model_list.append(f)
 
@@ -302,7 +313,7 @@ def train_target_model():
             thread_day = params['thread_day']
             y = data[f'后续{thread_day}日最高价利润率'] >= 1
             true_ratio = params['true_ratio']
-            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}.joblib"
+            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}_100.joblib"
             if model_name in model_list:
                 print(f"模型已存在，跳过: {model_name}")
                 continue
@@ -316,7 +327,11 @@ def train_target_model():
             }
             clf = RandomForestClassifier(**final_param)
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
+            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}.joblib"
+            model_file_path = os.path.join(save_path, file_name, model_name)
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+            train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    build_models()
-    # train_target_model()
+    # build_models()
+    train_target_model()

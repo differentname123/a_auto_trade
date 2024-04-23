@@ -3636,7 +3636,7 @@ if __name__ == '__main__':
     # gen_all_back()
     # load_all_data_performance()
     while True:
-        save_and_analyse_all_data_mul_real_time_RF('2024-04-22')
+        save_and_analyse_all_data_mul_real_time_RF('2024-04-23')
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')

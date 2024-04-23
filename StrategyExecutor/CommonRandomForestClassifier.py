@@ -932,13 +932,13 @@ def analysis_model():
     # result_dict_list = sorted(result_dict_list, key=lambda x: x['true_count_50_ratio'], reverse=True)
     # # 将result_dict_list转换为DataFrame
     # result_df = pd.DataFrame(result_dict_list)
-    data = pd.read_csv('../temp/analysis_model/cha_zhi_result_2024-04-22.csv', low_memory=False, dtype={'code': str})
+    data = pd.read_csv('../temp/analysis_model/cha_zhi_result_2024-04-23.csv', low_memory=False, dtype={'code': str})
 
     # 遍历../temp/data目录下的所有文件，筛选出以code_result_list_samples_开头的文件
     data_files = []
     for root, dirs, files in os.walk('../temp/data'):
         for file in files:
-            if file.startswith('code_result_list_samples_') and '20240422.csv' in file:
+            if file.startswith('code_result_list_samples_') and '20240423.csv' in file:
                 full_name = os.path.join(root, file)
                 data_files.append(full_name)
     for data_file in data_files:
@@ -1105,106 +1105,106 @@ def save_all_selected_samples(all_selected_samples, min_count=6):
 
 if __name__ == '__main__':
     # balance_disk()
-    analysis_model()
+    # analysis_model()
     # get_thread()
 
+
+    # delete_bad_model()
+    # print('删除完成')
+    # compress_model()
+    # test_load_memory_ratio()
+    # pre_load_model()
+
+
+
+    # balance_disk()
+    # output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
+    # with open(output_filename, 'r') as file:
+    #     sorted_scores_list = json.load(file)
     #
-    # # delete_bad_model()
-    # # print('删除完成')
-    # # compress_model()
-    # # test_load_memory_ratio()
-    # # pre_load_model()
+    # all_output_filename = '../final_zuhe/other/all_reports_cuml.json'
+    # with open(output_filename, 'r') as file:
+    #     all_sorted_scores_list = json.load(file)
     #
+    # model_name_list = [item['model_name'] for item in sorted_scores_list]
+    # all_model_name_list = [item['model_name'] for item in all_sorted_scores_list]
     #
-    #
-    # # balance_disk()
-    # # output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
-    # # with open(output_filename, 'r') as file:
-    # #     sorted_scores_list = json.load(file)
-    # #
-    # # all_output_filename = '../final_zuhe/other/all_reports_cuml.json'
-    # # with open(output_filename, 'r') as file:
-    # #     all_sorted_scores_list = json.load(file)
-    # #
-    # # model_name_list = [item['model_name'] for item in sorted_scores_list]
-    # # all_model_name_list = [item['model_name'] for item in all_sorted_scores_list]
-    # #
-    # # # 找出all_sorted_scores_list比sorted_scores_list多出来的模型
-    # # bad_model_list = list(set(all_model_name_list) - set(model_name_list))
-    #
-    #
-    #
-    # # write_joblib_files_to_txt('/mnt/d/model/all_models/')
-    # # write_joblib_files_to_txt('/mnt/g/model/all_models/')
-    # # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
-    #
-    # # origin_data_path = '../temp/real_time_price.csv'
-    # # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
-    # # get_all_good_data(data)
-    # # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
-    # # all_rf_model_list = load_rf_model_new(1, True)
-    # # 将all_rf_model_list按照score升序排序
-    # # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
-    # # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
-    # # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
-    # # data = low_memory_load('../train_data/all_data.csv')
-    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-22_real_time.csv')
-    # data['日期'] = pd.to_datetime(data['日期'])
-    # data = data[data['日期'] >= '2024-01-01']
-    # start = time.time()
-    # # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    # #     model_info_list = json.load(file)
+    # # 找出all_sorted_scores_list比sorted_scores_list多出来的模型
+    # bad_model_list = list(set(all_model_name_list) - set(model_name_list))
+
+
+
+    # write_joblib_files_to_txt('/mnt/d/model/all_models/')
+    # write_joblib_files_to_txt('/mnt/g/model/all_models/')
+    # write_joblib_files_to_txt('../model/all_models/profit_1_day_1_bad_0.4')
+
+    # origin_data_path = '../temp/real_time_price.csv'
+    # data = pd.read_csv(origin_data_path, low_memory=False, dtype={'代码': str})
+    # get_all_good_data(data)
+    # data = pd.read_csv('../temp/all_selected_samples_0.csv', low_memory=False, dtype={'代码': str})
+    # all_rf_model_list = load_rf_model_new(1, True)
+    # 将all_rf_model_list按照score升序排序
+    # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
+    # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
+    # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../train_data/all_data.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-22_real_time.csv')
+    data['日期'] = pd.to_datetime(data['日期'])
+    data = data[data['日期'] >= '2024-01-01']
+    start = time.time()
+    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+        model_info_list = json.load(file)
     # with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
     #     model_info_list = json.load(file)
-    # # # 筛选出model_size在0.08到0.2之间的模型
-    # # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
-    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4, thread_count=3, code_list='all')
+    # # 筛选出model_size在0.08到0.2之间的模型
+    # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=3, thread_count=3)
+
+
+    # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')
+    # save_all_selected_samples(all_selected_samples)
+    # D:680G 15个 W:1440G 97个 20240415-23：26
+    # D:641G 78个 W:1440G 187个 20240416-00：43
+
+    #
+    # # print(f"总耗时 {time.time() - start}")
+    # # del all_selected_samples
+    # # gc.collect()
+    # # # 获取data中包含'信号'的列
+    # # signal_columns = [column for column in data.columns if '节假日' in column]
+    # # signal_data = data[signal_columns]
+    # # print(signal_data)
+    # # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
+    # data = low_memory_load('../train_data/2024_data.csv')
+    # data['日期'] = pd.to_datetime(data['日期'])
+    # # get_all_good_data_with_model_name_list_new_pre(data, 50)
     #
     #
-    # # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')
-    # # save_all_selected_samples(all_selected_samples)
-    # # D:680G 15个 W:1440G 97个 20240415-23：26
-    # # D:641G 78个 W:1440G 187个 20240416-00：43
     #
-    # #
-    # # # print(f"总耗时 {time.time() - start}")
-    # # # del all_selected_samples
-    # # # gc.collect()
-    # # # # 获取data中包含'信号'的列
-    # # # signal_columns = [column for column in data.columns if '节假日' in column]
-    # # # signal_data = data[signal_columns]
-    # # # print(signal_data)
-    # # # data = pd.read_csv('../train_data/2024_data_all.csv', low_memory=False, dtype={'代码': str})
-    # # data = low_memory_load('../train_data/2024_data.csv')
-    # # data['日期'] = pd.to_datetime(data['日期'])
-    # # # get_all_good_data_with_model_name_list_new_pre(data, 50)
-    # #
-    # #
-    # #
-    # #
-    # # data = data[data['日期'] >= '2024-03-20']
-    # # # 按照日期分组
-    # # data_group = data.groupby(['日期'])
-    # # # 初始化一个临时列表用于存储五个分组
-    # # temp_group_list = []
-    # # # 初始化一个计数器
-    # # counter = 0
-    # # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-    # #     all_model_info_list = json.load(file)
-    # # all_model_info_list = [model_info for model_info in all_model_info_list if 0 < model_info['model_size'] < 0.3]
-    # # # 迭代每个分组
-    # # for date, group in data_group:
-    # #     # 将分组添加到临时列表
-    # #     temp_group_list.append(group)
-    # #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
-    # #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
-    # #         # 将五个分组的数据合并为一个DataFrame
-    # #         batch_data = pd.concat(temp_group_list)
-    # #         # 对这批数据执行函数
-    # #         all_selected_samples = get_all_good_data_with_model_name_list_new(batch_data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
-    # #         # 清空临时列表，为下一个批次做准备
-    # #         temp_group_list = []
-    # #         # break
-    # #     # 更新计数器
-    # #     counter += 1
-    # # # load_rf_model_new()
+    #
+    # data = data[data['日期'] >= '2024-03-20']
+    # # 按照日期分组
+    # data_group = data.groupby(['日期'])
+    # # 初始化一个临时列表用于存储五个分组
+    # temp_group_list = []
+    # # 初始化一个计数器
+    # counter = 0
+    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
+    #     all_model_info_list = json.load(file)
+    # all_model_info_list = [model_info for model_info in all_model_info_list if 0 < model_info['model_size'] < 0.3]
+    # # 迭代每个分组
+    # for date, group in data_group:
+    #     # 将分组添加到临时列表
+    #     temp_group_list.append(group)
+    #     # 每当临时列表中有五个分组或者是最后一个分组时，执行函数
+    #     if len(temp_group_list) == 5 or (counter == len(data_group) - 1):
+    #         # 将五个分组的数据合并为一个DataFrame
+    #         batch_data = pd.concat(temp_group_list)
+    #         # 对这批数据执行函数
+    #         all_selected_samples = get_all_good_data_with_model_name_list_new(batch_data, all_model_info_list, process_count=4, thread_count=3, code_list='all')
+    #         # 清空临时列表，为下一个批次做准备
+    #         temp_group_list = []
+    #         # break
+    #     # 更新计数器
+    #     counter += 1
+    # # load_rf_model_new()

@@ -839,8 +839,8 @@ def sort_new():
                     try:
                         result_dict = json.load(file)
                         for model_name, report_value in result_dict.items():
-                            # if 'thread_day_1' not in model_name:
-                            #     continue
+                            if 'profit_1' not in model_name:
+                                continue
                             for test_data_path, detail_report in report_value.items():
                                 if 'all' in test_data_path:
                                     temp_dict = {}
@@ -889,6 +889,7 @@ def sort_new():
                         pass
     # 将good_model_list先按照date_count降序排序再按照max_score降序排序
     good_model_list = sorted(good_model_list, key=lambda x: (-x['abs_threshold'], x['date_count']), reverse=True) # 10个好的 最大46
+    print(f"good_model_list的长度为{len(good_model_list)}")
     with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'w') as outfile:
         json.dump(good_model_list, outfile, indent=4)
 
@@ -982,8 +983,8 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 if __name__ == '__main__':
     # find_small_abs()
     sort_new()
-    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=100000,model_min_size=0, abs_threshold=1) # 0:144
-    # delete_bad_model()
+    # all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=300000,model_min_size=0, abs_threshold=1) # 0:147
+    delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]
     # for model_max_size in model_max_size_list:
