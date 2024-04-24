@@ -333,5 +333,5 @@ def train_target_model():
             train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
-    # build_models()
-    train_target_model()
+    build_models()
+    # train_target_model()

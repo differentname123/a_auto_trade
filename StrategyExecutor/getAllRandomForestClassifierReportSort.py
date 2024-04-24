@@ -839,7 +839,7 @@ def sort_new():
                     try:
                         result_dict = json.load(file)
                         for model_name, report_value in result_dict.items():
-                            if 'profit_1' not in model_name:
+                            if 'profit_2' not in model_name:
                                 continue
                             for test_data_path, detail_report in report_value.items():
                                 if 'all' in test_data_path:
@@ -983,8 +983,8 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 if __name__ == '__main__':
     # find_small_abs()
     sort_new()
-    # all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=300000,model_min_size=0, abs_threshold=1) # 0:147
-    delete_bad_model()
+    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=30000,model_min_size=0, abs_threshold=1) # 0:162
+    # delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]
     # for model_max_size in model_max_size_list:

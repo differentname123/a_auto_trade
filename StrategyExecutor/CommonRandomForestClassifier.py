@@ -274,6 +274,8 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
         # 获取model_path下的所有文件的全路径，如果是目录还需要继续递归
         for root, dirs, files in os.walk(model_path):
             for file in files:
+                if 'good' in root:
+                    continue
                 model_file_list.append(os.path.join(root, file))
     exist_stocks_list = []
     exist_stocks = set()
@@ -1148,7 +1150,7 @@ if __name__ == '__main__':
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
     # data = low_memory_load('../train_data/all_data.csv')
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-22_real_time.csv')
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-24_real_time.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['日期'] >= '2024-01-01']
     start = time.time()
@@ -1158,7 +1160,7 @@ if __name__ == '__main__':
     #     model_info_list = json.load(file)
     # # 筛选出model_size在0.08到0.2之间的模型
     # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=3, thread_count=3)
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4, thread_count=4)
 
 
     # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')
