@@ -281,7 +281,7 @@ def train_target_model():
     for model_name in model_name_list:
         param = parse_filename(model_name)
         param_list.append(param)
-    save_path = MODEL_PATH
+    save_path = D_MODEL_PATH
     model_list = []
     for model_path in MODEL_PATH_LIST:
         # 获取所有模型的文件名

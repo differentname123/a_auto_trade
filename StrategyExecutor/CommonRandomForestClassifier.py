@@ -497,19 +497,24 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, min_day=0, abs_threshold=0):
     :return:
     """
     selected_samples = None
+    result_list = []
     if abs_threshold > 0:
-        threshold = abs_threshold
-        high_confidence_true = (y_pred_proba[1] > threshold)
-        predicted_true_samples = np.sum(high_confidence_true)
-        # 如果有高于阈值的预测样本，打印对应的原始数据
-        if predicted_true_samples > min_day:
-            # 直接使用布尔索引从原始data中选择对应行
-            selected_samples = X1[high_confidence_true].copy()
-            # 统计selected_samples中 收盘 的和
+        for cha in range(0, 4):
+            cha = cha / 100
+            threshold = abs_threshold - cha
+            high_confidence_true = (y_pred_proba[1] >= threshold)
+            predicted_true_samples = np.sum(high_confidence_true)
+            # 如果有高于阈值的预测样本，打印对应的原始数据
+            if predicted_true_samples > min_day:
+                # 直接使用布尔索引从原始data中选择对应行
+                selected_samples = X1[high_confidence_true].copy()
+                # 统计selected_samples中 收盘 的和
+                result_list.append(selected_samples)
+        if len(result_list) > 0:
+            selected_samples = pd.concat(result_list)
             close_sum = selected_samples['收盘'].sum()
             print(f'高于阈值 {threshold:.2f} 的预测样本对应的原始数据:{close_sum} 代码:{set(selected_samples["代码"].values)} 收盘最小值:{selected_samples["收盘"].min()} 收盘最大值:{selected_samples["收盘"].max()}')
             print(selected_samples['日期'].value_counts())
-            return selected_samples
     return selected_samples
 
 def get_proba_data(data, rf_classifier):
@@ -537,6 +542,7 @@ def process_model_new(rf_model_map, data):
         code_list = rf_model_map['code_list']
     model_name = os.path.basename(rf_model_map['model_path'])
     load_time = 0
+    selected_samples_size = 0
     code_list_pred_proba = None
     try:
         # 如果rf_model_map['model_path']是文件路径，则加载模型
@@ -565,6 +571,7 @@ def process_model_new(rf_model_map, data):
             selected_samples['param'] = str(value)
             selected_samples['model_name'] = model_name
             all_selected_samples_list.append(selected_samples)
+            selected_samples_size = selected_samples.shape[0]
 
         if len(all_selected_samples_list) > 0:
             return pd.concat(all_selected_samples_list), code_list_pred_proba
@@ -578,7 +585,7 @@ def process_model_new(rf_model_map, data):
         #     print(f"删除模型 {model_name} 成功")
     finally:
         elapsed_time = time.time() - start
-        print(f"模型 {model_name} 耗时 {elapsed_time} 加载耗时 {load_time}")
+        print(f"模型 {model_name} 耗时 {elapsed_time} 加载耗时 {load_time} 选中样本数 {selected_samples_size}")
 
 def model_worker(model_info_list, data, result_list, code_result_list,max_workers=1):
     print(f"Process {current_process().name} started.")
@@ -1077,11 +1084,12 @@ def get_thread():
                 result = analyze_data(data, ratio_columns, '后续1日最高价利润率')
                 data_list.append(result)
 
-def save_all_selected_samples(all_selected_samples, min_count=6):
-    if 'code' not in all_selected_samples.columns:
-        all_selected_samples['code'] = all_selected_samples['代码']
+def save_all_selected_samples(all_selected_samples, min_count=0):
+    all_selected_samples['code'] = all_selected_samples['代码']
     if 'current_price' not in all_selected_samples.columns:
         all_selected_samples['current_price'] = all_selected_samples['收盘']
+    if '后续1日最高价利润率' not in all_selected_samples.columns:
+        all_selected_samples['后续1日最高价利润率'] = 0
     #将all_selected_samples按照日期分组
     first_grouped = all_selected_samples.groupby('日期')
     for date, group in first_grouped:
@@ -1105,7 +1113,70 @@ def save_all_selected_samples(all_selected_samples, min_count=6):
                     f.write(line)
                     print(line)
 
+
+def summarize_quantities(file_path):
+    from collections import defaultdict
+    import csv
+
+    # 创建一个字典来存储每个编号的累积数量和其他数据
+    data_summary = defaultdict(lambda: {'price': 0, 'quantity': 0, 'value': 0})
+
+    # 读取文件
+    with open(file_path, 'r') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if row:  # 确保行非空
+                row = [item.strip() for item in row]
+                # 解析行数据
+                identifier = row[0]
+                price = float(row[1])
+                quantity = float(row[2])
+                value = float(row[3])
+
+                # 更新字典
+                if identifier in data_summary:
+                    data_summary[identifier]['quantity'] += quantity
+                else:
+                    data_summary[identifier] = {'price': price, 'quantity': quantity, 'value': value}
+
+    # 对字典按数量排序
+    sorted_data = sorted(data_summary.items(), key=lambda x: x[1]['quantity'], reverse=True)
+    # 计算总数量
+    total_quantity = sum(info['quantity'] for identifier, info in sorted_data)
+    code_len = len(sorted_data)
+    result = []
+    # 输出结果
+    for identifier, info in sorted_data:
+        # 获取file_path的日期
+        date = file_path.split('/')[-1].split('_')[0]
+        line = f"date：{date}  ID: {identifier:6}, Price: {info['price']:8.2f}, Quantity: {info['quantity']:9.2f}, total:{total_quantity:6}  code_len:{code_len:6}  Value: {info['value']:8.2f}"
+
+        if info['value'] < 1:
+            print(line)
+        result.append(line)
+
+        break
+    return result
+
+def sort_all_select():
+    file_name_list= []
+    for root, dirs, files in os.walk('../final_zuhe/select'):
+        for file in files:
+            if file.startswith('2024-0') and 'real_time_good_price' in file:
+                full_name = os.path.join(root, file)
+                file_name_list.append(full_name)
+    result_dict = {}
+    for file_name in file_name_list:
+        sorted_data = summarize_quantities(file_name)
+        key = file_name.split('/')[-1].split('.')[0]
+        result_dict[key] = sorted_data
+    # 将result_dict写入文件
+    with open('../final_zuhe/other/sorted_all_select.json', 'w') as file:
+        json.dump(result_dict, file)
+    return result_dict
+
 if __name__ == '__main__':
+    sort_all_select()
     # balance_disk()
     # analysis_model()
     # get_thread()
@@ -1149,22 +1220,22 @@ if __name__ == '__main__':
     # all_rf_model_list = sorted(all_rf_model_list, key=lambda x: x['precision'])
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
-    # data = low_memory_load('../train_data/all_data.csv')
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-24_real_time.csv')
-    data['日期'] = pd.to_datetime(data['日期'])
-    data = data[data['日期'] >= '2024-01-01']
-    start = time.time()
-    with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
-        model_info_list = json.load(file)
-    # with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
+    # data = low_memory_load('../train_data/2024_data_all.csv')
+    # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-22_real_time.csv')
+    # data['日期'] = pd.to_datetime(data['日期'])
+    # data = data[data['日期'] >= '2024-01-01']
+    # start = time.time()
+    # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
     #     model_info_list = json.load(file)
-    # # 筛选出model_size在0.08到0.2之间的模型
-    # all_model_info_list = [model_info for model_info in model_info_list if 0 <= model_info['model_size'] <= 0.3]
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4, thread_count=4)
+    # # with open('../final_zuhe/other/good_all_model_reports_cuml_new.json', 'r') as file:
+    # #     model_info_list = json.load(file)
+    # # # 筛选出model_size在0.08到0.2之间的模型
+    # model_info_list = [model_info for model_info in model_info_list if 'thread_day_2' in model_info['model_name']]
+    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=2, thread_count=3)
 
 
-    # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240401_20240416.csv')
-    # save_all_selected_samples(all_selected_samples)
+    all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240102_20240425_count300_thread_12.csv')
+    save_all_selected_samples(all_selected_samples)
     # D:680G 15个 W:1440G 97个 20240415-23：26
     # D:641G 78个 W:1440G 187个 20240416-00：43
 
