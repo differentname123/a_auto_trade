@@ -327,6 +327,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
         file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
         for full_name, model_name in model_list:
             result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
+        return None
 
 if __name__ == '__main__':
     get_all_model_report(300000, 0)
