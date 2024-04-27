@@ -1633,7 +1633,7 @@ def sort_choose_data_result():
 
 
 if __name__ == '__main__':
-    # sort_choose_data_result()
+    sort_choose_data_result()
     # analyse_all_select(file_path)
     # sort_all_select()
     # balance_disk()
