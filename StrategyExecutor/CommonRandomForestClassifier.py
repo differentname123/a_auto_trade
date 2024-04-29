@@ -2109,7 +2109,14 @@ def example():
     all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4,
                                                                       thread_count=4)
     # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
-    mul_select('../temp/data/all_selected_samples_20230103_20231229.csv')
+    mul_select('../temp/data/all_selected_samples_20240429_20240429.csv')
+
+    # 获取第一层参数的性能
+    save_all_selected_samples(all_selected_samples)
+
+    # 获取第二次参数的性能
+    get_good_param_by_param_select(all_selected_samples)
+
 
 
 if __name__ == '__main__':
