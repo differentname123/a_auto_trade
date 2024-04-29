@@ -558,13 +558,9 @@ def process_model_new(rf_model_map, data):
     """
     start = time.time()
     all_selected_samples_list = []
-    code_list = []
-    if 'code_list' in rf_model_map:
-        code_list = rf_model_map['code_list']
     model_name = os.path.basename(rf_model_map['model_path'])
     load_time = 0
     selected_samples_size = 0
-    code_list_pred_proba = None
     try:
         # 如果rf_model_map['model_path']是文件路径，则加载模型
         if 'model' not in rf_model_map:
@@ -576,16 +572,6 @@ def process_model_new(rf_model_map, data):
 
         value = rf_model_map
         y_pred_proba, X1 = get_proba_data(data, rf_model)
-        if code_list == 'all':
-            code_list_pred_proba = pd.merge(y_pred_proba, X1, left_index=True, right_index=True)
-            code_list_pred_proba['param'] = str(value)
-        elif len(code_list) > 0:
-            code_index = X1['代码'].isin(code_list)
-            code_list_y_pred_proba = y_pred_proba[code_index]
-            code_list_X1 = X1[code_index]
-            # 将code_list_y_pred_proba和code_list_X1按照index merge,它们都是Dataframe类型的
-            code_list_pred_proba = pd.merge(code_list_y_pred_proba, code_list_X1, left_index=True, right_index=True)
-            code_list_pred_proba['param'] = str(value)
 
         selected_samples = get_thread_data_new_tree_0(y_pred_proba, X1, min_day=value['min_day'],
                                                       abs_threshold=value['abs_threshold'])
@@ -596,32 +582,26 @@ def process_model_new(rf_model_map, data):
             selected_samples_size = selected_samples.shape[0]
 
         if len(all_selected_samples_list) > 0:
-            return pd.concat(all_selected_samples_list), code_list_pred_proba
-        return None, code_list_pred_proba
+            return pd.concat(all_selected_samples_list)
+        return None
     except Exception as e:
         traceback.print_exc()
         print(f"模型 {model_name} 加载失败 {e}")
-        # # 删除模型文件
-        # if os.path.exists(rf_model_map['model_path']):
-        #     os.remove(rf_model_map['model_path'])
-        #     print(f"删除模型 {model_name} 成功")
     finally:
         elapsed_time = time.time() - start
         print(f"模型 {model_name} 耗时 {elapsed_time} 加载耗时 {load_time} 选中样本数 {selected_samples_size}")
 
 
-def model_worker(model_info_list, data, result_list, code_result_list, max_workers=1):
+def model_worker(model_info_list, data, result_list, max_workers=1):
     print(f"Process {current_process().name} started.")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_model_new, model_info, data): model_info for model_info in model_info_list}
         for future in as_completed(futures):
             model_info = futures[future]
             try:
-                result, code_result = future.result()
+                result = future.result()
                 if result is not None:
                     result_list.append(result)
-                if code_result is not None:
-                    code_result_list.append(code_result)
             except Exception as exc:
                 error_message = f"Model {model_info['model_path']} generated an exception: {exc}"
                 print(error_message)
@@ -769,24 +749,25 @@ def get_all_good_data_with_model_name_list_new_pre(data, all_model_info_list, da
     return all_selected_samples
 
 
-def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_count_threshold=50, code_list=[],
+def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_count_threshold=50,
                                                process_count=1, thread_count=1):
+    """
+    使用多进程加上多线程的方式获取all_model_info_list中模型的预测结果，最后将满足条件的数据合并保持
+    :param data:
+    :param all_model_info_list:
+    :param date_count_threshold:
+    :param process_count:
+    :param thread_count:
+    :return:
+    """
     print(f'当前时间 {datetime.now()}')
     # 获取data的最大和最小日期，保留到天,并且拼接为字符串
     date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
     start = time.time()
-    # 将code_list加入到每个模型中
-    for model_info in all_model_info_list:
-        model_info['code_list'] = code_list
     # 将all_model_info_list按照model_path分类，包含‘/mnt/w’的为一类，其余为一类
     all_model_info_list_w = [model_info for model_info in all_model_info_list if '/mnt/w' in model_info['model_path']]
     all_model_info_list_other = [model_info for model_info in all_model_info_list if
                                  '/mnt/w' not in model_info['model_path']]
-    # 打乱两个列表的顺序
-    # random.shuffle(all_model_info_list_w)
-    # random.shuffle(all_model_info_list_other)
-    # all_model_info_list_w.sort(key=lambda x: x['model_size'], reverse=True)
-    # all_model_info_list_other.sort(key=lambda x: x['model_size'], reverse=False)
     print(
         f"大小平衡后 all_model_info_list_w {len(all_model_info_list_w)} all_model_info_list_other {len(all_model_info_list_other)}")
 
@@ -802,7 +783,6 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
         # 存储最终结果的列表
         manager = multiprocessing.Manager()
         result_list = manager.list()
-        code_result_list = manager.list()
 
         # 提交任务到进程池
         futures = []
@@ -814,7 +794,7 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
             else:
                 model_chunk.sort(key=lambda x: x['model_size'], reverse=False)
                 jishu = 0
-            future = executor.submit(model_worker, model_chunk, data, result_list, code_result_list, thread_count)
+            future = executor.submit(model_worker, model_chunk, data, result_list, thread_count)
             futures.append(future)
 
         # 等待所有任务完成
@@ -822,11 +802,8 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
 
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
     all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
-    if code_list != []:
-        code_result_list_samples = pd.concat(code_result_list,
-                                             ignore_index=True) if code_result_list else pd.DataFrame()
-        code_result_list_samples.to_csv(f'../temp/data/code_result_list_samples_{date_str}.csv', index=False)
-
+    output_path = f'../temp/data/all_selected_samples_{date_str}.csv'
+    mul_select(output_path)
     print(f"总耗时 {time.time() - start}")
     return all_selected_samples
 
@@ -1358,6 +1335,15 @@ def process_task(args):
     single_process(filtered_results, output_filename, all_model_name_dict, profit_key)
 
 def get_result_select(all_selected_samples, param_result_list, all_model_name_dict, profit_key='后续1日最高价利润率', profit_key_2='后续2日最高价利润率'):
+    """
+    针对all_selected_samples进行param_result_list的选择，返回满足要求的数据
+    :param all_selected_samples:
+    :param param_result_list:
+    :param all_model_name_dict:
+    :param profit_key:
+    :param profit_key_2:
+    :return:
+    """
     final_result_list = []
     # 将result_list按照json_file分组
     first_grouped = pd.DataFrame(param_result_list).groupby('json_file')
@@ -1430,18 +1416,18 @@ def get_all_param_select(file_path='../temp/data/all_selected_samples_20240102_2
     """
     all_selected_samples = pd.read_csv(file_path, low_memory=False, dtype={'代码': str})
     all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
-    all_selected_samples = all_selected_samples[all_selected_samples['日期'] >= '2024-04-24']
+    # all_selected_samples = all_selected_samples[all_selected_samples['日期'] <= '2024-04-24']
     all_selected_samples['code'] = all_selected_samples['代码']
     if 'current_price' not in all_selected_samples.columns:
         all_selected_samples['current_price'] = all_selected_samples['收盘']
+    profit_key_2 = profit_key.replace('1', '2')
+    if profit_key not in all_selected_samples.columns:
+        all_selected_samples[profit_key] = 0
+    if profit_key_2 not in all_selected_samples.columns:
+        all_selected_samples[profit_key_2] = 0
 
     with open(param_file_path, 'r') as file:
         result_list = json.load(file)
-    # # 获取result_list前10条数据
-    # result_list = [result for result in result_list if
-    #                     result['bad_count'] / result['select_day_count'] <= 0.02 and result[
-    #                         'select_day_count'] >= 10]
-    # 加载模型信息
     file_list = ['good_all_model_reports_cuml_100_200_thread12.json',
                  'good_all_model_reports_cuml_200_200_thread12.json',
                  'good_all_model_reports_cuml_300_200_thread12.json',
@@ -1473,10 +1459,11 @@ def get_all_param_select(file_path='../temp/data/all_selected_samples_20240102_2
     # 将all_selected_samples_with_param写入文件
     base_name = os.path.basename(file_path)
     param_base_name = os.path.basename(param_file_path)
-    output_filename = f'../temp/back/all_{base_name}_param_{param_base_name}_0424.csv'
+    output_filename = f'../temp/back/all_{base_name}_param_{param_base_name}.csv'
     all_selected_samples_with_param.to_csv(output_filename, index=False)
+    return output_filename
 
-def choose_code_from_all_selected_samples(all_selected_samples, profit_key='后续1日最高价利润率', param_file_path='../final_zuhe/other/result_list_day1_2023.json'):
+def choose_code_from_all_selected_samples(all_selected_samples, profit_key='后续1日最高价利润率', param_file_path='../final_zuhe/other/result_list_day1_2023filter.json'):
     # param_file_path = '../final_zuhe/other/result_list_day1_2023.json'
     # profit_key = '后续1日最高价利润率'
     all_selected_samples['code'] = all_selected_samples['代码']
@@ -1528,6 +1515,12 @@ def choose_code_from_all_selected_samples(all_selected_samples, profit_key='后�
 
 
 def save_all_selected_samples(all_selected_samples, min_count=0):
+    """
+    第一次好参数性能获取，通过带有rf模型的select数据获取第一层参数的性能
+    :param all_selected_samples:
+    :param min_count:
+    :return:
+    """
     all_selected_samples['code'] = all_selected_samples['代码']
     if 'current_price' not in all_selected_samples.columns:
         all_selected_samples['current_price'] = all_selected_samples['收盘']
@@ -1685,35 +1678,6 @@ def sort_all_select():
     return bad_count, select_day_count
 
 
-def gen_full_select(data):
-    file_list = ['good_all_model_reports_cuml_100_200_thread12.json',
-                 'good_all_model_reports_cuml_200_200_thread12.json',
-                 'good_all_model_reports_cuml_300_200_thread12.json',
-                 'good_all_model_reports_cuml_100_200_thread2.json', 'good_all_model_reports_cuml_200_200_thread2.json',
-                 'good_all_model_reports_cuml_300_200_thread2.json',
-                 'good_all_model_reports_cuml_100_200_thread1.json', 'good_all_model_reports_cuml_200_200_thread1.json',
-                 'good_all_model_reports_cuml_300_200_thread1.json']
-    all_model_info_list = []
-    final_all_model_info_list = []
-    exist_model_name_list = []
-    all_model_name_list = []
-    for file in file_list:
-        with open(f'../final_zuhe/other/{file}', 'r') as file:
-            model_info_list = json.load(file)
-            all_model_name_list.extend([model_info['model_name'] for model_info in model_info_list])
-            all_model_info_list.extend(model_info_list)
-    # 将all_model_name_list去重
-    all_model_name_list = list(set(all_model_name_list))
-    for model_info in all_model_info_list:
-        if model_info['model_name'] in all_model_name_list and model_info['model_name'] not in exist_model_name_list:
-            exist_model_name_list.append(model_info['model_name'])
-            final_all_model_info_list.append(model_info)
-    # with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'w') as file:
-    #     json.dump(final_all_model_info_list, file)
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, final_all_model_info_list, process_count=1,
-                                                                      thread_count=1)
-    # save_all_selected_samples(all_selected_samples)
-
 def merge_and_sort_json_files(file_name_list):
     """
     Merge JSON files and sort the merged result by 'total_days' in descending order
@@ -1837,7 +1801,7 @@ def parse_filename(filename):
 
 def filter_data(data, args):
     data = data.copy()
-    ratio, thread_day, min_day_count, min_select_count, json_file = args
+    ratio, thread_day, min_day_count, min_select_count, json_file, strategy = args
     # ratio = 0.2
     # min_day_count = 20
     # min_select_count = 0
@@ -1853,16 +1817,40 @@ def filter_data(data, args):
     # 保留data中select_day_count大于等于min_day_count的数据
     data = data[data['select_day_count'] >= min_day_count]
     # 合并相同date和code的数据，其他列都取第一个值，同时增加一个select_count列，记录相同date和code的数量
-    data = data.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'), profit_2=('profit_2', 'first'))
+    data = data.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'), profit_2=('profit_2', 'first'), current_price=('current_price', 'first'))
     data = data.reset_index()
     # 选出select_count大于等于min_select_count的数据
     data = data[data['select_count'] >= min_select_count]
+    remove_single_code_days_data, single_record_dates = remove_single_code_days(data)
+    filtered_data = keep_only_single_code_days(data)
+    filter_remove_single_code_days_data = keep_only_single_code_days(remove_single_code_days_data)
+    if strategy == 'filtered_data':
+        return filtered_data
+    elif strategy == 'data':
+        return data
+    elif strategy == 'remove_single_code_days_data':
+        return remove_single_code_days_data
+    elif strategy == 'filter_remove_single_code_days_data':
+        return filter_remove_single_code_days_data
+    elif strategy == 'single_record_dates':
+        return single_record_dates
     return data
 
 def filter_select_data(data, args):
     # print(f"开始处理任务 {args}")
     ratio, thread_day, min_day_count, min_select_count, json_file = args
-    data = filter_data(data, args)
+    data = data[data['ratio'] <= ratio]
+    # 保留data中thread_day等于thread_day的数据,如果thread_day为'both'则保留所有数据
+    if thread_day != 'both':
+        data = data[data['thread_day'] == thread_day]
+    if json_file != 'both':
+        data = data[data['json_file'] == json_file]
+    # 保留data中select_day_count大于等于min_day_count的数据
+    data = data[data['select_day_count'] >= min_day_count]
+    # 合并相同date和code的数据，其他列都取第一个值，同时增加一个select_count列，记录相同date和code的数量
+    data = data.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'),
+                                              profit_2=('profit_2', 'first'), current_price=('current_price', 'first'))
+    data = data.reset_index()
     # 如果data为空，则返回空字典
     if data.shape[0] == 0:
         # 返回空DataFrame
@@ -1899,6 +1887,11 @@ def chunkify(lst, n):
     return [lst[i::n] for i in range(n)]
 
 def get_good_param_by_param_select(file_path=f'../temp/back/all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv'):
+    """
+    二次好参数性能获取，通过带有第一层参数的select数据获取第二层参数的性能
+    :param file_path:
+    :return:
+    """
     data = pd.read_csv(file_path, low_memory=False)
     data['ratio'] = data['bad_count'] / data['select_day_count']
     ratio_list = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16,
@@ -1976,44 +1969,151 @@ def chunk_tasks(tasks, chunk_size):
     for i in range(0, len(tasks), chunk_size):
         yield tasks[i:i + chunk_size]
 
-
-def good_param_select(data):
-    good_param_df = filter_good_param(day_2_day_ratio=0.0, day_1_day_ratio=0.0)
-    print(f"共有 {good_param_df.shape[0]} 个参数")
-
-    tasks = [
-        (row['ratio'], row['thread_day'], row['min_day_count'], row['min_select_count'], row['json_file'])
-        for index, row in good_param_df.iterrows()
-    ]
-
-    # 设定每个批次的大小
-    chunk_size = 100  # 调整这个值以适应您的具体需求
-
-    # 分批处理任务
-    tasks_batches = list(chunk_tasks(tasks, chunk_size))
-
-    with Pool(20) as pool:
-        # 处理各个批次
-        batch_results = pool.starmap(process_param_batch, [(data, batch) for batch in tasks_batches])
-
-    # 扁平化结果列表
-    results = [item for sublist in batch_results for item in sublist if item is not None]
-    result_df = None
-    # 合并所有有效结果
-    if results:
-        result_df = pd.concat(results, ignore_index=True)
-        # 输出相同date和code对应的数量
-        result_df = result_df.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'), profit_2=('profit_2', 'first'))
+def good_param_first_select(data):
+    """
+    最终通过好的一次参数选股
+    :param data:
+    :return:
+    """
+    result_list = []
+    bad_ratio_list = [0.0, 0.1]
+    for bad_ratio in bad_ratio_list:
+        # 筛选出bad_count小于1的数据
+        result_df = data[(data['bad_count'] / data['select_day_count']) <= bad_ratio]
+        result_df = result_df.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'),
+                                                            profit_2=('profit_2', 'first'), current_price=('current_price', 'first'))
         result_df = result_df.reset_index()
-        print(f"共有 {result_df.shape[0]} 个结果")
+        result_df['ratio'] = bad_ratio
+        print(f"{bad_ratio}共有 {result_df.shape[0]} 个选股")
         print(result_df)
-        # 将result_df写入文件
-        output_filename = '../temp/back/good_param_select.csv'
-        result_df.to_csv(output_filename, index=False)
-    return result_df
+        result_list.append(result_df)
+    if len(result_list) > 0:
+        result_df = pd.concat(result_list, ignore_index=True)
+        return result_df
+    return pd.DataFrame()
+
+
+
+def good_param_second_select(data, good_file_path='../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day2_2023filter.json.csv.csv'):
+    """
+    最终通过好的二次参数选股
+    :param data:
+    :return:
+    """
+    result_list = []
+    day_1_day_ratio_list = [0.0, 0.1]
+    day_2_day_ratio_list = [0.0, 0.1]
+    for day_1_day_ratio in day_1_day_ratio_list:
+        for day_2_day_ratio in day_2_day_ratio_list:
+            if day_1_day_ratio > day_2_day_ratio:
+                continue
+            good_param_df = filter_good_param(day_2_day_ratio=day_2_day_ratio, day_1_day_ratio=day_1_day_ratio, file_path=good_file_path)
+            print(f"共有 day_1_day_ratio{day_1_day_ratio} day_2_day_ratio{day_2_day_ratio} {good_param_df.shape[0]} 个参数")
+
+            tasks = [
+                (row['ratio'], row['thread_day'], row['min_day_count'], row['min_select_count'], row['json_file'], row['strategy'])
+                for index, row in good_param_df.iterrows()
+            ]
+            # tasks = tasks[:100]
+            # 设定每个批次的大小
+            chunk_size = 100  # 调整这个值以适应您的具体需求
+
+            # 分批处理任务
+            tasks_batches = list(chunk_tasks(tasks, chunk_size))
+
+            with Pool(20) as pool:
+                # 处理各个批次
+                batch_results = pool.starmap(process_param_batch, [(data, batch) for batch in tasks_batches])
+
+            # 扁平化结果列表
+            results = [item for sublist in batch_results for item in sublist if item is not None]
+            result_df = None
+            # 合并所有有效结果
+            if results:
+                result_df = pd.concat(results, ignore_index=True)
+                # 输出相同date和code对应的数量
+                result_df = result_df.groupby(['date', 'code']).agg(select_count=('code', 'count'), profit_1=('profit_1', 'first'), profit_2=('profit_2', 'first'), current_price=('current_price', 'first'))
+                result_df = result_df.reset_index()
+                print(f"共有 {result_df.shape[0]} 个选股")
+                print(result_df)
+                # 将result_df写入文件
+                output_filename = '../temp/back/good_param_select.csv'
+                result_df['day_1_day_ratio'] = day_1_day_ratio
+                result_df['day_2_day_ratio'] = day_2_day_ratio
+                result_df.to_csv(output_filename, index=False)
+                result_list.append(result_df)
+    if len(result_list) > 0:
+        result_df = pd.concat(result_list, ignore_index=True)
+        return result_df
+    return pd.DataFrame()
+
+def test():
+    param_file_path = '../final_zuhe/other/result_list_day1_2023filter.json'
+    with open(param_file_path, 'r') as file:
+        result_list = json.load(file)
+    # 筛选出bad_count/total_days小于0.1的数据
+    result_list = [item for item in result_list if item['bad_count'] / item['select_day_count'] <= 0.1]
+    # 过滤掉select_day_count为小于1的数据
+    result_list = [item for item in result_list if item['select_day_count'] >= 1]
+    # 统计result_list中的相同thread_day和json_file对应的数量
+    result_df = pd.DataFrame(result_list)
+    result_df = result_df.groupby(['thread_day', 'json_file']).agg(select_day_count=('select_day_count', 'count'))
+    result_df = result_df.reset_index()
+    print(result_df)
+
+def mul_select(all_data_frame_path):
+    """
+    对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
+    :param all_data_frame_path:
+    :return:
+    """
+    good_file_path_list = ['../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day2_2023filter.json.csv.csv',
+                           '../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv.csv']
+    result_list = []
+    for good_file_path in good_file_path_list:
+        print(f"开始处理 {good_file_path}")
+        if '_list_day1_' in good_file_path:
+            param_file_path = '../final_zuhe/other/result_list_day1_2023filter.json'
+        else:
+            param_file_path = '../final_zuhe/other/result_list_day2_2023filter.json'
+        output_filename = get_all_param_select(all_data_frame_path, param_file_path=param_file_path)
+        # get_good_param_by_param_select('../temp/back/all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv')
+        all_selected_samples = pd.read_csv(output_filename, dtype={'代码': str})
+        all_selected_samples['ratio'] = all_selected_samples['bad_count'] / all_selected_samples['select_day_count']
+        first_select_result = good_param_first_select(all_selected_samples)
+        second_select_result = good_param_second_select(all_selected_samples, good_file_path=good_file_path)
+        # 将first_select_result和second_select_result合并
+        result_df = pd.concat([first_select_result, second_select_result], ignore_index=True)
+        result_df['good_file_path'] = good_file_path
+        result_list.append(result_df)
+    if len(result_list) > 0:
+        result_df = pd.concat(result_list, ignore_index=True)
+        result_df['current_date'] = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        #获取当前时间，保留到天，转换为字符串
+        current_date_str = datetime.now().strftime("%Y-%m-%d")
+        output_filename = f'../temp/back/good_param_select_{current_date_str}.csv'
+        # 将result_df增量写入文件
+        result_df.to_csv(output_filename, index=False, mode='a', header=True)
+
+def example():
+    """
+    示例函数
+    :return:
+    """
+
+    # 使用模型在阈值范围内选股
+    with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'r') as file:
+        model_info_list = json.load(file)
+    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
+    data['日期'] = pd.to_datetime(data['日期'])
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4,
+                                                                      thread_count=4)
+    # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
+    mul_select('../temp/data/all_selected_samples_20230103_20231229.csv')
 
 
 if __name__ == '__main__':
+    example()
     # filter_good_param()
     # sort_choose_data_result()
     # analyse_all_select(file_path)
@@ -2057,14 +2157,14 @@ if __name__ == '__main__':
     # data = pd.read_csv('../temp/all_selected_samples_50.csv', low_memory=False, dtype={'代码': str})
     # data = pd.read_csv('../temp/data/.csv', low_memory=False, dtype={'代码': str})
     # data = low_memory_load('../train_data/2023_data_all.csv')
-    # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-22_real_time.csv')
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
     # data['日期'] = pd.to_datetime(data['日期'])
     # data = data[data['日期'] >= '2024-01-01']
     # start = time.time()
     # with open('../final_zuhe/other/good_all_model_reports_cuml.json', 'r') as file:
     #     model_info_list = json.load(file)
-    # # with open('../final_zuhe/other/good_all_model_reports_cuml_new.json', 'r') as file:
-    # #     model_info_list = json.load(file)
+    # with open('../final_zuhe/other/good_all_model_reports_cuml_new.json', 'r') as file:
+    #     model_info_list = json.load(file)
     # # # 筛选出model_size在0.08到0.2之间的模型
     # # model_info_list = [model_info for model_info in model_info_list if 'thread_day_1' in model_info['model_name']]
     # gen_full_select(data)
@@ -2074,13 +2174,16 @@ if __name__ == '__main__':
     # all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
     # all_selected_samples = all_selected_samples[all_selected_samples['日期'] >= '2024-04-24']
     # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20240425_20240425.csv')
+
     # all_selected_samples = low_memory_load('../temp/data/all_selected_samples_20230103_20231229.csv')
     # # all_selected_samples = None
-    # get_all_param_select('../temp/data/all_selected_samples_20240102_20240425.csv')
-    # get_good_param_by_param_select('../temp/back/all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv')
-    all_selected_samples = pd.read_csv('../temp/back/all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json_0424.csv', dtype={'代码': str})
-    all_selected_samples['ratio'] = all_selected_samples['bad_count'] / all_selected_samples['select_day_count']
-    good_param_select(all_selected_samples)
+    # output_filename = get_all_param_select('../temp/data/all_selected_samples_20240425_20240425.csv')
+    # mul_select('../temp/data/all_selected_samples_20240425_20240425.csv')
+    # get_good_param_by_param_select(output_filename)
+    # all_selected_samples = pd.read_csv(output_filename, dtype={'代码': str})
+    # all_selected_samples['ratio'] = all_selected_samples['bad_count'] / all_selected_samples['select_day_count']
+    # good_param_first_select(all_selected_samples)
+    # good_param_second_select(all_selected_samples)
     # save_all_selected_samples(all_selected_samples)
     # choose_code_from_all_selected_samples(all_selected_samples)
     # choose_code_from_all_selected_samples(all_selected_samples, param_file_path='../final_zuhe/other/result_list_day2_2023filter.json')
