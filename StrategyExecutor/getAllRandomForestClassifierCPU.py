@@ -51,11 +51,50 @@ def train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_fil
     print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 开始训练模型: {model_name}")
     clf.fit(X_train, y_train)
     dump(clf, model_file_path, compress=1)
-    print(f"耗时 {time.time() - start_time} 大小为 {os.path.getsize(model_file_path) / 1024 ** 2:.2f} MB  模型已保存: {model_file_path} \n\n")
+    model_name_size = round(os.path.getsize(model_file_path) / 1024 ** 2, 2)
+    print(f"耗时 {time.time() - start_time} 大小为 {model_name_size} MB  模型已保存: {model_file_path} \n\n")
     with open(exist_model_file_path, 'a') as f:
         f.write(model_name + '\n')
+    return model_name_size
 
-def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, origin_data_path_dir, report_list):
+def are_other_affecting_params_same(params1, params2, affecting_params, current_key):
+    # 检查除了当前考虑的参数之外,其他影响问题的参数是否相同
+    for key in affecting_params.keys():
+        if key != current_key and params1[key] != int(params2[key]):
+            return False
+    return True
+
+def are_params_triggering_problem(params1, params2, affecting_params):
+    # 检查两个参数组合在影响问题的参数上是否满足特定条件
+    for key, increases_problem in affecting_params.items():
+        # 检查除了当前考虑的参数之外,其他影响问题的参数是否相同
+        if not are_other_affecting_params_same(params1, params2, affecting_params, key):
+            continue
+
+        if increases_problem:
+            # 如果该参数在值变大时导致问题,且当前组合的值大于等于已经导致问题的组合的值,则认为满足条件
+            if params1[key] >= int(params2[key]):
+                return True
+        else:
+            # 如果该参数在值变小时导致问题,且当前组合的值小于等于已经导致问题的组合的值,则认为满足条件
+            if params1[key] <= int(params2[key]):
+                return True
+    return False
+
+BIG_MODEL_SIZE_PARAMS = {
+    'n_estimators': True,  # 学习率变大可能导致NAN
+    'max_depth': True,  # 学习率变大可能导致NAN
+    'min_samples_split': False,  # 学习率变大可能导致NAN
+    'min_samples_leaf': False,  # 学习率变大可能导致NAN
+}
+def skip_params(params, train_results, max_model_size=200):
+    big_train_results = {k: v for k, v in train_results.items() if v['model_size'] > max_model_size}
+    # 根据已有的训练结果设计跳过条件
+    for model_name, result in big_train_results.items():
+        if are_params_triggering_problem(params, big_train_results[model_name]['params'], BIG_MODEL_SIZE_PARAMS):
+            return True
+
+def train_models(X_train, y_train, model_type, thread_day, origin_data_path_dir, report_list):
     """
     训练指定类型的模型并处理类别不平衡
     :param X_train: 训练数据集特征
@@ -70,39 +109,49 @@ def train_models(X_train, y_train, model_type, thread_day, true_ratio, is_skip, 
     true_ratio = y_train.mean()
     param_grid = {
         'RandomForest': {
-            'n_estimators': [100, 250, 300, 400, 500, 600],
+            'n_estimators': [100, 200, 250, 300, 400, 500, 600],
             'max_depth': [10, 20, 30, 40, 100, 200, 400],
-            'min_samples_split': [2, 3, 4, 5, 6],
-            'min_samples_leaf': [1, 2, 3, 4]
+            'min_samples_split': [2, 3, 4, 5, 6, 7, 8],
+            'min_samples_leaf': [1, 2, 3, 4, 5, 6]
         }
     }[model_type]
+    train_results_file = os.path.join(MODEL_OTHER, f"{origin_data_path_dir}_train_result.json")
+    # 尝试从文件中加载已有的训练结果
+    try:
+        with open(train_results_file, 'r') as f:
+            train_results = json.load(f)
+    except Exception as e:
+        train_results = {}
+        print(f"Error loading training results: {e}")
+        pass
 
     params_list = list(ParameterGrid(param_grid))
     # random.shuffle(params_list)
-    print(f"待训练的模型数量: {len(params_list)}")
+    print(f"待训练的模型数量: {len(params_list)} 已有的report_list数量: {len(report_list)}")
     save_path = D_MODEL_PATH
     for params in params_list:
+
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
         model_file_path = os.path.join(save_path, origin_data_path_dir, model_name)
         flag = False
         if model_name in report_list:
             print(f"模型已存在，跳过: {model_name}")
             continue
-        # for model_path in MODEL_PATH_LIST:
-        #     exist_model_file_path = os.path.join(model_path, 'existed_model.txt')
-        #     if is_skip and os.path.exists(exist_model_file_path):
-        #         with open(exist_model_file_path, 'r') as f:
-        #              # 读取每一行存入existed_model_list，去除换行符
-        #             existed_model_list = [line.strip() for line in f]
-        #             if model_name in existed_model_list:
-        #                 print(f"模型已存在，跳过: {model_name}")
-        #                 flag = True
-        #                 break
+        if skip_params(params, train_results):
+            print(f"size太大 跳过参数: {params}")
+            continue
         if flag:
             continue
         exist_model_file_path = os.path.join(save_path, 'existed_model.txt')
         clf = RandomForestClassifier(**params)
-        train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
+        model_size = train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
+        params = {k: str(v) for k, v in params.items()}
+        train_result = {}
+        train_result['params'] = params
+        train_result['model_size'] = model_size
+        train_results[model_name] = train_result
+        with open(train_results_file, 'w') as f:
+            json.dump(train_results, f, indent=4)
 
 def load_test_data(file_path):
     print(f"开始处理数据集: {file_path}")
@@ -132,6 +181,10 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
         thread_day_list = [1, 2, 3]
     origin_data_path_dir = os.path.dirname(file_path_path)
     origin_data_path_dir = origin_data_path_dir.split('/')[-1]
+    base_name = os.path.basename(file_path_path)
+    # 去除base_name中的后缀
+    base_name = base_name.split('.')[0]
+    origin_data_path_dir = origin_data_path_dir + '_' + base_name
     print("加载数据{}...".format(file_path_path))
     final_data, X = load_test_data(file_path_path)
     ratio_result_path = os.path.join(MODEL_OTHER, origin_data_path_dir + 'ratio_result.json')
@@ -153,7 +206,7 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
                 json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        train_models(X_train, y_train, 'RandomForest', thread_day, true_ratio, is_skip, origin_data_path_dir, report_list)
+        train_models(X_train, y_train, 'RandomForest', thread_day, origin_data_path_dir, report_list)
 
 
 def worker(origin_data_path, report_list):
@@ -167,16 +220,16 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        # '../train_data/profit_2_day_1_bad_0.2/bad_0.2_data_batch_count.csv',
+        # '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
+        '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
+        '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
         # '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
         # '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_1_day_1_bad_1.0/bad_1.0_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_1.0/bad_1.0_data_batch_count.csv',
-        '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
+        # '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
+        # '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
         # '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
         # '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        # '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
@@ -262,19 +315,10 @@ def train_target_model():
     # # 获取sorted_scores_list中的model_name的列表
     # model_name_list = [item['model_name'] for item in sorted_scores_list]
     model_name_list = []
-
-
-    # file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
-    # with open(file_path, 'r') as lines:
-    #     for line in lines:
-    #         model_name_list.append(line.strip())
-
-    with open('../final_zuhe/other/good_all_model_reports_cuml_old_data_profit_1.json', 'r') as file:
-        model_info_list = json.load(file)
-    for model_info in model_info_list:
-        model_name_list.append(model_info['model_name'])
-
-    print(len(model_name_list))
+    file_path = f'../final_zuhe/other/not_estimated_model_list.txt'
+    with open(file_path, 'r') as lines:
+        for line in lines:
+            model_name_list.append(line.strip())
 
     # 读取模型参数
     param_list = []
@@ -287,9 +331,6 @@ def train_target_model():
         # 获取所有模型的文件名
         for root, ds, fs in os.walk(model_path):
             for f in fs:
-                full_name = os.path.join(root, f)
-                if 'good_models' in full_name or 'bad_1.0' in full_name or 'profit_2' in full_name:
-                    continue
                 if f.endswith('joblib'):
                     model_list.append(f)
 
@@ -313,7 +354,7 @@ def train_target_model():
             thread_day = params['thread_day']
             y = data[f'后续{thread_day}日最高价利润率'] >= 1
             true_ratio = params['true_ratio']
-            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}_100.joblib"
+            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}.joblib"
             if model_name in model_list:
                 print(f"模型已存在，跳过: {model_name}")
                 continue
@@ -327,11 +368,8 @@ def train_target_model():
             }
             clf = RandomForestClassifier(**final_param)
             train_and_dump_model(clf, X, y, model_file_path, exist_model_file_path)
-            model_name = f"RandomForest_origin_data_path_dir_{file_name}_thread_day_{params['thread_day']}_true_ratio_{true_ratio}_max_depth_{params['max_depth']}_min_samples_leaf_{params['min_samples_leaf']}_min_samples_split_{params['min_samples_split']}_n_estimators_{params['n_estimators']}.joblib"
-            model_file_path = os.path.join(save_path, file_name, model_name)
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-            train_and_dump_model(clf, X_train, y_train, model_file_path, exist_model_file_path)
 
 if __name__ == '__main__':
     build_models()
+
     # train_target_model()

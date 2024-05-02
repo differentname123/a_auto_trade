@@ -21,7 +21,7 @@ import pandas as pd
 
 from InfoCollector.save_all import save_all_data_mul
 from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json, load_data_filter, \
-    load_file_chunk_filter
+    load_file_chunk_filter, downcast_dtypes
 from itertools import combinations
 import talib
 import warnings
@@ -610,7 +610,7 @@ def generate_features_for_file(file_path, save_path):
     :param save_path: str, 特征数据保存的目标目录路径。生成的文件将以源文件名保存在此路径下。
     :return: None
     """
-    data_list = load_data_filter(file_path, end_date='2024-03-01')
+    data_list = load_data_filter(file_path, end_date='2024-05-01')
     new_data_list = []
     for data in data_list:
         new_data = get_data_feature(data)
@@ -668,7 +668,34 @@ def load_and_merge_data(batch):
     return None
 
 
+def split_dataframe(data_df, split_num):
+    """
+    将 DataFrame 中的数据按行分割成多个列表,并返回这些列表。
 
+    参数:
+    data_df (pandas.DataFrame): 输入的 DataFrame
+    split_num (int): 需要分割的列表数量
+
+    返回:
+    list: 包含分割后的多个列表
+    """
+    start = time.time()
+    # 按照日期分组并排序
+    grouped = data_df.sort_values(by=['日期', '后续1日最高价利润率', '后续2日最高价利润率', '涨跌幅']).groupby('日期')
+
+    # 创建 split_num 个空列表
+    split_lists = [[] for _ in range(split_num)]
+
+    # 遍历分组后的数据
+    for _, group_df in grouped:
+        group_values = group_df.values.tolist()
+        for i, row in enumerate(group_values):
+            split_lists[i % split_num].append(row)
+
+    # 将每个列表合并为 DataFrame
+    split_df_lists = [pd.DataFrame(split_list, columns=data_df.columns) for split_list in split_lists]
+    print(f'分割数据耗时：{time.time() - start:.2f}秒')
+    return split_df_lists
 
 def load_bad_data():
     """
@@ -687,36 +714,42 @@ def load_bad_data():
         # 获取目录下所有文件的完整路径
         all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
         all_data_df = load_and_merge_data(all_files)
-        all_data_df.to_csv(all_data_file_path, index=False)
+        # all_data_df.to_csv(all_data_file_path, index=False)
     else:
         print('开始加载已有的所有数据')
-        all_data_df = pd.read_csv(all_data_file_path)
+        all_data_df = pd.read_csv(all_data_file_path, parse_dates=['日期'])
     # return
-    all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
-    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
-    all_data_df_2024.to_csv('../train_data/2024_data.csv')
+    # all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    # all_data_df_2024.to_csv('../train_data/2024_data.csv', index=False)
+    # del all_data_df_2024
+    all_data_df = downcast_dtypes(all_data_df)
     all_data_df = all_data_df[all_data_df['日期'] <= pd.Timestamp('2024-01-01')]
     # return
+    print(f'加载所有数据耗时：{time.time() - start_time:.2f}秒')
+    # time.sleep(10)
     new_data = data_filter(all_data_df)
     print(f'加载所有数据耗时：{time.time() - start_time:.2f}秒 过滤前数据量为{len(all_data_df)} 过滤后数据量为{len(new_data)}')
     all_data_df = new_data
+    del new_data
 
     results_file_path = '../final_zuhe/other/all_data_performance.json'
     performance_results = read_json(results_file_path)
 
-    ratio_list = [0.2, 0.25, 0.3, 0.4, 0.5]
-    profit_list = [1, 2, 3, 4, 5]
+    ratio_list = [0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75]
+    profit_list = [1, 2]
     day_list = [1, 2]
 
     for profit in profit_list:
         for day in day_list:
             for ratio in ratio_list:
                 key_name = f'后续{day}日{profit}成功率'
-                bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if result[key_name] < ratio]
-                key = f'profit_{profit}_day_{day}_bad_{ratio}'
+                bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if result[key_name] <= ratio]
+                key = f'profit_{profit}_day_{day}_ratio_{ratio}'
                 out_put_path = f'../train_data/{key}'
                 print(f'开始加载bad_{out_put_path}的数据')
                 file_name = f'bad_{ratio}_data_batch_count.csv'
+                good_file_name = f'good_{ratio}_data_batch_count.csv'
+                bad_file_out_put_path = os.path.join(out_put_path, good_file_name)
                 file_out_put_path = os.path.join(out_put_path, file_name)
                 # 检查文件是否存在
                 if os.path.exists(file_out_put_path):
@@ -726,11 +759,34 @@ def load_bad_data():
                 if not os.path.exists(out_put_path):
                     os.makedirs(out_put_path)
                 bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
-                if len(bad_data) > 3100000:
-                    print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
-                    break
-                print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
                 bad_data.to_csv(file_out_put_path, index=False)
+                print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
+                if len(bad_data) <= 2000000:
+                    for idx, temp_df in enumerate(split_dataframe(bad_data, 3)):
+                        temp_df.to_csv(f'../train_data/{key}/bad_{idx}.csv', index=False)
+                        all_10_list = split_dataframe(temp_df, 10)
+                        train_df = pd.concat(all_10_list[:7], ignore_index=True)
+                        test_df = pd.concat(all_10_list[7:], ignore_index=True)
+                        train_df.to_csv(f'../train_data/{key}/bad_{idx}_train.csv', index=False)
+                        test_df.to_csv(f'../train_data/{key}/bad_{idx}_test.csv', index=False)
+                        print(f'bad_{idx}.csv的数据量为{len(temp_df)}')
+                    del temp_df, train_df, test_df
+                del bad_data
+                good_data = all_data_df[~all_data_df['日期'].dt.date.isin(bad_ratio_day)]
+                if len(good_data) <= 2000000:
+                    for idx, temp_df in enumerate(split_dataframe(good_data, 3)):
+                        temp_df.to_csv(f'../train_data/{key}/good_{idx}.csv', index=False)
+                        all_10_list = split_dataframe(temp_df, 10)
+                        train_df = pd.concat(all_10_list[:7], ignore_index=True)
+                        test_df = pd.concat(all_10_list[7:], ignore_index=True)
+                        train_df.to_csv(f'../train_data/{key}/good_{idx}_train.csv', index=False)
+                        test_df.to_csv(f'../train_data/{key}/good_{idx}_test.csv', index=False)
+                        print(f'good_{idx}.csv的数据量为{len(temp_df)}')
+                    del temp_df, train_df, test_df
+                print(f'good_{out_put_path}的数据量为{len(good_data)}')
+                good_data.to_csv(bad_file_out_put_path, index=False)
+                del good_data
+
 
 def data_filter(data):
     """
@@ -795,22 +851,23 @@ if __name__ == '__main__':
     # file_path = '../daily_data_exclude_new_can_buy'
     # out_path = '../feature_data_exclude_new_can_buy'
     # generate_features_for_all_files(file_path, out_path)
-    # load_bad_data()
+    load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
-    # # # file_path = '../train_data/profit_1_day_1_bad_0.7/bad_0.7_data_batch_count.csv'
+    # file_path = '../train_data/2024_data.csv'
     # data = pd.read_csv(file_path)
+    # split_dataframe(data, 3)
     # new_data = data_filter(data)
     # print(new_data)
     # # 找到data比new_data多的数据
     # print(data[~data.isin(new_data).all(1)])
 
-    file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
-    data = load_data(file_path)
-    # 除去data最后一行
-    # data = data[:-1]
-    new_data = get_data_feature(data, '2024-01-01')
-    print(new_data)
+    # file_path = '../daily_data_exclude_new_can_buy/东方电子_000682.txt'
+    # data = load_data(file_path)
+    # # 除去data最后一行
+    # # data = data[:-1]
+    # new_data = get_data_feature(data, '2024-01-01')
+    # print(new_data)
 
     # data = pd.read_csv('../train_data/index_data.csv')
     # get_index_data_feature(data)

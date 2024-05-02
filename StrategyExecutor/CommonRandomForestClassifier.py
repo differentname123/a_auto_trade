@@ -1416,7 +1416,7 @@ def get_all_param_select(file_path='../temp/data/all_selected_samples_20240102_2
     """
     all_selected_samples = pd.read_csv(file_path, low_memory=False, dtype={'代码': str})
     all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
-    # all_selected_samples = all_selected_samples[all_selected_samples['日期'] <= '2024-04-24']
+    # all_selected_samples = all_selected_samples[all_selected_samples['日期'] < '2024-04-24']
     all_selected_samples['code'] = all_selected_samples['代码']
     if 'current_price' not in all_selected_samples.columns:
         all_selected_samples['current_price'] = all_selected_samples['收盘']
@@ -1455,7 +1455,7 @@ def get_all_param_select(file_path='../temp/data/all_selected_samples_20240102_2
     # 合并结果
     all_selected_samples_with_param = pd.concat(results)
 
-    print(all_selected_samples_with_param.shape[0])
+    print(f'第一层命中数量{all_selected_samples_with_param.shape[0]}')
     # 将all_selected_samples_with_param写入文件
     base_name = os.path.basename(file_path)
     param_base_name = os.path.basename(param_file_path)
@@ -2005,7 +2005,7 @@ def good_param_second_select(data, good_file_path='../temp/back/good_param_all_a
     day_2_day_ratio_list = [0.0, 0.1]
     for day_1_day_ratio in day_1_day_ratio_list:
         for day_2_day_ratio in day_2_day_ratio_list:
-            if day_1_day_ratio > day_2_day_ratio:
+            if day_1_day_ratio < day_2_day_ratio:
                 continue
             good_param_df = filter_good_param(day_2_day_ratio=day_2_day_ratio, day_1_day_ratio=day_1_day_ratio, file_path=good_file_path)
             print(f"共有 day_1_day_ratio{day_1_day_ratio} day_2_day_ratio{day_2_day_ratio} {good_param_df.shape[0]} 个参数")
@@ -2067,17 +2067,15 @@ def mul_select(all_data_frame_path):
     :param all_data_frame_path:
     :return:
     """
-    good_file_path_list = ['../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day2_2023filter.json.csv.csv',
-                           '../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv.csv']
+    good_file_path_dict = {'../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day2_2023filter.json.csv.csv':'../final_zuhe/other/result_list_day2_2023filter.json',
+                           '../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv.csv':'../final_zuhe/other/result_list_day1_2023filter.json',
+                           '../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day2.json.csv.csv':'../final_zuhe/other/result_list_day2.json',
+                           '../temp/back/good_param_all_all_selected_samples_20240102_20240425.csv_param_result_list_day1.json.csv.csv':'../final_zuhe/other/result_list_day1.json'
+                           }
     result_list = []
-    for good_file_path in good_file_path_list:
+    for good_file_path, param_file_path in good_file_path_dict.items():
         print(f"开始处理 {good_file_path}")
-        if '_list_day1_' in good_file_path:
-            param_file_path = '../final_zuhe/other/result_list_day1_2023filter.json'
-        else:
-            param_file_path = '../final_zuhe/other/result_list_day2_2023filter.json'
         output_filename = get_all_param_select(all_data_frame_path, param_file_path=param_file_path)
-        # get_good_param_by_param_select('../temp/back/all_all_selected_samples_20240102_20240425.csv_param_result_list_day1_2023filter.json.csv')
         all_selected_samples = pd.read_csv(output_filename, dtype={'代码': str})
         all_selected_samples['ratio'] = all_selected_samples['bad_count'] / all_selected_samples['select_day_count']
         first_select_result = good_param_first_select(all_selected_samples)
@@ -2101,21 +2099,23 @@ def example():
     :return:
     """
 
-    # 使用模型在阈值范围内选股
-    with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'r') as file:
-        model_info_list = json.load(file)
-    data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
-    data['日期'] = pd.to_datetime(data['日期'])
-    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4,
-                                                                      thread_count=4)
+    # # 使用模型在阈值范围内选股
+    # with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'r') as file:
+    #     model_info_list = json.load(file)
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
+    # data['日期'] = pd.to_datetime(data['日期'])
+    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4,
+    #                                                                   thread_count=4)
     # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
-    mul_select('../temp/data/all_selected_samples_20240429_20240429.csv')
+    # data = pd.read_csv('../temp/back/good_param_select_2024-04-30.csv')
+    mul_select('../temp/data/all_selected_samples_20240430_20240430.csv')
 
-    # 获取第一层参数的性能
-    save_all_selected_samples(all_selected_samples)
+    # # 获取第一层参数的性能
+    # save_all_selected_samples(all_selected_samples)
 
-    # 获取第二次参数的性能
-    get_good_param_by_param_select(all_selected_samples)
+    # # 获取第二次参数的性能
+    # all_selected_samples_with_param_file = get_all_param_select('../temp/data/all_selected_samples_20240102_20240425.csv', param_file_path='../final_zuhe/other/result_list_day2.json')
+    # get_good_param_by_param_select(all_selected_samples_with_param_file)
 
 
 
