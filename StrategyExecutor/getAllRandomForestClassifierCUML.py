@@ -9,7 +9,7 @@
 
 """
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'  # 指定使用第二张GPU（2060），索引从0开始
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU（2060），索引从0开始
 import json
 import re
 
@@ -220,15 +220,15 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        # '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
-        # '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
-        # '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
+        '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
+        '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
+        '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
         '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
-        # '../train_data/profit_1_day_2_ratio_0.25/bad_0_train.csv',
-        # '../train_data/profit_1_day_2_ratio_0.3/bad_0_train.csv',
-        # '../train_data/profit_1_day_2_ratio_0.4/bad_0_train.csv',
-        # '../train_data/profit_1_day_2_ratio_0.5/bad_0_train.csv',
-        # '../train_data/profit_1_day_2_ratio_0.6/bad_0_train.csv',
+        '../train_data/profit_1_day_2_ratio_0.25/bad_0_train.csv',
+        '../train_data/profit_1_day_2_ratio_0.3/bad_0_train.csv',
+        '../train_data/profit_1_day_2_ratio_0.4/bad_0_train.csv',
+        '../train_data/profit_1_day_2_ratio_0.5/bad_0_train.csv',
+        '../train_data/profit_1_day_2_ratio_0.6/bad_0_train.csv',
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):

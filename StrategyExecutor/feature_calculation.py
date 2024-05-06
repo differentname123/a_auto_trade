@@ -563,13 +563,9 @@ def get_all_data_performance():
     此函数首先遍历指定目录下的所有文件，然后使用多进程并行加载这些文件的数据。
     加载后，数据被合并并按日期分组，以分析每天的数据表现，并将结果保存到JSON文件中。
     """
-    file_path = '../daily_data_exclude_new_can_buy'
+    file_path = '../train_data/2024_data.csv'
 
-    # 获取目录下所有文件的完整路径
-    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
-    # all_files = all_files[:100]
-    # 合并各个进程加载的数据
-    all_data_df = load_and_merge_data(all_files)
+    all_data_df = low_memory_load(file_path)
     # 将日期列转换为日期时间格式，并处理格式错误
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'], errors='coerce')
 
@@ -584,7 +580,7 @@ def get_all_data_performance():
         performance_results[date_str] = performance
 
     # 保存分析结果到JSON文件
-    results_file_path = '../final_zuhe/other/all_data_performance.json'
+    results_file_path = '../final_zuhe/other/2024_all_data_performance.json'
     write_json(results_file_path, performance_results)
     print(f'所有数据的表现分析已保存到 {results_file_path}')
 
@@ -864,7 +860,10 @@ def is_precision_always_increasing(json_list, max_count=2, min_cha=-0.1):
     # 首先检查列表是否为空或只有一个元素
     if len(json_list) < 2:
         return True
-
+    # if json_list[-1]['true_stocks_set'] != []:
+    #     return True
+    # else:
+    #     return False
     # 遍历列表，比较每个元素的precision值
     for i in range(len(json_list) - 1):
         # 获取当前元素和下一个元素的precision值
@@ -886,6 +885,27 @@ def is_precision_always_increasing(json_list, max_count=2, min_cha=-0.1):
     return True
 
 def test():
+    # # 读取'../model/other/good_model_list.txt'
+    # with open('../model/other/good_model_list.txt', 'r') as f:
+    #     good_model_list = f.readlines()
+    # good_model_list_befor = [model.strip() for model in good_model_list]
+    # # 读取'../model/other/bad_model_list.txt'
+    # with open('../model/other/bad_model_list.txt', 'r') as f:
+    #     bad_model_list = f.readlines()
+    # bad_model_list_befor = [model.strip() for model in bad_model_list]
+    #
+    # with open('../model/other/good_model_list_last.txt', 'r') as f:
+    #     good_model_list = f.readlines()
+    # good_model_list_last = [model.strip() for model in good_model_list]
+    # # 读取'../model/other/bad_model_list.txt'
+    # with open('../model/other/bad_model_list_last.txt', 'r') as f:
+    #     bad_model_list = f.readlines()
+    # bad_model_list_last = [model.strip() for model in bad_model_list]
+    #
+    # # 找到good_model_list_last比good_model_list多的数据
+    # last_more = set(good_model_list_last) - set(good_model_list_befor)
+    # last_less = set(good_model_list_befor) - set(good_model_list_last)
+
     good_model_list = []
     bad_model_list = []
     file_path = '../model/reports'
@@ -916,7 +936,9 @@ def test():
             f.write(model + '\n')
 
 if __name__ == '__main__':
-    test()
+    get_all_data_performance()
+
+    # test()
 
     # for root, _, files in os.walk('../daily_data_exclude_new_can_buy'):
     #     for file in files:

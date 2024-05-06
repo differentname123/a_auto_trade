@@ -2131,16 +2131,18 @@ def example():
     data = low_memory_load('../temp/data/all_selected_samples_20240102_20240430.csv')
     data['日期'] = pd.to_datetime(data['日期'])
     data = data[data['cha_thread'] >= 0]
-    data = data[data['日期'] == '2024-04-29']
-    # 获取code的数量，并且按照数量降序排列
-    code_count = data['代码'].value_counts()
-    code_count = code_count.reset_index()
-    code_count.columns = ['代码', 'count']
-    code_count = code_count.sort_values(by='count', ascending=False)
+    # data = data[data['日期'] == '2024-04-18']
+    # 按照日期和code分组,并计算每组的行数和price的和
+    # 按照日期和代码分组,并计算每组的后续1日最高价利润率的第一个值和行数
+    group_data = data.groupby(['日期', '代码']).agg({'后续1日最高价利润率': 'first'}).reset_index()
+    group_data['count'] = data.groupby(['日期', '代码']).size().reset_index(name='count')['count']
+    # 选出每个日期数量最多的数据
+    group_data = group_data.loc[group_data.groupby('日期')['count'].idxmax()]
+    # 选出后续1日最高价利润率大于0.01的数据
 
 
     # # 使用模型在阈值范围内选股
-    with open('../final_zuhe/other/new_good_all_model_reports_cuml_all_all.json', 'r') as file:
+    with open('../final_zuhe/other/new_good_all_model_reports_cuml_all_train_thread_day_1.json', 'r') as file:
         model_info_list = json.load(file)
     # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
     # data['日期'] = pd.to_datetime(data['日期'])

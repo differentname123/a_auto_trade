@@ -349,4 +349,4 @@ def get_all_model_report(max_size=0.5, min_size=0):
         return None
 
 if __name__ == '__main__':
-    get_all_model_report(120, 80)
+    get_all_model_report(200, 0)

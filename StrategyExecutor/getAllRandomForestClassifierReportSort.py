@@ -986,7 +986,7 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 # 将build_models和get_all_model_report用两个进程同时执行
 if __name__ == '__main__':
     # find_small_abs()
-    # sort_new()
+    sort_new()
     all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=200, model_min_size=0, abs_threshold=1) # 0:162
     # delete_bad_model()
 
