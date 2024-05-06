@@ -263,6 +263,16 @@ def balance_disk(class_key='/mnt/w'):
 
     return all_model_info_list
 
+def get_all_train_data(model_name_list):
+    """
+    获取所有的训练数据
+    :param model_name_list:
+    :return:
+    """
+    all_train_data = []
+    for model_name in model_name_list:
+        all_train_data.append(model_name.split('origin_data_path_dir_')[1].split('_bad_0_train')[0])
+    return list(set(all_train_data))
 
 def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=10000000,
                       model_min_size=0, abs_threshold=1):
@@ -271,10 +281,10 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
     :param model_path:
     :return:
     """
-    all_rf_model_list = []
+
+
     output_filename = '../final_zuhe/other/all_model_reports_cuml.json'
-    final_output_filename = '../final_zuhe/other/good_all_model_reports_cuml.json'
-    final_output_filename_back = f'../final_zuhe/other/good_model_list_thread_1/good_all_model_reports_cuml_{date_count_threshold}_{model_max_size}.json'
+
     not_estimated_model_list = []
     not_estimated_model_list_back = f'../final_zuhe/other/not_estimated_model_list.txt'
     model_file_list = []
@@ -285,70 +295,89 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                 if 'good' in root:
                     continue
                 model_file_list.append(os.path.join(root, file))
-    exist_stocks_list = []
-    exist_stocks = set()
     # 加载output_filename，找到最好的模型
     with open(output_filename, 'r') as file:
         sorted_scores_list = json.load(file)
-        for sorted_scores in sorted_scores_list:
-            if sorted_scores['date_count'] <= date_count_threshold:
-                print(f"模型 {sorted_scores['model_name']} 的date_count小于{date_count_threshold}，跳过。")
-                continue
-            if sorted_scores['abs_threshold'] > abs_threshold:
-                print(f"模型 {model_name} 的阈值大于{abs_threshold}，跳过。")
-                continue
-            model_name = sorted_scores['model_name']
-            model_size = sorted_scores['model_size']
-            model_file_path = None
-            for model_path in model_file_list:
-                if model_name in model_path:
-                    model_file_path = model_path
-                    break
+        # 获取所有的模型名称
+        model_name_list = [sorted_scores['model_name'] for sorted_scores in sorted_scores_list]
+        train_data_list = get_all_train_data(model_name_list)
+        train_data_list.append('all')
+        thread_day_list = ['train_thread_day_2', 'train_thread_day_1', 'all']
+        # 将sorted_scores_list转换成dataframe然后按照model_name分组
+        df = pd.DataFrame(sorted_scores_list)
+        temp_df = df.copy()
+        for train_data in train_data_list:
+            for thread_day in thread_day_list:
+                final_output_filename = f'../final_zuhe/other/new_good_all_model_reports_cuml_{train_data}_{thread_day}.json'
+                exist_stocks = set()
+                all_rf_model_list = []
+                if thread_day == 'all':
+                    current_df = temp_df
+                else:
+                    # 过滤出model_name包含thread_day的数据
+                    current_df = temp_df[temp_df['model_name'].str.contains(thread_day)]
+                if train_data != 'all':
+                    # 过滤出model_name包含train_data的数据
+                    current_df = current_df[current_df['model_name'].str.contains(train_data)]
+                else:
+                    current_df = current_df
+                sorted_scores_list = current_df.groupby('model_name')
 
-            if need_filter:
-                current_stocks = set(sorted_scores['true_stocks_set'])
-                # exist_flag = False
-                # # 判断current_stocks是否被包含在exist_stocks中
-                # for exist_stocks in exist_stocks_list:
-                #     if len(current_stocks - exist_stocks) == 0:
-                #         print(f"模型 {model_name} 已经有相似的模型，跳过。")
-                #         exist_flag = True
-                #         break
-                # if exist_flag:
-                #     continue
-                # exist_stocks_list.append(current_stocks)
-                if len(current_stocks - exist_stocks) == 0:
-                    print(f"模型 {model_name} 已经有相似的模型，跳过。")
-                    continue
-                exist_stocks = exist_stocks | current_stocks
-            if model_file_path is not None:
-                # 判断model_file_path大小是否大于model_max_size
-                if model_size > model_max_size or model_size < model_min_size:
-                    print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
-                    continue
-                if sorted_scores['date_count'] > date_count_threshold:
-                    sorted_scores['true_stocks_set'] = []
-                    other_dict = sorted_scores
-                    other_dict['model_path'] = model_file_path
-                    other_dict['model_size'] = model_size
-                    all_rf_model_list.append(other_dict)
-            else:
-                not_estimated_model_list.append(model_name)
-                print(f"模型 {model_name} 不存在，跳过。")
-    print(f"加载了 {len(all_rf_model_list)} 个模型")
-    # 将all_rf_model_list按照model_size从小到大排序
-    all_rf_model_list.sort(key=lambda x: x['date_count'], reverse=True)
-    # 将all_rf_model_list存入final_output_filename
-    with open(final_output_filename, 'w') as file:
-        json.dump(all_rf_model_list, file)
-    # 将all_rf_model_list存入final_output_filename
-    with open(final_output_filename_back, 'w') as file:
-        json.dump(all_rf_model_list, file)
-    with open(not_estimated_model_list_back, 'w') as file:
-        for model_name in not_estimated_model_list:
-            file.write(model_name + '\n')
-    if need_balance:
-        all_rf_model_list = balance_disk()
+                for model_name, sorted_scores in sorted_scores_list:
+                    # 如果sorted_scores存在date_count为0的情况，直接跳过
+                    if sorted_scores['date_count'].min() == 0:
+                        print(f"模型 {model_name} 的date_count为0，跳过。")
+                        continue
+                    # 获取abs_threshold最大的那行数据
+                    sorted_scores = sorted_scores.sort_values(by='abs_threshold', ascending=False)
+                    sorted_scores = sorted_scores.iloc[0]
+                    if sorted_scores['date_count'] <= date_count_threshold:
+                        print(f"模型 {sorted_scores['model_name']} 的date_count小于{date_count_threshold}，跳过。")
+                        continue
+                    if sorted_scores['abs_threshold'] > abs_threshold:
+                        print(f"模型 {model_name} 的阈值大于{abs_threshold}，跳过。")
+                        continue
+                    model_name = sorted_scores['model_name']
+                    model_size = sorted_scores['model_size']
+                    model_file_path = None
+                    for model_path in model_file_list:
+                        if model_name in model_path:
+                            model_file_path = model_path
+                            break
+
+                    if need_filter:
+                        current_stocks = set(sorted_scores['true_stocks_set'])
+                        if len(current_stocks - exist_stocks) == 0:
+                            print(f"模型 {model_name} 已经有相似的模型，跳过。")
+                            continue
+                        exist_stocks = exist_stocks | current_stocks
+                    if model_file_path is not None:
+                        # 判断model_file_path大小是否大于model_max_size
+                        if model_size > model_max_size or model_size < model_min_size:
+                            print(f"{os.path.getsize(model_file_path)}大小超过 {model_max_size}G，跳过。")
+                            continue
+                        if sorted_scores['date_count'] > date_count_threshold:
+                            sorted_scores['true_stocks_set'] = []
+                            # 将sorted_scores转换成字典
+                            sorted_scores = sorted_scores.to_dict()
+                            other_dict = sorted_scores
+                            other_dict['model_path'] = model_file_path
+                            other_dict['model_size'] = model_size
+                            all_rf_model_list.append(other_dict)
+                    else:
+                        not_estimated_model_list.append(model_name)
+                        print(f"模型 {model_name} 不存在，跳过。")
+                print(f"加载了 {len(all_rf_model_list)} 个模型")
+                # 将all_rf_model_list按照model_size从小到大排序
+                all_rf_model_list.sort(key=lambda x: x['date_count'], reverse=True)
+                # 将all_rf_model_list存入final_output_filename
+                with open(final_output_filename, 'w') as file:
+                    json.dump(all_rf_model_list, file)
+                with open(not_estimated_model_list_back, 'w') as file:
+                    for model_name in not_estimated_model_list:
+                        file.write(model_name + '\n')
+                if need_balance:
+                    all_rf_model_list = balance_disk()
     return all_rf_model_list
 
 
@@ -514,7 +543,7 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, min_day=0, abs_threshold=0):
     result_list = []
     debug = True
     if abs_threshold > 0:
-        for cha in range(10, 11):
+        for cha in range(0, 1):
             cha = cha / 100
             threshold = abs_threshold - cha
             high_confidence_true = (y_pred_proba[1] >= threshold)
@@ -803,7 +832,7 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
     all_selected_samples.to_csv(f'../temp/data/all_selected_samples_{date_str}.csv', index=False)
     output_path = f'../temp/data/all_selected_samples_{date_str}.csv'
-    mul_select(output_path)
+    # mul_select(output_path)
     print(f"总耗时 {time.time() - start}")
     return all_selected_samples
 
@@ -2098,17 +2127,29 @@ def example():
     示例函数
     :return:
     """
+    f'../temp/data/all_selected_samples_20240430_20240430.csv'
+    data = low_memory_load('../temp/data/all_selected_samples_20240102_20240430.csv')
+    data['日期'] = pd.to_datetime(data['日期'])
+    data = data[data['cha_thread'] >= 0]
+    data = data[data['日期'] == '2024-04-29']
+    # 获取code的数量，并且按照数量降序排列
+    code_count = data['代码'].value_counts()
+    code_count = code_count.reset_index()
+    code_count.columns = ['代码', 'count']
+    code_count = code_count.sort_values(by='count', ascending=False)
+
 
     # # 使用模型在阈值范围内选股
-    # with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'r') as file:
-    #     model_info_list = json.load(file)
+    with open('../final_zuhe/other/new_good_all_model_reports_cuml_all_all.json', 'r') as file:
+        model_info_list = json.load(file)
     # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
     # data['日期'] = pd.to_datetime(data['日期'])
-    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=4,
-    #                                                                   thread_count=4)
+    data = low_memory_load('../train_data/2024_data.csv')
+    data['日期'] = pd.to_datetime(data['日期'])
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=3, thread_count=2)
     # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
     # data = pd.read_csv('../temp/back/good_param_select_2024-04-30.csv')
-    mul_select('../temp/data/all_selected_samples_20240430_20240430.csv')
+    # mul_select('../temp/data/all_selected_samples_20240430_20240430.csv')
 
     # # 获取第一层参数的性能
     # save_all_selected_samples(all_selected_samples)

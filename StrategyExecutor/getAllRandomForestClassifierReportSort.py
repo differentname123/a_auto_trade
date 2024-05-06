@@ -802,7 +802,7 @@ def statistics_optimized(daily_precision, min_unique_dates=4):
     return result
 
 
-def deal_reports(report_list, min_unique_dates=3, sort_key='date_count', sort_key2='date_count'):
+def deal_reports(report_list, min_unique_dates=1, sort_key='date_count', sort_key2='date_count'):
     result_list = []
     for report in report_list:
         result = {}
@@ -839,10 +839,12 @@ def sort_new():
                     try:
                         result_dict = json.load(file)
                         for model_name, report_value in result_dict.items():
-                            if 'profit_1' not in model_name or 'thread_day_2' not in model_name:
+                            # if 'profit_1' not in model_name or 'thread_day_2' not in model_name:
+                            #     continue
+                            if len(report_value.keys()) != 2:
                                 continue
                             for test_data_path, detail_report in report_value.items():
-                                if 'all' in test_data_path:
+                                if '.csv' in test_data_path:
                                     temp_dict = {}
                                     max_score = 0
                                     date_count = 0
@@ -874,6 +876,7 @@ def sort_new():
                                                 min_day = result_list[0]['min_day']
                                                 true_stocks_set = result_list[0]['true_stocks_set']
                                                 max_false_count = result_list[0]['max_false_count']
+                                    temp_dict['test_data_path'] = test_data_path
                                     temp_dict['max_score'] = max_score
                                     temp_dict['date_count'] = date_count
                                     temp_dict['precision'] = precision
@@ -885,6 +888,7 @@ def sort_new():
                                     temp_dict['model_size'] = model_size
                                     good_model_list.append(temp_dict)
                     except Exception as e:
+                        print(f"处理文件 {fullname} 时出现异常: {e}")
                         traceback.print_exc()
                         pass
     # 将good_model_list先按照date_count降序排序再按照max_score降序排序
@@ -983,7 +987,7 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 if __name__ == '__main__':
     # find_small_abs()
     # sort_new()
-    all_rf_model_list = load_rf_model_new(100, True, need_balance=False, model_max_size=200, model_min_size=0, abs_threshold=1) # 0:162
+    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=200, model_min_size=0, abs_threshold=1) # 0:162
     # delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]

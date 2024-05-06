@@ -222,14 +222,13 @@ def build_models():
     origin_data_path_list = [
         '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
         # '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
-        '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
-        # '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        # '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
+        # '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.25/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.3/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.4/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.5/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.6/bad_0_train.csv',
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
@@ -249,6 +248,7 @@ def build_models():
                 if f.endswith('joblib'):
                     model_list.append(f)
     report_list.extend(model_list)
+    report_list = list(set(report_list))
 
     threads = []
     for origin_data_path in origin_data_path_list:

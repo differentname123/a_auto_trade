@@ -21,7 +21,7 @@ import pandas as pd
 
 from InfoCollector.save_all import save_all_data_mul
 from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json, load_data_filter, \
-    load_file_chunk_filter
+    load_file_chunk_filter, downcast_dtypes, low_memory_load
 from itertools import combinations
 import talib
 import warnings
@@ -698,19 +698,6 @@ def load_and_merge_data(batch):
     return None
 
 
-def spilt_train_test_data(data_df, test_ratio=0.3, split_num=3):
-    """
-    将数据分割为训练集和测试集。
-
-    :param data_df: DataFrame，包含所有数据。
-    :param test_ratio: float，测试集占总数据的比例。
-    :param split_num: int，分割次数。
-    :return: list of tuple，每个元组包含训练集和测试集。
-    """
-    # 将data_df先按照
-    pass
-
-
 def split_dataframe(data_df, split_num):
     """
     将 DataFrame 中的数据按行分割成多个列表,并返回这些列表。
@@ -741,6 +728,56 @@ def split_dataframe(data_df, split_num):
     return split_df_lists
 
 
+def merge_files_in_directory(directory='../train_data/profit_1_day_1_ratio_0.25'):
+    # 用于存储待合并的文件路径
+    file_paths = {}
+    print(f'开始合并{directory}目录下的文件')
+    # 遍历目录下的所有文件和子目录
+    for root, dirs, files in os.walk(directory):
+        for file_name in files:
+            # 检查文件名是否以 '.csv' 结尾
+            if file_name.endswith('.csv') and ('2021' in file_name or '2023' in file_name) and ('test' not in file_name) and 'train' not in file_name:
+                # 提取文件名的前缀部分
+                prefix = file_name.split('_')[0]
+
+                # 如果该前缀还没有出现过，则添加到字典中
+                if prefix not in file_paths:
+                    file_paths[prefix] = {}
+
+                # 提取文件名的关键部分（不包括前缀和年份）
+                key_part = '_'.join(file_name.split('_')[1:-1])
+
+                # 如果该关键部分还没有出现过，则创建对应的文件路径列表
+                if key_part not in file_paths[prefix]:
+                    file_paths[prefix][key_part] = []
+
+                # 将文件路径添加到对应的列表中
+                file_path = os.path.join(root, file_name)
+                file_paths[prefix][key_part].append(file_path)
+
+    # 遍历字典，按组加载和合并文件
+    for prefix, key_dict in file_paths.items():
+
+        for key_part, paths in key_dict.items():
+            path_data_list = []
+            if len(paths) != 2:
+                print(f'长度不正确 {paths}')
+                continue
+            print(f'待合并的文件：{paths}')
+            old_file_name = f"{prefix}_{key_part}.csv"
+            merged_file_name = f"{prefix}_{key_part}_merged.csv"
+            merged_file_path = os.path.join(directory, merged_file_name)
+            old_file_name_path = os.path.join(directory, old_file_name)
+
+            if not os.path.exists(old_file_name_path):
+                for path in paths:
+                    path_data_list.append(low_memory_load(path))
+            if len(path_data_list) == 2:
+                all_data_df = pd.concat(path_data_list)
+                all_data_df.to_csv(merged_file_path, index=False)
+                print(f"合并完成：{merged_file_name} ,{paths}")
+
+
 def load_bad_data():
     """
     all_data_performance.json
@@ -749,9 +786,9 @@ def load_bad_data():
     :param day:
     :return:
     """
-    train_test_num = 3
     start_time = time.time()
-    all_data_file_path = '../train_data/all_data.csv'
+    all_data_file_path = '../train_data/profit_1_day_1_ratio_0.25/good_0.25_data_batch_count.csv'
+    # all_data_file_path = '../train_data/all_data.csv'
     if not os.path.exists(all_data_file_path):
         print('开始加载所有数据')
         # 生成相应的数据
@@ -759,20 +796,25 @@ def load_bad_data():
         # 获取目录下所有文件的完整路径
         all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
         all_data_df = load_and_merge_data(all_files)
-        all_data_df.to_csv(all_data_file_path, index=False)
+        # all_data_df.to_csv(all_data_file_path, index=False)
     else:
         print('开始加载已有的所有数据')
-        all_data_df = pd.read_csv(all_data_file_path)
-    # return
+        all_data_df = low_memory_load(all_data_file_path)
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
-    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
-    all_data_df_2024.to_csv('../train_data/2024_data.csv')
-    all_data_df = all_data_df[all_data_df['日期'] <= pd.Timestamp('2024-01-01')]
     # return
+    # all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    # all_data_df_2024.to_csv('../train_data/2024_data_2023.csv', index=False)
+    # del all_data_df_2024
+    # all_data_df = downcast_dtypes(all_data_df)
+    all_data_df = all_data_df[all_data_df['日期'] > pd.Timestamp('2020-01-01')]
+    # return
+    print(f'加载所有数据耗时：{time.time() - start_time:.2f}秒')
+    # time.sleep(10)
     new_data = data_filter(all_data_df)
     print(
         f'加载所有数据耗时：{time.time() - start_time:.2f}秒 过滤前数据量为{len(all_data_df)} 过滤后数据量为{len(new_data)}')
     all_data_df = new_data
+    del new_data
 
     results_file_path = '../final_zuhe/other/all_data_performance.json'
     performance_results = read_json(results_file_path)
@@ -786,31 +828,62 @@ def load_bad_data():
             for ratio in ratio_list:
                 key_name = f'后续{day}日{profit}成功率'
                 bad_ratio_day = [pd.to_datetime(date).date() for date, result in performance_results.items() if
-                                 result[key_name] < ratio]
+                                 result[key_name] <= ratio]
                 key = f'profit_{profit}_day_{day}_ratio_{ratio}'
                 out_put_path = f'../train_data/{key}'
                 print(f'开始加载bad_{out_put_path}的数据')
-                file_name = f'bad_{ratio}_data_batch_count.csv'
-                good_file_name = f'good_{ratio}_data_batch_count.csv'
-                good_file_out_put_path = os.path.join(out_put_path, good_file_name)
+                file_name = f'bad_{ratio}_data_batch_count_2023.csv'
+                good_file_name = f'good_{ratio}_data_batch_count_2023.csv'
+                bad_file_out_put_path = os.path.join(out_put_path, good_file_name)
                 file_out_put_path = os.path.join(out_put_path, file_name)
-                # 检查文件是否存在
-                if not os.path.exists(file_out_put_path):
-                    bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
-                    bad_data.to_csv(file_out_put_path, index=False)
-                    print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
 
-                elif not os.path.exists(good_file_out_put_path):
-                    good_data = all_data_df[~all_data_df['日期'].dt.date.isin(bad_ratio_day)]
-                    good_data.to_csv(good_file_out_put_path, index=False)
-                    print(f'good_{out_put_path}的数据量为{len(good_data)}')
                 # 检查目录是否存在，不存在则创建
-                if not os.path.exists(out_put_path):
-                    os.makedirs(out_put_path)
+                os.makedirs(out_put_path, exist_ok=True)
+
+                bad_data = all_data_df[all_data_df['日期'].dt.date.isin(bad_ratio_day)]
+                print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
+                # if not os.path.exists(file_out_put_path) or len(bad_data) > 5000000:
+                #     bad_data.to_csv(file_out_put_path, index=False)
+
+                if len(bad_data) <= 5000000:
+                    for idx, temp_df in enumerate(split_dataframe(bad_data, 3)):
+                        temp_file_path = f'../train_data/{key}/bad_{idx}_2023.csv'
+                        if not os.path.exists(temp_file_path):
+                            temp_df.to_csv(temp_file_path, index=False)
+                            all_10_list = split_dataframe(temp_df, 10)
+                            train_df = pd.concat(all_10_list[:7], ignore_index=True)
+                            test_df = pd.concat(all_10_list[7:], ignore_index=True)
+                            train_file_path = f'../train_data/{key}/bad_{idx}_train_2023.csv'
+                            test_file_path = f'../train_data/{key}/bad_{idx}_test_2023.csv'
+                            if not os.path.exists(train_file_path):
+                                train_df.to_csv(train_file_path, index=False)
+                            if not os.path.exists(test_file_path):
+                                test_df.to_csv(test_file_path, index=False)
+                            print(f'bad_{idx}_2023.csv的数据量为{len(temp_df)}')
+                            del temp_df, train_df, test_df
+                del bad_data
 
                 good_data = all_data_df[~all_data_df['日期'].dt.date.isin(bad_ratio_day)]
-                print(f'bad_{out_put_path}的数据量为{len(bad_data)}')
                 print(f'good_{out_put_path}的数据量为{len(good_data)}')
+                # if not os.path.exists(bad_file_out_put_path) or len(good_data) > 5000000:
+                #     good_data.to_csv(bad_file_out_put_path, index=False)
+                if len(good_data) <= 5000000:
+                    for idx, temp_df in enumerate(split_dataframe(good_data, 3)):
+                        temp_file_path = f'../train_data/{key}/good_{idx}_2023.csv'
+                        if not os.path.exists(temp_file_path):
+                            temp_df.to_csv(temp_file_path, index=False)
+                            all_10_list = split_dataframe(temp_df, 10)
+                            train_df = pd.concat(all_10_list[:7], ignore_index=True)
+                            test_df = pd.concat(all_10_list[7:], ignore_index=True)
+                            train_file_path = f'../train_data/{key}/good_{idx}_train_2023.csv'
+                            test_file_path = f'../train_data/{key}/good_{idx}_test_2023.csv'
+                            if not os.path.exists(train_file_path):
+                                train_df.to_csv(train_file_path, index=False)
+                            if not os.path.exists(test_file_path):
+                                test_df.to_csv(test_file_path, index=False)
+                            print(f'good_{idx}_2023.csv的数据量为{len(temp_df)}')
+                            del temp_df, train_df, test_df
+                del good_data
 
 
 def data_filter(data):
@@ -861,9 +934,70 @@ def data_filter_for_single(data):
         (filtered_data['涨跌幅'] <= (filtered_data['Max_rate'] - 0.01 / filtered_data['收盘'].shift(1) * 100))]
 
     return filtered_data
+def is_precision_always_increasing(json_list, max_count=2, min_cha=-0.1):
+    # 首先检查列表是否为空或只有一个元素
+    if len(json_list) < 2:
+        return True
 
+    # 遍历列表，比较每个元素的precision值
+    for i in range(len(json_list) - 1):
+        # 获取当前元素和下一个元素的precision值
+        current_precision = json_list[i].get('precision', None)
+        next_precision = json_list[i + 1].get('precision', None)
+
+        # 检查precision值是否存在
+        if current_precision is None or next_precision is None:
+            raise ValueError("Some items are missing the 'precision' attribute")
+
+        # 如果当前的precision值不小于下一个，返回False
+        if (current_precision + min_cha) > next_precision or current_precision <= 0.5:
+            max_count -= 1
+            # print(f"Precision is not always increasing: {json_list[i].get('abs_threshold', None)}")
+            if max_count == 0:
+                return False
+
+    # 所有比较都显示precision是递增的
+    return True
+
+def test():
+    good_model_list = []
+    bad_model_list = []
+    file_path = '../model/reports'
+    # 遍历file_path下的所有json文件
+    for root, dirs, files in os.walk(file_path):
+        for file in files:
+            if file.endswith('.json'):
+                json_file = os.path.join(root, file)
+                data = read_json(json_file)
+                for model_name, model_data in data.items():
+                    for test_data, test_result in model_data.items():
+                        detail_report = test_result['tree_0_abs_1']
+                        is_precision = is_precision_always_increasing(detail_report)
+                        if is_precision:
+                            good_model_list.append(model_name)
+                        else:
+                            bad_model_list.append(model_name)
+    print(f'good_model_list:{len(good_model_list)}')
+    print(f'bad_model_list:{len(bad_model_list)}')
+    # 将good_model_list和bad_model_list写入文件，每个模型名占用一行
+    with open('../model/other/good_model_list.txt', 'w') as f:
+        for model in good_model_list:
+            f.write(model + '\n')
+    with open('../model/other/bad_model_list.txt', 'w') as f:
+        for model in bad_model_list:
+            f.write(model + '\n')
 
 if __name__ == '__main__':
+    # test()
+    # 获取../train_data下的所有文件夹
+    dir_list = []
+    for root, dirs, files in os.walk('../train_data'):
+        for dir in dirs:
+            full_path = os.path.join(root, dir)
+            dir_list.append(full_path)
+    for dir in dir_list:
+        merge_files_in_directory(dir)
+
     #
     # for root, _, files in os.walk('../daily_data_exclude_new_can_buy'):
     #     for file in files:
@@ -878,10 +1012,10 @@ if __name__ == '__main__':
     # all_data_df = load_and_merge_data(all_files)
     # print(all_data_df)
 
-    file_path = '../daily_data_exclude_new_can_buy'
-    out_path = '../feature_data_exclude_new_can_buy'
-    generate_features_for_all_files(file_path, out_path)
-    load_bad_data()
+    # file_path = '../daily_data_exclude_new_can_buy'
+    # out_path = '../feature_data_exclude_new_can_buy'
+    # generate_features_for_all_files(file_path, out_path)
+    # load_bad_data()
 
     # file_path = '../feature_data_exclude_new_can_buy/ST实达_600734.txt'
     # file_path = '../train_data/2024_data.csv'

@@ -9,6 +9,8 @@
 :description:
 
 """
+from collections import defaultdict
+from multiprocessing import Process
 
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第一张GPU（2080），索引从0开始
@@ -210,6 +212,8 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             new_temp_dict[file_path] = result_dict[model_name][file_path]
             print(f"模型 {model_name} 对于文件 {file_path} 的报告已存在,跳过。")
             return
+        if model_name in result_dict:
+            new_temp_dict = result_dict[model_name]
         file_start_time = time.time()
         model = load_model(abs_name, model_name)
         if model is None:
@@ -249,13 +253,13 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
         return result_dict
     except BaseException as e:
         traceback.print_exc()
-        os.remove(abs_name)
+        # os.remove(abs_name)
         print(f"已删除生成报告时出现异常: {e}")
         return {}
 
 
-def load_test_data():
-    file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
+def load_test_data(file_path):
+    # file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
     print(f"开始处理数据集: {file_path}")
     data = low_memory_load(file_path)
     data = cudf.DataFrame(data)
@@ -272,6 +276,12 @@ def load_test_data():
     X_test = data[signal_columns]
     return final_data, X_test
 
+def group_models_by_last_dir(model_list):
+    grouped_models = defaultdict(list)
+    for full_name, base_name in model_list:
+        last_dir = os.path.basename(os.path.dirname(full_name))
+        grouped_models[last_dir].append((full_name, base_name))
+    return dict(grouped_models)
 
 def get_all_model_report(max_size=0.5, min_size=0):
     """
@@ -291,13 +301,19 @@ def get_all_model_report(max_size=0.5, min_size=0):
                     report_list.append(f.split('_report.json')[0])
         model_list = []
         size_list = []
+        need_train_model_list = []
+        # 加载'../model/other/good_model_list.txt'文件中的模型
+        with open(os.path.join(MODEL_OTHER, 'good_model_list.txt'), 'r') as f:
+            for line in f:
+                need_train_model_list.append( os.path.basename(line.strip()))
+
 
         for model_path in MODEL_PATH_LIST:
             # 获取所有模型的文件名
             for root, ds, fs in os.walk(model_path):
                 for f in fs:
                     full_name = os.path.join(root, f)
-                    if 'good_models' in full_name or 'bad_1.0' in full_name or 'profit_1' in full_name:
+                    if 'train' not in full_name:
                         continue
                     # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
@@ -316,18 +332,21 @@ def get_all_model_report(max_size=0.5, min_size=0):
 
         # 将排序后的列表赋值给model_list
         model_list = sorted_model_list
+        temp_dict = group_models_by_last_dir(model_list)
         print(
             f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)}")
-
-        start_time = time.time()
-        if final_data is None or X_test is None:
-            final_data, X_test = load_test_data()
-        print(
-            f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
-        file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
-        for full_name, model_name in model_list:
-            result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
+        for key, value in temp_dict.items():
+            model_list = value
+            last_path = key.split('_bad')[0]
+            file_path = f'/mnt/w/project/python_project/a_auto_trade/train_data/{last_path}/bad_0_test.csv'
+            start_time = time.time()
+            final_data, X_test = load_test_data(file_path)
+            print(
+                f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
+            # file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
+            for full_name, model_name in model_list:
+                result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
         return None
 
 if __name__ == '__main__':
-    get_all_model_report(300000, 0)
+    get_all_model_report(120, 80)

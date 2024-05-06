@@ -15,7 +15,7 @@ import time
 def run_script():
     while True:
         print("Starting the main script...")
-        process = subprocess.Popen(["python", "getAllRandomForestClassifierCUML.py"])
+        process = subprocess.Popen(["python", "getAllRandomForestClassifierReport.py"])
         process.wait()
 
         if process.returncode != 0:

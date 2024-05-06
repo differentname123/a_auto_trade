@@ -128,7 +128,7 @@ def train_models(X_train, y_train, model_type, thread_day, origin_data_path_dir,
     params_list = list(ParameterGrid(param_grid))
     # random.shuffle(params_list)
     print(f"待训练的模型数量: {len(params_list)} 已有的report_list数量: {len(report_list)}")
-    save_path = D_MODEL_PATH
+    save_path = MODEL_PATH
     for params in params_list:
 
         model_name = f"{model_type}_origin_data_path_dir_{origin_data_path_dir}_thread_day_{thread_day}_true_ratio_{true_ratio}_{'_'.join([f'{key}_{value}' for key, value in params.items()])}.joblib"
@@ -222,14 +222,13 @@ def build_models():
     origin_data_path_list = [
         # '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
         '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
-        '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
-        # '../train_data/profit_2_day_2_bad_0.2/bad_0.2_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.3/bad_0.3_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.4/bad_0.4_data_batch_count.csv',
-        # '../train_data/profit_2_day_1_bad_0.5/bad_0.5_data_batch_count.csv',
-        # '../train_data/profit_2_day_2_bad_0.5/bad_0.5_data_batch_count.csv'
+        # '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
+        # '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.25/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.3/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.4/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.5/bad_0_train.csv',
+        # '../train_data/profit_1_day_2_ratio_0.6/bad_0_train.csv',
     ]
     report_list = []
     for root, ds, fs in os.walk(MODEL_REPORT_PATH):
@@ -249,6 +248,7 @@ def build_models():
                 if f.endswith('joblib'):
                     model_list.append(f)
     report_list.extend(model_list)
+    report_list = list(set(report_list))
 
     threads = []
     for origin_data_path in origin_data_path_list:
@@ -325,7 +325,7 @@ def train_target_model():
     for model_name in model_name_list:
         param = parse_filename(model_name)
         param_list.append(param)
-    save_path = D_MODEL_PATH
+    save_path = MODEL_PATH
     model_list = []
     for model_path in MODEL_PATH_LIST:
         # 获取所有模型的文件名
