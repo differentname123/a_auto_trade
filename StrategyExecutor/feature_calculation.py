@@ -563,7 +563,7 @@ def get_all_data_performance():
     此函数首先遍历指定目录下的所有文件，然后使用多进程并行加载这些文件的数据。
     加载后，数据被合并并按日期分组，以分析每天的数据表现，并将结果保存到JSON文件中。
     """
-    file_path = '../train_data/2024_data.csv'
+    file_path = '../train_data/2024_data_2024.csv'
 
     all_data_df = low_memory_load(file_path)
     # 将日期列转换为日期时间格式，并处理格式错误
@@ -725,9 +725,10 @@ def load_bad_data():
         print('开始加载已有的所有数据')
         all_data_df = low_memory_load(all_data_file_path)
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
-    # return
-    # all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
-    # all_data_df_2024.to_csv('../train_data/2024_data_2023.csv', index=False)
+    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    all_data_df_2024.to_csv('../train_data/2024_data_2024.csv', index=False)
+    return
+
     # del all_data_df_2024
     all_data_df = downcast_dtypes(all_data_df)
     all_data_df = all_data_df[all_data_df['日期'] >= pd.Timestamp('2021-01-01')]
