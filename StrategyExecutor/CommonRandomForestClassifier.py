@@ -811,7 +811,7 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
     model_chunks = model_chunks_w + model_chunks_other
 
     # 创建进程池
-    with concurrent.futures.ProcessPoolExecutor(max_workers=process_count) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=process_count*2) as executor:
         # 存储最终结果的列表
         manager = multiprocessing.Manager()
         result_list = manager.list()
@@ -2304,8 +2304,8 @@ def get_all_model_list():
                 full_name = os.path.join(root, file)
                 model_info = read_json(full_name)
                 all_model_name_dict[file] = model_info
-    # 按照model_info的长度升序排列
-    all_model_name_dict = dict(sorted(all_model_name_dict.items(), key=lambda item: len(item[1])))
+    # 按照model_info的长度降序排列
+    all_model_name_dict = dict(sorted(all_model_name_dict.items(), key=lambda x: len(x[1]), reverse=True))
     return all_model_name_dict
 
 def gen_full_select():
@@ -2541,8 +2541,8 @@ def example():
     示例函数
     :return:
     """
-    file_path = '../train_data/profit_1_day_1_ratio_0.5/bad_1_select.csv'
-    save_all_selected_samples(file_path)
+    # file_path = '../train_data/profit_1_day_1_ratio_0.5/bad_1_select.csv'
+    # save_all_selected_samples(file_path)
     file_path = '../train_data/profit_1_day_1_ratio_0.5/good_1_select.csv'
     save_all_selected_samples(file_path, processes=25)
     # gen_full_select()
