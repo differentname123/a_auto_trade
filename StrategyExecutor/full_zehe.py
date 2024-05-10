@@ -3635,7 +3635,6 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    data = pd.read_csv('../temp/data/second_all_selected_samples_20240509_20240509.csv')
     date_list = [
                  '2024-04-15', '2024-04-16', '2024-04-17', '2024-04-18', '2024-04-19']
     while True:
