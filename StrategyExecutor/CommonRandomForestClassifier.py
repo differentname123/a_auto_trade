@@ -1612,7 +1612,7 @@ def filter_duplicated_date_code(data):
     data = data.drop_duplicates(subset=['日期', '代码'])
     return data
 
-def analyse_first_min_count_select(all_selected_samples):
+def analyse_first_min_count_select(all_selected_samples, output_filename_path, param_dict):
     """
     分析出第一层的选择数据，all_selected_samples为模型组 cha date_count筛选后的数据，返回结果会加上min_count限制和选择的方法限制（选择最高的 选择大于min_count的 选择单数据的 选择多数据的）
     :param all_selected_samples:
@@ -1629,6 +1629,14 @@ def analyse_first_min_count_select(all_selected_samples):
     min_count_list = list(set(count_list))
     min_count_list = split_list(min_count_list, 100)
     min_count_list.sort()
+    # 如果output_filename_path存在，直接返回
+    if os.path.exists(output_filename_path):
+        return
+    # 判断output_filename_path路径是否存在，不存在则创建
+    if not os.path.exists(output_filename_path):
+        os.makedirs(output_filename_path)
+    min_output_filename_path = os.path.join(output_filename_path, 'min_count.csv')
+
     for min_count in min_count_list:
         # print(f"开始分析第一层参数min_count 当前时间{datetime.now()} min_count{min_count} {origin_grouped.shape[0]}")
         # 筛选出count大于min_count的数据
@@ -1650,13 +1658,16 @@ def analyse_first_min_count_select(all_selected_samples):
         result_df = pd.DataFrame()
     # 删除total_count为0的数据
     if 'total_count' in result_df.columns:
-        result_df = result_df[result_df['total_count'] != 0]
         result_df = remove_duplicate_rows(result_df)
-        result_df = result_df.loc[:, ~result_df.columns.str.contains('date_list')]
+        result_df = result_df[result_df['total_days'] > 3]
+        result_df = result_df[result_df['day_2_day_ratio'] <= 0.1]
+        # 遍历param_dict，将param_dict的值添加到result_df中
+        for key, value in param_dict.items():
+            result_df[key] = value
+        if result_df.shape[0] > 0:
+            result_df.to_csv(min_output_filename_path, index=False)
     else:
         print(f'total_count not in columns{result_df} {all_selected_samples}')
-
-    return result_df
 
 def remove_duplicate_rows(df):
     """
@@ -1680,7 +1691,7 @@ def remove_duplicate_rows(df):
     print(f"过滤前 {df.shape[0]} 删除重复行后的DataFrame大小: {df_filtered.shape[0]}")
     return df_filtered
 
-def analyse_first_cha_zhi_select(origin_selected_samples):
+def analyse_first_cha_zhi_select(origin_selected_samples, output_filename_path, param_dict):
     cha_zhi_result_list = []
     # 获取origin_selected_samples的所有不重复cha_thread，保留两位小数
     cha_thread_list = origin_selected_samples['cha_thread'].tolist()
@@ -1704,70 +1715,17 @@ def analyse_first_cha_zhi_select(origin_selected_samples):
             less_selected_samples = origin_selected_samples.loc[origin_selected_samples.groupby('日期')['cha_thread'].idxmin()]
         print(
             f"开始分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]}")
-        more_result_df = analyse_first_min_count_select(more_selected_samples)
-        less_result_df = analyse_first_min_count_select(less_selected_samples)
-        if more_result_df.shape[0] > 0:
-            more_result_df['cha_zhi'] = cha_zhi
-            more_result_df['is_cha_zhi_more'] = True
-            cha_zhi_result_list.append(more_result_df)
-        if less_result_df.shape[0] > 0:
-            less_result_df['cha_zhi'] = cha_zhi
-            less_result_df['is_cha_zhi_more'] = False
-            cha_zhi_result_list.append(less_result_df)
+        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_more')
+        param_dict['cha_zhi'] = cha_zhi
+        param_dict['is_cha_zhi_more'] = True
+        more_result_df = analyse_first_min_count_select(more_selected_samples, cha_output_filename_path, param_dict)
+        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_less')
+        param_dict['is_cha_zhi_more'] = False
+        less_result_df = analyse_first_min_count_select(less_selected_samples, cha_output_filename_path, param_dict)
         print(f"完成分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} {origin_selected_samples.shape[0]} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]} cha_zhi进度{cha_zhi_list.index(cha_zhi)}/{len(cha_zhi_list)}")
-    if len(cha_zhi_result_list) > 0:
-        result_df = pd.concat(cha_zhi_result_list)
-        # result_df = remove_duplicate_rows(result_df)
-        # result_df = result_df.loc[:, ~result_df.columns.str.contains('date_list')]
-    else:
-        result_df = pd.DataFrame()
-    return result_df
 
 
-def analyse_first_date_count_select_old(origin_selected_samples, model_info_list):
-    """
-    分析出第一层的选择数据，all_selected_samples为模型组 cha date_count筛选后的数据，返回结果会加上min_count限制和选择的方法限制（选择最高的 选择大于min_count的 选择单数据的 选择多数据的）
-    :param origin_selected_samples:
-    :param model_info_list:
-    :return:
-    """
-    date_count_result_list = []
-    date_count_list = [model_info['date_count'] for model_info in model_info_list]
-    date_count_split_list = list(set(date_count_list))
-    date_count_split_list = split_list(date_count_split_list, 100)
-    date_count_split_list.sort()
-
-    for date_count in date_count_split_list:
-
-        more_model_name_list = [model_info['model_name'] for model_info in model_info_list if
-                           model_info['date_count'] >= date_count]
-        more_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(more_model_name_list)]
-        less_model_name_list = [model_info['model_name'] for model_info in model_info_list if
-                             model_info['date_count'] < date_count]
-        less_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(less_model_name_list)]
-        print(
-            f"开始分析第一层参数date_count 当前时间{datetime.now()} date_count {date_count} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_origin_selected_samples {less_origin_selected_samples.shape[0]}")
-
-        more_result_df = analyse_first_cha_zhi_select(more_origin_selected_samples)
-        if more_result_df.shape[0] > 0:
-            more_result_df['date_count'] = date_count
-            more_result_df['is_date_count_more'] = True
-            date_count_result_list.append(more_result_df)
-
-
-        less_result_df = analyse_first_cha_zhi_select(less_origin_selected_samples)
-        if less_result_df.shape[0] > 0:
-            less_result_df['date_count'] = date_count
-            less_result_df['is_date_count_more'] = False
-            date_count_result_list.append(less_result_df)
-        print(f"完成分析第一层参数date_count 当前时间{datetime.now()} date_count {date_count} {origin_selected_samples.shape[0]} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_origin_selected_samples {less_origin_selected_samples.shape[0]} date_count进度{date_count_split_list.index(date_count)}/{len(date_count_split_list)}")
-    if len(date_count_result_list) > 0:
-        result_df = pd.concat(date_count_result_list)
-    else:
-        result_df = pd.DataFrame()
-    return result_df
-
-def analyse_first_date_count_select_parallel(date_count, origin_selected_samples, model_info_list):
+def analyse_first_date_count_select_parallel(date_count, origin_selected_samples, model_info_list, output_filename_path, param_dict):
     more_model_name_list = [model_info['model_name'] for model_info in model_info_list if
                             model_info['date_count'] >= date_count]
     more_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(more_model_name_list)]
@@ -1776,20 +1734,16 @@ def analyse_first_date_count_select_parallel(date_count, origin_selected_samples
     less_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(less_model_name_list)]
     print(
         f"开始分析第一层参数date_count 当前时间{datetime.now()} date_count {date_count} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_origin_selected_samples {less_origin_selected_samples.shape[0]}")
-
-    more_result_df = analyse_first_cha_zhi_select(more_origin_selected_samples)
-    if more_result_df.shape[0] > 0:
-        more_result_df['date_count'] = date_count
-        more_result_df['is_date_count_more'] = True
-
-    less_result_df = analyse_first_cha_zhi_select(less_origin_selected_samples)
-    if less_result_df.shape[0] > 0:
-        less_result_df['date_count'] = date_count
-        less_result_df['is_date_count_more'] = False
-
+    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_more')
+    param_dict['date_count'] = date_count
+    param_dict['is_date_count_more'] = True
+    more_result_df = analyse_first_cha_zhi_select(more_origin_selected_samples, date_output_filename_path, param_dict)
+    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_less')
+    param_dict['is_date_count_more'] = False
+    less_result_df = analyse_first_cha_zhi_select(less_origin_selected_samples, date_output_filename_path, param_dict)
     return more_result_df, less_result_df
 
-def analyse_first_date_count_select(origin_selected_samples, model_info_list, processes=25):
+def analyse_first_date_count_select(origin_selected_samples, model_info_list, output_filename_path, param_dict, processes=25):
     """
     分析出第一层的选择数据,all_selected_samples为模型组 cha date_count筛选后的数据,返回结果会加上min_count限制和选择的方法限制(选择最高的 选择大于min_count的 选择单数据的 选择多数据的)
     :param origin_selected_samples:
@@ -1805,27 +1759,11 @@ def analyse_first_date_count_select(origin_selected_samples, model_info_list, pr
     results = []
     for date_count in date_count_split_list:
         result = pool.apply_async(analyse_first_date_count_select_parallel,
-                                  args=(date_count, origin_selected_samples, model_info_list))
+                                  args=(date_count, origin_selected_samples, model_info_list, output_filename_path, param_dict))
         results.append(result)
 
     pool.close()
     pool.join()
-
-    date_count_result_list = []
-    for result in results:
-        more_result_df, less_result_df = result.get()
-        if more_result_df.shape[0] > 0:
-            date_count_result_list.append(more_result_df)
-        if less_result_df.shape[0] > 0:
-            date_count_result_list.append(less_result_df)
-
-    if len(date_count_result_list) > 0:
-        result_df = pd.concat(date_count_result_list)
-        # result_df = remove_duplicate_rows(result_df)
-    else:
-        result_df = pd.DataFrame()
-    return result_df
-
 
 def save_all_selected_samples(file_path, processes=25):
     """
@@ -1842,34 +1780,31 @@ def save_all_selected_samples(file_path, processes=25):
 
     all_selected_samples = low_memory_load(file_path)
     all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
+    # 将日期转换为字符串保留年月日
+    all_selected_samples['日期'] = all_selected_samples['日期'].dt.strftime('%Y-%m-%d')
     all_model_name_dict = get_all_model_list()
     if '后续2日最高价利润率' not in all_selected_samples.columns:
         all_selected_samples['后续2日最高价利润率'] = 0
     if '后续1日最高价利润率' not in all_selected_samples.columns:
         all_selected_samples['后续1日最高价利润率'] = 0
     for json_file, model_info_list in all_model_name_dict.items():
-        first_param_result_list = []
-        output_filename = f'../final_zuhe/other/first_param_{param_base_name}_{base_name}_{json_file}.csv'
-        if os.path.exists(output_filename):
-            print(f"文件 {output_filename} 已存在")
-            continue
+        output_filename_path = f'../final_zuhe/first_param/{param_base_name}/{base_name}/{json_file}'
+        param_dict = {'json_file': json_file}
+
         print(f"开始模型组第一层参数遍历 当前时间{datetime.now()} json_file {json_file} model_info_list {len(model_info_list)} {file_path}")
-        result_df = analyse_first_date_count_select(all_selected_samples, model_info_list, processes=processes)
-        if result_df.shape[0] > 0:
-            result_df['json_file'] = json_file
-            first_param_result_list.append(result_df)
-        print(f"完成模型组第一层参数遍历 当前时间{datetime.now()} 数量{result_df.shape[0]} json_file{json_file} model_info_list{len(model_info_list)} {file_path} 模型组进度{list(all_model_name_dict.keys()).index(json_file)}/{len(all_model_name_dict)}")
-        if len(first_param_result_list) > 0:
-            first_param_result_df = pd.concat(first_param_result_list)
-            # first_param_result_df = remove_duplicate_rows(first_param_result_df)
-            # 删除data中列名包含date_list的列
-            # first_param_result_df = first_param_result_df.loc[:, ~first_param_result_df.columns.str.contains('date_list')]
-        else:
-            first_param_result_df = pd.DataFrame()
+        result_df = analyse_first_date_count_select(all_selected_samples, model_info_list, output_filename_path, param_dict, processes=processes)
+        print(f"完成模型组第一层参数遍历 当前时间{datetime.now()} json_file{json_file} model_info_list{len(model_info_list)} {file_path} 模型组进度{list(all_model_name_dict.keys()).index(json_file)}/{len(all_model_name_dict)}")
+        # if len(first_param_result_list) > 0:
+        #     first_param_result_df = pd.concat(first_param_result_list)
+        #     # first_param_result_df = remove_duplicate_rows(first_param_result_df)
+        #     # 删除data中列名包含date_list的列
+        #     # first_param_result_df = first_param_result_df.loc[:, ~first_param_result_df.columns.str.contains('date_list')]
+        # else:
+        #     first_param_result_df = pd.DataFrame()
         # 过滤first_param_result_df，只保留day_2_count_ratio小于0.2的数据
-        first_param_result_df = first_param_result_df[first_param_result_df['day_2_count_ratio'] <= 0.2]
-        first_param_result_df.to_csv(output_filename, index=False)
-        print(f"保存文件 {output_filename} len {first_param_result_df.shape[0]}")
+        # first_param_result_df = first_param_result_df[first_param_result_df['day_2_count_ratio'] <= 0.2]
+        # first_param_result_df.to_csv(output_filename, index=False)
+        # print(f"保存文件 {output_filename} len {first_param_result_df.shape[0]}")
 
 
 def summarize_quantities(file_path, bad_count):
@@ -2599,16 +2534,18 @@ def select_first_code(file_path='../train_data/profit_1_day_1_ratio_0.25/bad_1_s
         result_df.to_csv(f'../final_zuhe/select/first_all_selected_{base_name}.csv', index=False)
 
 
+
+
 def example():
     """
     示例函数
     :return:
     """
-    # file_path = '../train_data/profit_1_day_1_ratio_0.25/bad_1_select.csv'
-    # save_all_selected_samples(file_path)
-    # file_path = '../train_data/profit_1_day_1_ratio_0.25/good_1_select.csv'
-    # save_all_selected_samples(file_path, processes=25)
-    gen_full_select()
+    file_path = '../train_data/profit_1_day_1_ratio_0.5/bad_1_select.csv'
+    save_all_selected_samples(file_path)
+    file_path = '../train_data/profit_1_day_1_ratio_0.5/good_1_select.csv'
+    save_all_selected_samples(file_path, processes=25)
+    # gen_full_select()
     return
 
     # select_first_code('../temp/data/second_all_selected_samples_20240507_20240507.csv')
@@ -2640,9 +2577,9 @@ def example():
     #     model_info_list = json.load(file)
     # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
     # # data['日期'] = pd.to_datetime(data['日期'])
-    # data = low_memory_load('../train_data/2024_data.csv')
+    # data = low_memory_load('../train_data/profit_1_day_1_ratio_0.7/good_1_merged.csv')
     # data['日期'] = pd.to_datetime(data['日期'])
-    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=2, thread_count=2)
+    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=3, thread_count=3)
     # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
     # data = pd.read_csv('../temp/back/good_param_select_2024-04-30.csv')
     # mul_select('../temp/data/all_selected_samples_20240430_20240430.csv')

@@ -606,7 +606,7 @@ def generate_features_for_file(file_path, save_path):
     :param save_path: str, 特征数据保存的目标目录路径。生成的文件将以源文件名保存在此路径下。
     :return: None
     """
-    data_list = load_data_filter(file_path, end_date='2024-05-01')
+    data_list = load_data_filter(file_path, start_date='2023-01-01', end_date='2025-05-01')
     new_data_list = []
     for data in data_list:
         new_data = get_data_feature(data)
@@ -936,8 +936,38 @@ def test():
         for model in bad_model_list:
             f.write(model + '\n')
 
-if __name__ == '__main__':
+def update_2024_data():
+    """
+    更新2024年的数据
+    :return:
+    """
+    file_path = '../daily_data_exclude_new_can_buy'
+    out_path = '../feature_data_exclude_new_can_buy'
+    generate_features_for_all_files(file_path, out_path)
+    print('开始加载所有数据')
+    # 生成相应的数据
+    file_path = '../feature_data_exclude_new_can_buy'
+    # 获取目录下所有文件的完整路径
+    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    all_data_df = load_and_merge_data(all_files)
+    all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
+    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    all_data_df_2024.to_csv('../train_data/2024_data_2024.csv', index=False)
     get_all_data_performance()
+
+    compare_origin_selected_samples = low_memory_load('../train_data/2024_data.csv')
+    compare_origin_selected_samples = compare_origin_selected_samples[
+        compare_origin_selected_samples.columns.drop(list(compare_origin_selected_samples.filter(regex='信号')))]
+    compare_origin_selected_samples1 = low_memory_load('../train_data/2024_data_2024.csv')
+    compare_origin_selected_samples1 = compare_origin_selected_samples1[
+        compare_origin_selected_samples1.columns.drop(list(compare_origin_selected_samples1.filter(regex='信号')))]
+    # 合并compare_origin_selected_samples和compare_origin_selected_samples1，删除重复的数据
+    compare_origin_selected_samples = pd.concat([compare_origin_selected_samples, compare_origin_selected_samples1], ignore_index=True)
+    compare_origin_selected_samples.to_csv('../train_data/full_2024_compare.csv', index=False)
+
+if __name__ == '__main__':
+    update_2024_data()
+    # get_all_data_performance()
 
     # test()
 
