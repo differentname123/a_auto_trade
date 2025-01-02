@@ -183,7 +183,7 @@ def downcast_dtypes(df):
                 df[col] = df[col].astype(np.int32)
     return df
 
-def load_file_chunk_filter(file_chunk, start_date='2023-01-01' ,end_date='2025-01-01'):
+def load_file_chunk_filter(file_chunk, start_date='2024-01-01' ,end_date='2026-01-01'):
     """
     加载文件块的数据
     """

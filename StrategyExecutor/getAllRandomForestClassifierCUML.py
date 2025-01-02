@@ -27,6 +27,7 @@ from StrategyExecutor.common import downcast_dtypes, low_memory_load
 TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
+F_MODEL_PATH = '/mnt/f/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_OTHER = '../model/other'
@@ -194,8 +195,13 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
     except FileNotFoundError:
         ratio_result = {}
     for thread_day in thread_day_list:
-        key_name = f'后续{thread_day}日最高价利润率'
-        y = final_data[key_name] >= profit
+        if thread_day == 3:
+            key_name_2 = f'后续2日最高价利润率'
+            key_name_1 = f'后续1日最高价利润率'
+            y = (final_data[key_name_1] < final_data[key_name_2]) & (final_data[key_name_1] < profit)
+        else:
+            key_name = f'后续{thread_day}日最高价利润率'
+            y = final_data[key_name] >= profit
         ratio_key = origin_data_path_dir + '_' + str(thread_day)
         if ratio_key in ratio_result:
             true_ratio = ratio_result[ratio_key]
@@ -205,7 +211,8 @@ def train_all_model(file_path_path, report_list, profit=1, thread_day_list=None,
             with open(ratio_result_path, 'w') as f:
                 json.dump(ratio_result, f)
         print(f"处理天数阈值: {thread_day}, 真实比率: {true_ratio:.4f}")
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+        X_train = X
+        y_train = y
         train_models(X_train, y_train, 'RandomForest', thread_day, origin_data_path_dir, report_list)
 
 
@@ -220,25 +227,37 @@ def build_models():
     训练所有模型
     """
     origin_data_path_list = [
-        '../train_data/profit_1_day_1_ratio_0.25/bad_0_train.csv',
-        '../train_data/profit_1_day_1_ratio_0.3/bad_0_train.csv',
-        '../train_data/profit_1_day_1_ratio_0.4/bad_0_train.csv',
-        '../train_data/profit_1_day_1_ratio_0.5/bad_0_train.csv',
-        '../train_data/profit_1_day_2_ratio_0.25/bad_0_train.csv',
-        '../train_data/profit_1_day_2_ratio_0.3/bad_0_train.csv',
-        '../train_data/profit_1_day_2_ratio_0.4/bad_0_train.csv',
-        '../train_data/profit_1_day_2_ratio_0.5/bad_0_train.csv',
-        '../train_data/profit_1_day_2_ratio_0.6/bad_0_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_0-1_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_1-2_train.csv',
+        '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_2-3_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_3-4_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_4-5_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_5-6_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_6-7_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_7-8_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_8-9_train.csv',
+        # '/mnt/f/train_data/profit_1_day_1_ratio_0.25/bad_0_interval_9-10_train.csv',
+
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_0-1_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_1-2_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_2-3_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_3-4_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_4-5_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_5-6_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_6-7_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_7-8_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_8-9_train.csv',
+        # '/mnt/f/train_data/profit_1_day_2_ratio_0.25/bad_0_interval_9-10_train.csv',
     ]
     report_list = []
-    for root, ds, fs in os.walk(MODEL_REPORT_PATH):
-        for f in fs:
-            if f.endswith('report.json'):
-                report_list.append(f.split('_report.json')[0])
-    for root, ds, fs in os.walk(DELETED_MODEL_REPORT_PATH):
-        for f in fs:
-            if f.endswith('report.json'):
-                report_list.append(f.split('_report.json')[0])
+    # for root, ds, fs in os.walk(MODEL_REPORT_PATH):
+    #     for f in fs:
+    #         if f.endswith('report.json'):
+    #             report_list.append(f.split('_report.json')[0])
+    # for root, ds, fs in os.walk(DELETED_MODEL_REPORT_PATH):
+    #     for f in fs:
+    #         if f.endswith('report.json'):
+    #             report_list.append(f.split('_report.json')[0])
 
     model_list = []
     for model_path in MODEL_PATH_LIST:

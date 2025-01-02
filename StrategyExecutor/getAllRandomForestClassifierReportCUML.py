@@ -24,12 +24,13 @@ from StrategyExecutor.common import low_memory_load, downcast_dtypes
 import gc
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
+F_MODEL_PATH = '/mnt/f/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
 MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
 MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/reports'
 DELETED_MODEL_REPORT_PATH = '/mnt/w/project/python_project/a_auto_trade/model/deleted_reports'
 MODEL_OTHER = '/mnt/w/project/python_project/a_auto_trade/model/other'
-TRAIN_DATA_PATH = '/mnt/w/project/python_project/a_auto_trade/train_data'
+TRAIN_DATA_PATH = '../train_data'
 import warnings
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
@@ -224,13 +225,18 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
             'tree_1_abs_1': False, 'tree_0_abs_1': True,
             'tree_1_cha_zhi_1': False, 'tree_0_cha_zhi_1': True
         }
-        temp_dict_result = {}
+        temp_dict_result = {'tree_0_abs_1' : []}
         temp_dict_result['model_size'] = round(os.path.getsize(abs_name) / (1024 ** 2), 2)
         print("加载数据{}...".format(file_path))
         profit = int(model_name.split('profit_')[1].split('_')[0])
         thread_day = int(model_name.split('thread_day_')[1].split('_')[0])
         key_name = f'后续{thread_day}日最高价利润率'
-        y_test = data[key_name] >= profit
+        if thread_day == 3:
+            key_name_2 = f'后续2日最高价利润率'
+            key_name_1 = f'后续1日最高价利润率'
+            y_test = (data[key_name_1] < data[key_name_2]) & (data[key_name_1] < profit)
+        else:
+            y_test = data[key_name] >= profit
         total_samples = len(y_test)
         print(f"当前时间{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 处理数据耗时: {time.time() - file_start_time:.2f}秒 模型大小: {os.path.getsize(abs_name) / 1024 ** 2:.2f}M {model_name}条数据")
 
@@ -259,7 +265,7 @@ def get_model_report(abs_name, model_name, file_path, data, X_test):
 
 
 def load_test_data(file_path):
-    # file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
+    # file_path = '../train_data/all_data.csv'
     print(f"开始处理数据集: {file_path}")
     data = low_memory_load(file_path)
     data = cudf.DataFrame(data)
@@ -293,7 +299,7 @@ def get_all_model_report(max_size=0.5, min_size=0):
         report_list = []
         for root, ds, fs in os.walk(MODEL_REPORT_PATH):
             for f in fs:
-                if f.endswith('report.json'):
+                if f.endswith('report.json') and 'interval' in f and 'ofit_1_day_1' in f:
                     report_list.append(f.split('_report.json')[0])
         for root, ds, fs in os.walk(DELETED_MODEL_REPORT_PATH):
             for f in fs:
@@ -301,11 +307,11 @@ def get_all_model_report(max_size=0.5, min_size=0):
                     report_list.append(f.split('_report.json')[0])
         model_list = []
         size_list = []
-        need_train_model_list = []
-        # 加载'../model/other/good_model_list.txt'文件中的模型
-        with open(os.path.join(MODEL_OTHER, 'good_model_list.txt'), 'r') as f:
-            for line in f:
-                need_train_model_list.append( os.path.basename(line.strip()))
+        # need_train_model_list = []
+        # # 加载'../model/other/good_model_list.txt'文件中的模型
+        # with open(os.path.join(MODEL_OTHER, 'good_model_list.txt'), 'r') as f:
+        #     for line in f:
+        #         need_train_model_list.append( os.path.basename(line.strip()))
 
 
         for model_path in MODEL_PATH_LIST:
@@ -315,17 +321,19 @@ def get_all_model_report(max_size=0.5, min_size=0):
                     full_name = os.path.join(root, f)
                     if 'train' not in full_name:
                         continue
+                    condition = f.endswith('joblib') and 'interval' in f and 'profit_1_day_1' in f
+                    if not condition:
+                        continue
                     # 获取full_name文件的大小,如果大于4G,则跳过
                     file_size = os.path.getsize(full_name)
                     if file_size > max_size * 1024 ** 2 or file_size < min_size * 1024 ** 2:
                         # print(f"模型 {full_name} 大小超过4G,跳过。")
                         continue
-                    if f.endswith('joblib') and f not in report_list:
-                        model_list.append((full_name, f))
-                        size_list.append(file_size)
+                    model_list.append((full_name, f))
+                    size_list.append(file_size)
 
         # 根据文件大小对索引进行排序
-        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=True)
+        sorted_indices = sorted(range(len(size_list)), key=lambda i: size_list[i], reverse=False)
 
         # 根据排序后的索引重新生成model_list
         sorted_model_list = [model_list[i] for i in sorted_indices]
@@ -338,15 +346,17 @@ def get_all_model_report(max_size=0.5, min_size=0):
         for key, value in temp_dict.items():
             model_list = value
             last_path = key.split('_bad')[0]
-            file_path = f'/mnt/w/project/python_project/a_auto_trade/train_data/{last_path}/bad_0_test.csv'
+            last_file_name = key.split('_bad')[1]
+            # last_file_name = last_file_name.replace('train', 'test')
+            file_path = f'../train_data/{last_path}/bad{last_file_name}.csv'
             start_time = time.time()
             final_data, X_test = load_test_data(file_path)
             print(
                 f"待训练的模型数量: {len(model_list)} 已存在的模型报告数量{len(report_list)} 耗时: {time.time() - start_time:.2f}秒")
-            # file_path = '/mnt/w/project/python_project/a_auto_trade/train_data/all_data.csv'
+            # file_path = '../train_data/all_data.csv'
             for full_name, model_name in model_list:
                 result_dict = get_model_report(full_name, model_name, file_path, final_data, X_test)
         return None
 
 if __name__ == '__main__':
-    get_all_model_report(200, 120)
+    get_all_model_report(100, 50)

@@ -43,7 +43,8 @@ from pandas import DataFrame
 
 from InfoCollector.save_all import save_all_data_mul, get_price, fix_st, save_index_data
 from StrategyExecutor.CommonRandomForestClassifier import load_rf_model, get_all_good_data_with_model_list, \
-    get_all_good_data_with_model_name_list, get_all_good_data_with_model_name_list_new
+    get_all_good_data_with_model_name_list, get_all_good_data_with_model_name_list_new, get_first_good_param, \
+    select_first_code, count_total_sort, get_first_good_param_old, select_first_code_old
 from StrategyExecutor.basic_daily_strategy import clear_other_clo
 from StrategyExecutor.feature_calculation import get_data_feature
 
@@ -2420,19 +2421,153 @@ def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys
                     f.write(code + ',' + str(get_buy_price(price)) + '\n')
                 print("{}耗时：{}".format(name, end - start))
 
-def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
+def gen_first_param_dict(train_data='profit_1_day_1'):
+    good_param_path = f'../final_zuhe/first_param/{train_data}_param_df.csv'
+    good_param_df = pd.read_csv(good_param_path)
+    all_model_info_list_dict_path = f'../final_zuhe/first_param/{train_data}_all_model_info_list.json'
+    all_model_info_list_dict = read_json(all_model_info_list_dict_path)
+    return good_param_df, all_model_info_list_dict
+
+def gen_first_param_dict_old(train_data='profit_1_day_1'):
+    param_dict = {}
+    all_model_info_list_dict = {}
+
+    file_list = []
+    for root, dirs, files in os.walk('../final_zuhe/other'):
+        for file in files:
+            if 'interval' in file and '0531' in file and train_data in file:
+                file_list.append(file)
+    for file in file_list:
+        with open(f'../final_zuhe/other/{file}', 'r') as files:
+            temp_dict = json.load(files)
+            key_name = f'{file.split("interval_")[1].split("_train")[0]}_{file.split("train_thread_")[1].split(".json")[0]}_{train_data}'
+            all_model_info_list_dict[key_name] = temp_dict
+
+    # 获取'../final_zuhe/first_param/0524下的所有json文件
+    for root, dirs, files in os.walk('../final_zuhe/first_param/0524'):
+    # for root, dirs, files in os.walk('../final_zuhe/first_param/profit_1_day_2_0530'):
+        for file in files:
+            # 获取对应的磁盘大小
+            full_path = os.path.join(root, file)
+            file_size = os.path.getsize(full_path) / 1024 / 1024
+            if file.endswith('.csv') and file_size < 100000 and 'thread_day_3' not in file and '8-9' not in file and 'thread_day_3' not in file:
+                key_name = f'{file.split("interval_")[1].split("_train")[0]}_{file.split("train_thread_")[1].split(".json")[0]}_{train_data}'
+                temp_param_dict = {}
+
+                def safe_get_good_param(day_1_day_ratio, day_2_day_ratio, total_days):
+                    try:
+                        good_param = get_first_good_param(
+                            day_1_day_ratio=day_1_day_ratio,
+                            day_2_day_ratio=day_2_day_ratio,
+                            total_days=total_days,
+                            duplicate_rows=False,
+                            remove_false=False,
+                            file_path=f'{root}/{file}'
+                        )
+                        # Only proceed if there are enough rows
+                        if len(good_param) >= 200:
+                            # min_total_days = good_param['total_days'].nlargest(20).iloc[-1]
+                            # 保留前200行
+                            # 将good_param按照total_days降序排列，然后取前200行
+                            good_param = good_param.sort_values('total_days', ascending=False)
+                            good_param = good_param.head(200)
+
+                            # good_param = good_param[good_param['total_days'] >= min_total_days]
+                        else:
+                            min_total_days = good_param['total_days'].min()  # handle case with fewer than 20 rows
+                            good_param = good_param[good_param['total_days'] >= min_total_days]
+                        param_len = len(good_param)
+                        return good_param, param_len
+                    except IndexError as e:
+                        print(
+                            f"Error processing file {file} with ratios {day_1_day_ratio}, {day_2_day_ratio}, days {total_days}: {e}")
+                        return pd.DataFrame(), 0  # return empty DataFrame and length 0
+
+                # First set of parameters
+                good_param, param_len = safe_get_good_param(0.0, 0.05, 0)
+                temp_param_dict[f'{param_len}_{train_data}_0.0_0.05_0'] = good_param
+
+                # Second set of parameters
+                good_param, param_len = safe_get_good_param(0.2, 0.05, 20)
+                temp_param_dict[f'{param_len}_{train_data}_0.2_0.05_20'] = good_param
+
+                param_dict[key_name] = temp_param_dict
+    # 只保留存在param_dict中key的all_model_info_list_dict
+    all_model_info_list_dict = {key: value for key, value in all_model_info_list_dict.items() if key in param_dict}
+    return param_dict, all_model_info_list_dict
+
+def choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict, first_param_dict):
+    try:
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        date_str = f"{all_result_df['日期'].min().strftime('%Y%m%d')}_{all_result_df['日期'].max().strftime('%Y%m%d')}"
+        with open(out_put_path, 'a') as f:
+            f.write('\n\n\n')  # 写入一行空行
+        for model_name, all_model_info_list in all_model_info_list_dict.items():
+            print('开始处理模型：{}'.format(model_name))
+            all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list, process_count=4,
+                                                                              thread_count=4)
+            if all_selected_samples is  None or  all_selected_samples.empty:
+                continue
+
+            # if first_param_dict.get(model_name) is not None:
+            #     good_param_dict = first_param_dict[model_name]
+            #     for key, good_params_df in good_param_dict.items():
+            #         if 'old' in key:
+            #             result_df = select_first_code_old(all_selected_samples, good_params_df)
+            #         else:
+            #             result_df = select_first_code(all_selected_samples, good_params_df)
+            #         result_df = count_total_sort(result_df)
+            #         # 将result_df也写入到out_put_path
+            #         with open(out_put_path, 'a') as f:
+            #             f.write('\n')  # 写入一行空行
+            #             for code, row in result_df.iterrows():
+            #                 f.write('{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{}\n'.format(row['代码'], round(row['收盘'], 2),
+            #                                                                                       round(row['收盘'], 2),
+            #                                                                                       round(row['收盘'], 2),
+            #                                                                                       row['rf_select_count'],
+            #                                                                                       row['total_rank'], key, model_name,
+            #                                                                                       row['名称'],
+            #                                                                                       current_time))
+
+            if all_selected_samples is not None and not all_selected_samples.empty:
+                # 打印all_selected_samples的 code 收盘价
+                # # 筛选出数量大于等于2的条目
+                # all_selected_samples = selected_samples_with_count[selected_samples_with_count['选中数量'] >= 2]
+                # 处理合并后的DataFrame
+                # 过滤all_selected_samples中cha_zhi大于0的数据
+                output_file_path = f'../temp/day1_data/second_all_selected_samples_{date_str}_{model_name}.csv'
+                all_selected_samples.to_csv(output_file_path, index=False)
+                if 'day3' not in model_name:
+                    all_selected_samples = all_selected_samples[all_selected_samples['cha_thread'] >= 0]
+                grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
+                                                                   current_price=('current_price', 'min'),
+                                                                   name=('名称', 'first'),
+                                                                   count=('code', 'count'))
+                # 按照数量降序排列
+                grouped = grouped.sort_values(by='count', ascending=False)
+                # 将结果保存到out_put_path
+                with open(out_put_path, 'a') as f:
+                    f.write('\n')  # 写入一行空行
+                    for code, row in grouped.iterrows():
+                        f.write('{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{}\n'.format(code, row['min_close'],
+                                                                                              row['max_close'],
+                                                                                              row['current_price'],
+                                                                                              row['count'], model_name,
+                                                                                              row['name'],
+                                                                                              current_time))
+
+
+    except Exception as e:
+        traceback.print_exc()
+        print('处理文件失败：{}'.format(e))
+
+def save_and_analyse_all_data_RF_real_time_thread_new(target_date, param_dict, all_model_info_list_dict, date_str_hour):
     """
     多线程拉取最新数据并且分析出结果
     :return:
     """
     start = time.time()
     out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
-    with open('../final_zuhe/other/all_data.json', 'r') as file:
-    # with open('../final_zuhe/other/good_all_model_reports_cuml_all.json', 'r') as file:
-        model_info_list = json.load(file)
-    # # 筛选出model_size在0.08到0.2之间的模型
-    all_model_info_list = model_info_list
-
     stock_data_df = ak.stock_zh_a_spot_em()
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
@@ -2444,11 +2579,6 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
 
     # 筛选出满足条件的股票数据
     filtered_stock_data_df = stock_data_df[~stock_data_df['代码'].isin(new_exclude_code_set)]
-
-    # 保留filtered_stock_data_df的后100个数据
-    # filtered_stock_data_df = filtered_stock_data_df
-    # all_rf_model_list = load_rf_model(MODEL_PATH)
-    plus_threshold = 50
 
     # 将满足条件的DataFrame分成100个子列表
     stock_data_lists = np.array_split(filtered_stock_data_df, 96)
@@ -2471,33 +2601,11 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date):
     # 保存合并后的DataFrame到文件
     all_result_df.to_csv(output_file_path, index=False)
     print('待处理的数据量：{} 更新数据耗时{}'.format(len(all_result_df), time.time() - start))
-
-    try:
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list, process_count=4,
-                                                                          thread_count=4)
-        if all_selected_samples is not None and not all_selected_samples.empty:
-            # 打印all_selected_samples的 code 收盘价
-            # # 筛选出数量大于等于2的条目
-            # all_selected_samples = selected_samples_with_count[selected_samples_with_count['选中数量'] >= 2]
-            # 处理合并后的DataFrame
-            grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
-                                                               current_price=('current_price', 'min'),
-                                                               count=('code', 'count'))
-            # 按照数量降序排列
-            grouped = grouped.sort_values(by='count', ascending=False)
-            # 将结果保存到out_put_path
-            with open(out_put_path, 'a') as f:
-                f.write('\n')  # 写入一行空行
-                for code, row in grouped.iterrows():
-                    f.write('{}, {}, {}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'],
-                                                              row['current_price'], row['count'], current_time))
-                    # print(
-                    #     '{}, {}, {}, {}, {}, {}'.format(code, row['min_close'], row['max_close'], row['current_price'],
-                    #                                     row['count'], current_time))
-
-    except Exception as e:
-        print('处理文件失败：{}'.format(e))
+    # choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict, param_dict)
+    output_file_path = f'../temp/day1_data/second_all_selected_samples_{target_date}.csv'
+    all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict, date_str_hour,
+                                                                      process_count=5,
+                                                                      thread_count=4, output_file_path=output_file_path)
 
     end = time.time()
     print(f'处理完成，耗时：{end - start}秒')
@@ -3468,10 +3576,6 @@ def get_RF_real_time_price(file_path, target_date, all_rf_model_list):
     all_selected_samples = get_all_good_data_with_model_list(result_df, all_rf_model_list)
     return all_selected_samples
 
-def save_and_analyse_all_data_mul_real_time_RF(target_date):
-    save_and_analyse_all_data_RF_real_time_thread_new(target_date)
-    # save_and_analyse_all_data_RF_real_time_thread(target_date)
-
 
 def fix_RF_data(file_path='../final_zuhe/min_data/2024-01-02_RF_target_thread.csv'):
     target_date = file_path.split('/')[-1].split('_')[0]
@@ -3624,7 +3728,7 @@ if __name__ == '__main__':
     # # 应用数据类型转换
     # data_downcasted = downcast_dtypes(data)
     #
-    # # 计算转换后的内存占用
+    # # 计算转换后的内存占用fe
     # memory_after = data_downcasted.memory_usage(deep=True).sum()
     # print(f"转换后的内存占用: {memory_after} bytes")
     #
@@ -3635,11 +3739,38 @@ if __name__ == '__main__':
     # get_all_data_perfomance()
     # gen_all_back()
     # load_all_data_performance()
-    date_list = [
-                 '2024-04-15', '2024-04-16', '2024-04-17', '2024-04-18', '2024-04-19']
-    while True:
-        for date in date_list:
-            save_and_analyse_all_data_mul_real_time_RF('2024-05-06')
+    # date_list = ['2024-06-07', '2024-06-06', '2024-06-05', '2024-06-04', '2024-06-03', '2024-05-31', '2024-05-30', '2024-05-29', '2024-05-28', '2024-05-27']
+    # 延时100s
+    # time.sleep(15000)
+    # date_list = ['2024-06-13', '2024-06-12', '2024-06-11', '2024-06-07', '2024-06-06', '2024-06-05', '2024-06-04', '2024-06-03']
+    date_list = ['2025-01-02']
+
+    # data = low_memory_load('../final_zuhe/other/2024_data_2024_simple.csv')
+    # # 获取data中的所有不重复的日期
+    # date_list = data['日期'].unique()
+    # # 将date_list转换为list类型
+    # date_list = date_list.tolist()
+    # # 删除后50个数据
+    # # date_list = date_list[:-30]
+    # # 筛选出date_list包含2024-05的日期
+    # # date_list = [date for date in date_list if '2024-06' not in str(date)]
+
+    train_data = 'profit_1_day_1'
+    date_list.reverse()
+    param_dict1, all_model_info_list_dict1 = gen_first_param_dict(train_data=train_data)
+    param_dict2, all_model_info_list_dict2 = gen_first_param_dict(train_data='profit_1_day_2')
+    # while True:
+    for date in date_list:
+        date_str_hour = str(time.strftime('%H:%M:%S', time.localtime()))
+        save_and_analyse_all_data_RF_real_time_thread_new(date, param_dict1, all_model_info_list_dict1, date_str_hour)
+        output_file_path = '../final_zuhe/real_time/select_RF_{}_real_time.csv'.format(date)
+        all_result_df = pd.read_csv(output_file_path, low_memory=False, dtype={'代码': str})
+        all_result_df['日期'] = pd.to_datetime(all_result_df['日期'])
+        output_file_path = f'../temp/day2_data/second_all_selected_samples_{date}.csv'
+        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict2, date_str_hour,
+                                                                          process_count=5,
+                                                                          thread_count=4,
+                                                                          output_file_path=output_file_path)
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')

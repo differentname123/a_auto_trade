@@ -574,17 +574,30 @@ def get_all_data_performance():
 
     # 分析每组（每天）的数据表现
     performance_results = {}
+    pre_date_str = ''
+    next_profit = 0
     for date, group in grouped_data:
         date_str = date.strftime('%Y-%m-%d')  # 格式化日期为字符串
         performance = analyze_data_performance(group)
         performance_results[date_str] = performance
+        # 如果pre_date_str在grouped_data中
+        if pre_date_str in performance_results.keys():
+            # 计算前一天的上涨比例
+            rise_rate = performance_results[date_str]['上涨比例']
+            performance_results[pre_date_str]['下一天上涨比例'] = rise_rate
+        performance_results[date_str]['后续0日1成功率'] = next_profit
+
+        pre_date_str = date_str
+        next_profit = performance_results[date_str]['后续1日1成功率']
+    performance_results[date_str]['下一天上涨比例'] = 0
+
 
     # 保存分析结果到JSON文件
     results_file_path = '../final_zuhe/other/2024_all_data_performance.json'
     write_json(results_file_path, performance_results)
     print(f'所有数据的表现分析已保存到 {results_file_path}')
 
-def analyze_data_performance(data, min_profit_list=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]):
+def analyze_data_performance(data, min_profit_list=[0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]):
     """
     分析给定数据的表现情况。3天内的成功率
     :param data:
@@ -596,6 +609,9 @@ def analyze_data_performance(data, min_profit_list=[1, 2, 3, 4, 5, 6, 7, 8, 9, 1
             key_name = '后续{}日最高价利润率'.format(days)
             success_rate = (data[key_name]).ge(min_profit).mean()
             result[f'后续{days}日{min_profit}成功率'] = success_rate
+            # 增加上涨个数比例
+    rise_rate = (data['涨跌幅'] > 0).mean()
+    result['上涨比例'] = rise_rate
     return result
 
 def generate_features_for_file(file_path, save_path):
@@ -952,21 +968,75 @@ def update_2024_data():
     all_data_df = load_and_merge_data(all_files)
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
     all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    key_signal_columns = [column for column in all_data_df_2024.columns if '后续' in column]
+    key_signal_columns.append('涨跌幅')
+    key_signal_columns.extend(['日期', '代码'])
+    final_data = all_data_df_2024[key_signal_columns]
+    # 将data写入'../final_zuhe/other/2024_data_2024_simple.json'
+    final_data.to_csv('../final_zuhe/other/2024_data_2024_simple.csv', index=False)
     all_data_df_2024.to_csv('../train_data/2024_data_2024.csv', index=False)
     get_all_data_performance()
 
-    compare_origin_selected_samples = low_memory_load('../train_data/2024_data.csv')
-    compare_origin_selected_samples = compare_origin_selected_samples[
-        compare_origin_selected_samples.columns.drop(list(compare_origin_selected_samples.filter(regex='信号')))]
-    compare_origin_selected_samples1 = low_memory_load('../train_data/2024_data_2024.csv')
-    compare_origin_selected_samples1 = compare_origin_selected_samples1[
-        compare_origin_selected_samples1.columns.drop(list(compare_origin_selected_samples1.filter(regex='信号')))]
-    # 合并compare_origin_selected_samples和compare_origin_selected_samples1，删除重复的数据
-    compare_origin_selected_samples = pd.concat([compare_origin_selected_samples, compare_origin_selected_samples1], ignore_index=True)
-    compare_origin_selected_samples.to_csv('../train_data/full_2024_compare.csv', index=False)
+    # compare_origin_selected_samples = low_memory_load('../train_data/2024_data.csv')
+    # compare_origin_selected_samples = compare_origin_selected_samples[
+    #     compare_origin_selected_samples.columns.drop(list(compare_origin_selected_samples.filter(regex='信号')))]
+    # compare_origin_selected_samples1 = low_memory_load('../train_data/2024_data_2024.csv')
+    # compare_origin_selected_samples1 = compare_origin_selected_samples1[
+    #     compare_origin_selected_samples1.columns.drop(list(compare_origin_selected_samples1.filter(regex='信号')))]
+    # # 合并compare_origin_selected_samples和compare_origin_selected_samples1，删除重复的数据
+    # compare_origin_selected_samples = pd.concat([compare_origin_selected_samples, compare_origin_selected_samples1], ignore_index=True)
+    # compare_origin_selected_samples.to_csv('../train_data/full_2024_compare.csv', index=False)
+
+def update_2024_data_simple():
+    """
+    更新2024年的数据
+    :return:
+    """
+    start_time = time.time()
+    save_path = '../daily_data_exclude_new_can_buy'
+    # 删除source_path和save_path下的所有文件
+    for root, _, files in os.walk(save_path):
+        for file in files:
+            os.remove(os.path.join(root, file))
+    for root, _, files in os.walk(save_path):
+        for file in files:
+            os.remove(os.path.join(root, file))
+
+    save_all_data_mul()
+
+
+    print(f'开始加载所有数据 耗时：{time.time() - start_time:.2f}秒')
+    # 生成相应的数据
+    file_path = '../daily_data_exclude_new_can_buy'
+    # 获取目录下所有文件的完整路径
+    all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    all_data_df = load_and_merge_data(all_files)
+    print(f'加载所有数据 耗时：{time.time() - start_time:.2f}秒')
+    all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
+    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    key_signal_columns = [column for column in all_data_df_2024.columns if '后续' in column]
+    key_signal_columns.append('涨跌幅')
+    key_signal_columns.extend(['日期', '代码'])
+    key_signal_columns.extend(['换手率'])
+    final_data = all_data_df_2024[key_signal_columns]
+    # 将data写入'../final_zuhe/other/2024_data_2024_simple.json'
+    final_data.to_csv('../final_zuhe/other/2024_data_2024_simple.csv', index=False)
+    all_data_df_2024.to_csv('../train_data/2024_data_2024.csv', index=False)
+    get_all_data_performance()
+    print(f'加载所有数据 耗时：{time.time() - start_time:.2f}秒')
+
+    # compare_origin_selected_samples = low_memory_load('../train_data/2024_data.csv')
+    # compare_origin_selected_samples = compare_origin_selected_samples[
+    #     compare_origin_selected_samples.columns.drop(list(compare_origin_selected_samples.filter(regex='信号')))]
+    # compare_origin_selected_samples1 = low_memory_load('../train_data/2024_data_2024.csv')
+    # compare_origin_selected_samples1 = compare_origin_selected_samples1[
+    #     compare_origin_selected_samples1.columns.drop(list(compare_origin_selected_samples1.filter(regex='信号')))]
+    # # 合并compare_origin_selected_samples和compare_origin_selected_samples1，删除重复的数据
+    # compare_origin_selected_samples = pd.concat([compare_origin_selected_samples, compare_origin_selected_samples1], ignore_index=True)
+    # compare_origin_selected_samples.to_csv('../train_data/full_2024_compare.csv', index=False)
 
 if __name__ == '__main__':
-    update_2024_data()
+    update_2024_data_simple()
     # get_all_data_performance()
 
     # test()

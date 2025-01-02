@@ -832,17 +832,20 @@ def sort_new():
     for root, ds, fs in os.walk(file_path):
         for f in fs:
             if f.endswith('.json'):
+                if 'interval_7-8' not in f or 'profit_1_day_1' not in f:
+                    continue
                 # f = 'RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.4_thread_day_1_true_ratio_0.3107309813750629_max_depth_100_min_samples_leaf_1_min_samples_split_2_n_estimators_600.joblib_report.json'
                 fullname = os.path.join(root, f)
                 # fullname = '../model/reports/RandomForest_origin_data_path_dir_profit_1_day_1_bad_0.3_thread_day_1_true_ratio_0.2236552287808054_max_depth_400_min_samples_leaf_3_min_samples_split_2_n_estimators_250.joblib_report.json'
-                with open(fullname, 'r') as file:
+                with (open(fullname, 'r') as file):
                     try:
                         result_dict = json.load(file)
                         for model_name, report_value in result_dict.items():
-                            # if 'profit_1' not in model_name or 'thread_day_2' not in model_name:
-                            #     continue
-                            if len(report_value.keys()) != 2:
+                            temp_good_model_list = []
+
+                            if len(report_value.keys()) < 2:
                                 continue
+                            null_flag = False
                             for test_data_path, detail_report in report_value.items():
                                 if '.csv' in test_data_path:
                                     temp_dict = {}
@@ -862,12 +865,15 @@ def sort_new():
                                         result_list = deal_reports(report_list, sort_key=sort_key, sort_key2=sort_key2)
                                         # 获取result_list中每个元素的abs_threshold，和precision，生成一个新的dict
                                         precision_dict = {}
-                                        for result in report_list:
-                                            temp_abs_threshold = round(result['abs_threshold'], 2)
-                                            temp_precision = result['precision']
-                                            precision_dict[temp_abs_threshold] = temp_precision
+                                        # for result in report_list:
+                                        #     temp_abs_threshold = round(result['abs_threshold'], 2)
+                                        #     temp_precision = result['precision']
+                                        #     precision_dict[temp_abs_threshold] = temp_precision
 
                                         if result_list:
+                                            if result_list[0]['date_count'] <= 0:
+                                                null_flag = True
+                                                break
                                             if result_list[0][sort_key] > max_score:
                                                 max_score = result_list[0][sort_key]
                                                 date_count = result_list[0]['date_count']
@@ -876,6 +882,11 @@ def sort_new():
                                                 min_day = result_list[0]['min_day']
                                                 true_stocks_set = result_list[0]['true_stocks_set']
                                                 max_false_count = result_list[0]['max_false_count']
+                                        else:
+                                            null_flag = True
+                                            break
+                                    if null_flag:
+                                        break
                                     temp_dict['test_data_path'] = test_data_path
                                     temp_dict['max_score'] = max_score
                                     temp_dict['date_count'] = date_count
@@ -886,13 +897,15 @@ def sort_new():
                                     temp_dict['max_false_count'] = max_false_count
                                     temp_dict['precision_dict'] = precision_dict
                                     temp_dict['model_size'] = model_size
-                                    good_model_list.append(temp_dict)
+                                    temp_good_model_list.append(temp_dict)
+                            if not null_flag:
+                                good_model_list.extend(temp_good_model_list)
                     except Exception as e:
                         print(f"处理文件 {fullname} 时出现异常: {e}")
                         traceback.print_exc()
                         pass
     # 将good_model_list先按照date_count降序排序再按照max_score降序排序
-    good_model_list = sorted(good_model_list, key=lambda x: (-x['abs_threshold'], x['date_count']), reverse=True) # 10个好的 最大46
+    good_model_list = sorted(good_model_list, key=lambda x: (-x['date_count']), reverse=True) # 10个好的 最大46
     print(f"good_model_list的长度为{len(good_model_list)}")
     with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'w') as outfile:
         json.dump(good_model_list, outfile, indent=4)
@@ -915,15 +928,32 @@ def move_model_report(model_name_list):
 
 
 def delete_bad_model():
-    with open('/mnt/w/project/python_project/a_auto_trade/final_zuhe/other/all_model_reports_cuml.json', 'r') as file:
-        all_model_reports = json.load(file)
     model_name_list = []
-    all_rf_model_list = load_rf_model_new(0, False)
-    good_model_name = [model['model_name'] for model in all_rf_model_list]
-    for model in all_model_reports:
-        if model['model_name'] not in good_model_name:
-            model_name_list.append(model['model_name'])
-    delete_model(model_name_list)
+    # 获取'../temp/back_model'下的所有文件
+    need_keep_model_list = []
+    keep_model_list = []
+    for root, ds, fs in os.walk('../temp/back_model'):
+        for f in fs:
+            if f.endswith('.joblib'):
+                need_keep_model_list.append(f)
+    for model_path in MODEL_PATH_LIST:
+        # 获取所有模型的文件名
+        for root, ds, fs in os.walk(model_path):
+            for f in fs:
+                full_name = os.path.join(root, f)
+                if 'train' not in full_name:
+                    continue
+                condition = f.endswith('joblib')
+                if not condition:
+                    continue
+                if f not in need_keep_model_list:
+                    model_name_list.append(full_name)
+                else:
+                    keep_model_list.append(full_name)
+    # 将model_name_list中的模型报告文件删除
+    for model_path in model_name_list:
+        # 删除模型文件
+        os.remove(model_path)
     # move_model_report(model_name_list)
 
 def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
@@ -987,7 +1017,7 @@ def find_small_abs(thread_count=100, need_filter=True, abs_threshold=1):
 if __name__ == '__main__':
     # find_small_abs()
     sort_new()
-    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=200, model_min_size=0, abs_threshold=1) # 0:162
+    all_rf_model_list = load_rf_model_new(0, True, need_balance=False, model_max_size=5000, model_min_size=0, abs_threshold=1) # 0:162
     # delete_bad_model()
 
     # model_max_size_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,1,2,3,5,10]

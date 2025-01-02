@@ -8,10 +8,10 @@
 :description:
     通用的一些关于随机森林模型的代码
 """
-from collections import Counter
+
 
 import os
-from datetime import datetime
+
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第二张GPU，索引从0开始
 import random
@@ -19,9 +19,10 @@ import sys
 import psutil
 import gc  # 引入垃圾回收模块
 from functools import partial
-
+import tracemalloc
+from collections import Counter
 import concurrent.futures
-
+from datetime import datetime
 import json
 import multiprocessing
 
@@ -37,18 +38,16 @@ from imblearn.over_sampling import SMOTE
 from joblib import dump, load
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from feature_calculation import update_2024_data
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from StrategyExecutor.common import low_memory_load
 
 D_MODEL_PATH = '/mnt/d/model/all_models/'
 G_MODEL_PATH = '/mnt/g/model/all_models/'
+F_MODEL_PATH = '/mnt/f/model/all_models/'
 MODEL_PATH = '/mnt/w/project/python_project/a_auto_trade/model/all_models'
-MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH]
+MODEL_PATH_LIST = [D_MODEL_PATH, G_MODEL_PATH, MODEL_PATH, F_MODEL_PATH]
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
 
@@ -273,7 +272,7 @@ def get_all_train_data(model_name_list):
     """
     all_train_data = []
     for model_name in model_name_list:
-        all_train_data.append(model_name.split('origin_data_path_dir_')[1].split('_bad_0_train')[0])
+        all_train_data.append(model_name.split('origin_data_path_dir_')[1].split('_train_thread_day')[0])
     return list(set(all_train_data))
 
 def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=False, model_max_size=10000000,
@@ -303,14 +302,14 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
         # 获取所有的模型名称
         model_name_list = [sorted_scores['model_name'] for sorted_scores in sorted_scores_list]
         train_data_list = get_all_train_data(model_name_list)
-        train_data_list.append('all')
-        thread_day_list = ['train_thread_day_2', 'train_thread_day_1', 'all']
+        # train_data_list.append('all')
+        thread_day_list = ['train_thread_day_1', 'train_thread_day_2']
         # 将sorted_scores_list转换成dataframe然后按照model_name分组
         df = pd.DataFrame(sorted_scores_list)
         temp_df = df.copy()
         for train_data in train_data_list:
             for thread_day in thread_day_list:
-                final_output_filename = f'../final_zuhe/other/new_good_all_model_reports_cuml_{train_data}_{thread_day}.json'
+                final_output_filename = f'../final_zuhe/other/new_good_all_model_reports_cuml_{train_data}_{thread_day}_0631.json'
                 exist_stocks = set()
                 all_rf_model_list = []
                 if thread_day == 'all':
@@ -329,6 +328,10 @@ def load_rf_model_new(date_count_threshold=100, need_filter=True, need_balance=F
                     # 如果sorted_scores存在date_count为0的情况，直接跳过
                     if sorted_scores['date_count'].min() == 0:
                         print(f"模型 {model_name} 的date_count为0，跳过。")
+                        continue
+                    # 如果sorted_scores长度为1，直接跳过
+                    if len(sorted_scores) < 2:
+                        print(f"模型 {model_name} 的长度为{len(sorted_scores)}，跳过。")
                         continue
                     # 获取abs_threshold最大的那行数据
                     sorted_scores = sorted_scores.sort_values(by='abs_threshold', ascending=False)
@@ -548,6 +551,7 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, min_day=0, abs_threshold=0):
         for cha in range(10, 11):
             cha = cha / 100
             threshold = abs_threshold - cha
+            # threshold = 0.0
             high_confidence_true = (y_pred_proba[1] >= threshold)
             predicted_true_samples = np.sum(high_confidence_true)
             # 如果有高于阈值的预测样本，打印对应的原始数据
@@ -557,6 +561,7 @@ def get_thread_data_new_tree_0(y_pred_proba, X1, min_day=0, abs_threshold=0):
                 if debug:
                     # 将对应的预测概率添加到selected_samples中
                     selected_samples.loc[:, 'cha_thread'] = y_pred_proba[high_confidence_true][1] - abs_threshold
+                    selected_samples.loc[:, 'thread'] = y_pred_proba[high_confidence_true][1]
                 # 统计selected_samples中 收盘 的和
                 result_list.append(selected_samples)
         if len(result_list) > 0:
@@ -608,6 +613,7 @@ def process_model_new(rf_model_map, data):
         if selected_samples is not None:
             selected_samples['date_count'] = value['date_count']
             selected_samples['model_name'] = model_name
+            selected_samples['key_name'] = model_name.split('data_path_dir_')[1].split('ratio')[0] + model_name.split('interval_')[1].split('_true_ratio')[0]
             all_selected_samples_list.append(selected_samples)
             selected_samples_size = selected_samples.shape[0]
 
@@ -779,7 +785,7 @@ def get_all_good_data_with_model_name_list_new_pre(data, all_model_info_list, da
     return all_selected_samples
 
 
-def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_count_threshold=50,
+def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_str_hour, date_count_threshold=50,
                                                process_count=1, thread_count=1, output_file_path=None):
     """
     使用多进程加上多线程的方式获取all_model_info_list中模型的预测结果，最后将满足条件的数据合并保持
@@ -795,7 +801,7 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
     date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
     start = time.time()
     if output_file_path is None:
-        output_file_path = f'../temp/data/second_all_selected_samples_{date_str}.csv'
+        output_file_path = f'../temp/data/second_all_selected_samples_{date_str}_all_all_2024.csv'
     # 将all_model_info_list按照model_path分类，包含‘/mnt/w’的为一类，其余为一类
     all_model_info_list_w = [model_info for model_info in all_model_info_list if '/mnt/w' in model_info['model_path']]
     all_model_info_list_other = [model_info for model_info in all_model_info_list if
@@ -833,6 +839,7 @@ def get_all_good_data_with_model_name_list_new(data, all_model_info_list, date_c
         concurrent.futures.wait(futures)
 
     all_selected_samples = pd.concat(result_list, ignore_index=True) if result_list else pd.DataFrame()
+    all_selected_samples['date_str_hour'] = date_str_hour
     all_selected_samples.to_csv(output_file_path, index=False)
     # mul_select(output_path)
     print(f"总耗时 {time.time() - start}")
@@ -1135,58 +1142,56 @@ def get_thread():
                 data_list.append(result)
 
 
-def statistic_select_data(data, profit_col_1='后续1日最高价利润率', profit_col_2='后续2日最高价利润率', threshold=1):
-    """统计data中指定两个profit列小于给定阈值的数量、天数及其比例,并返回对应的具体选择情况。
+def statistic_select_data(data, profit_cols=['后续1日最高价利润率', '后续2日最高价利润率'], thresholds=[1, 2, 3, 4]):
+    """统计data中指定多个profit列在多个阈值下的数量、天数及其比例,并返回对应的具体选择情况。
 
     Args:
         data (DataFrame): 输入的数据。
-        profit_col_1 (str): 第一个profit列的名称。
-        profit_col_2 (str): 第二个profit列的名称。
-        threshold (float): 阈值,用于比较profit列。
+        profit_cols (list of str): profit列的名称列表。
+        thresholds (list of float): 阈值列表,用于比较profit列。
 
     Returns:
         dict: 包含统计结果和具体选择情况的字典。
     """
-    # 计算第一个profit列相关数据
-    profit_1_less_than_threshold = data[data[profit_col_1] < threshold]
-    profit_1_less_than_threshold_count = profit_1_less_than_threshold.shape[0]
-    profit_1_less_than_threshold_days = profit_1_less_than_threshold['日期'].nunique()
-    profit_1_less_than_threshold_count_ratio = profit_1_less_than_threshold_count / data.shape[0] if data.shape[0] != 0 else 0
-    profit_1_less_than_threshold_days_ratio = profit_1_less_than_threshold_days / data['日期'].nunique() if data['日期'].nunique() != 0 else 0
-    profit_1_less_than_threshold_count_date_list = profit_1_less_than_threshold[['日期', '代码']].apply(lambda x: f"{x['日期']}_{x['代码']}", axis=1).tolist()
-    profit_1_less_than_threshold_day_date_list = profit_1_less_than_threshold[['日期', '代码']].drop_duplicates('日期').apply(lambda x: f"{x['日期']}_{x['代码']}", axis=1).tolist()
+    data = data.copy()
+    result_dict = {}
 
-    # 计算第二个profit列相关数据
-    profit_2_less_than_threshold = data[data[profit_col_2] < threshold]
-    profit_2_less_than_threshold_count = profit_2_less_than_threshold.shape[0]
-    profit_2_less_than_threshold_days = profit_2_less_than_threshold['日期'].nunique()
-    profit_2_less_than_threshold_count_ratio = profit_2_less_than_threshold_count / data.shape[0] if data.shape[0] != 0 else 0
-    profit_2_less_than_threshold_days_ratio = profit_2_less_than_threshold_days / data['日期'].nunique() if data['日期'].nunique() != 0 else 0
-    profit_2_less_than_threshold_count_date_list = profit_2_less_than_threshold[['日期', '代码']].apply(lambda x: f"{x['日期']}_{x['代码']}", axis=1).tolist()
-    profit_2_less_than_threshold_day_date_list = profit_2_less_than_threshold[['日期', '代码']].drop_duplicates('日期').apply(lambda x: f"{x['日期']}_{x['代码']}", axis=1).tolist()
+    # 计算总数和日期
+    total_count = data.shape[0]
+    total_days = data['日期'].nunique()
 
     # 计算total_count_date_list
-    total_count_date_list = data[['日期', '代码']].apply(lambda x: f"{x['日期']}_{x['代码']}", axis=1).tolist()
+    data['日期_代码'] = data['日期'].astype(str) + '_' + data['代码'].astype(str)
+    total_count_date_list = ','.join(sorted(data['日期_代码'].tolist()))
 
-    # 组装结果
-    result_dict = {
-        'day_2_count': profit_2_less_than_threshold_count,
-        'day_2_day': profit_2_less_than_threshold_days,
-        'day_2_count_ratio': profit_2_less_than_threshold_count_ratio,
-        'day_2_day_ratio': profit_2_less_than_threshold_days_ratio,
-        'day_2_count_date_list': ','.join(sorted(profit_2_less_than_threshold_count_date_list)),
-        'day_2_day_date_list': ','.join(sorted(profit_2_less_than_threshold_day_date_list)),
-        'day_1_count': profit_1_less_than_threshold_count,
-        'day_1_day': profit_1_less_than_threshold_days,
-        'day_1_count_ratio': profit_1_less_than_threshold_count_ratio,
-        'day_1_day_ratio': profit_1_less_than_threshold_days_ratio,
-        'day_1_count_date_list': ','.join(sorted(profit_1_less_than_threshold_count_date_list)),
-        'day_1_day_date_list': ','.join(sorted(profit_1_less_than_threshold_day_date_list)),
-        'total_count': data.shape[0],
-        'total_days': data['日期'].nunique(),
-        'total_count_date_list': ','.join(sorted(total_count_date_list))
-    }
+    # 组装总体结果
+    result_dict['total_count'] = total_count
+    result_dict['total_days'] = total_days
+    result_dict['total_count_date_list'] = total_count_date_list
 
+    for profit_col in profit_cols:
+        profit_key = 'day_1' if profit_col == '后续1日最高价利润率' else 'day_2'
+        for threshold in thresholds:
+            # 计算当前profit列和阈值的相关数据
+            profit_less_than_threshold = data[data[profit_col] < threshold]
+            profit_less_than_threshold_count = profit_less_than_threshold.shape[0]
+            profit_less_than_threshold_days = profit_less_than_threshold['日期'].nunique()
+            profit_less_than_threshold_count_ratio = profit_less_than_threshold_count / total_count if total_count != 0 else 0
+            profit_less_than_threshold_days_ratio = profit_less_than_threshold_days / total_days if total_days != 0 else 0
+
+            # 生成字段名称
+            col_prefix = f"{profit_key}_profit_{threshold}"
+
+            # 组装结果
+            result_dict[f'{col_prefix}_count'] = profit_less_than_threshold_count
+            result_dict[f'{col_prefix}_day'] = profit_less_than_threshold_days
+            result_dict[f'{col_prefix}_count_ratio'] = round(profit_less_than_threshold_count_ratio, 4)
+            result_dict[f'{col_prefix}_day_ratio'] = round(profit_less_than_threshold_days_ratio, 4)
+            result_dict[f'{col_prefix}_count_date_list'] = ','.join(sorted(profit_less_than_threshold['日期_代码'].tolist()))
+            result_dict[f'{col_prefix}_day_date_list'] = ','.join(sorted(profit_less_than_threshold.drop_duplicates('日期')['日期_代码'].tolist()))
+    # 删除临时列
+    data.drop('日期_代码', axis=1, inplace=True)
+    del data
     return result_dict
 
 def remove_single_code_days(data):
@@ -1612,6 +1617,66 @@ def filter_duplicated_date_code(data):
     data = data.drop_duplicates(subset=['日期', '代码'])
     return data
 
+def analyse_first_abs_thread_select(all_selected_samples, output_filename_path, param_dict):
+
+    if all_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
+    # 获取origin_selected_samples的所有不重复cha_thread，保留两位小数
+    abs_thread_list = all_selected_samples['thread'].tolist()
+    abs_thread_list = [round(thread, 2) for thread in abs_thread_list]
+    abs_thread_list = list(set(abs_thread_list))
+    abs_thread_list.sort()
+    # 如果output_filename_path存在，直接返回
+    if os.path.exists(output_filename_path):
+        print(f"文件 {output_filename_path} 已存在")
+        return
+    print(f"开始分析第一层参数abs_thread all 当前时间{datetime.now()} {all_selected_samples.shape[0]} {abs_thread_list}")
+    abs_thread_result_list = []
+    # 将all_selected_samples按照日期分组
+    for abs_thread in abs_thread_list:
+        # print(f"开始分析第一层参数abs_thread 当前时间{datetime.now()} abs_thread{abs_thread} {all_selected_samples.shape[0]}")
+        # tracemalloc.start()
+
+        more_selected_samples = all_selected_samples[all_selected_samples['thread'] >= abs_thread]
+        less_selected_samples = all_selected_samples[all_selected_samples['thread'] < abs_thread]
+        abs_thread_output_filename_path = os.path.join(output_filename_path, str(abs_thread) + '_abs_thread_more')
+        param_dict['abs_thread'] = abs_thread
+        param_dict['is_abs_thread_more'] = True
+        more_result_df = analyse_first_min_count_select(more_selected_samples, abs_thread_output_filename_path, param_dict)
+        abs_thread_output_filename_path = os.path.join(output_filename_path, str(abs_thread) + '_abs_thread_less')
+        param_dict['is_abs_thread_more'] = False
+        less_result_df = analyse_first_min_count_select(less_selected_samples, abs_thread_output_filename_path, param_dict)
+        abs_thread_result_list.append(pd.concat([more_result_df, less_result_df]))
+
+        # # 获取当前的内存快照
+        # snapshot = tracemalloc.take_snapshot()
+        # top_stats = snapshot.statistics('lineno')
+        #
+        # print("[ Top 10 memory usage ]")
+        # for stat in top_stats[:10]:
+        #     print(stat)
+    if len(abs_thread_result_list) > 0:
+        result_df = pd.concat(abs_thread_result_list)
+        if 'total_count' in result_df.columns:
+            result_df = result_df[result_df['total_days'] > 0]
+            result_df = result_df[result_df['day_2_profit_1_count_ratio'] <= 0.1]
+            result_df = remove_duplicate_rows(result_df)
+            # # 遍历param_dict，将param_dict的值添加到result_df中
+            # for key, value in param_dict.items():
+            #     result_df[key] = value
+            if result_df.shape[0] > 0:
+                # 判断output_filename_path路径是否存在，不存在则创建
+                if not os.path.exists(output_filename_path):
+                    os.makedirs(output_filename_path)
+                abs_thread_output_filename_path = os.path.join(output_filename_path, 'abs_thread.csv')
+                result_df.to_csv(abs_thread_output_filename_path, index=False)
+                print(f"保存文件 {abs_thread_output_filename_path}")
+        else:
+            print(f'total_count not in columns{result_df} {all_selected_samples}')
+
+
+
 def analyse_first_min_count_select(all_selected_samples, output_filename_path, param_dict):
     """
     分析出第一层的选择数据，all_selected_samples为模型组 cha date_count筛选后的数据，返回结果会加上min_count限制和选择的方法限制（选择最高的 选择大于min_count的 选择单数据的 选择多数据的）
@@ -1619,7 +1684,7 @@ def analyse_first_min_count_select(all_selected_samples, output_filename_path, p
     :return:
     """
     if all_selected_samples.shape[0] == 0:
-        print(f'all_selected_samples is empty {all_selected_samples}')
+        # print(f'all_selected_samples is empty {all_selected_samples}')
         return pd.DataFrame()
     result_list = []
     origin_grouped = all_selected_samples.groupby(['日期', '代码']).agg(rf_select_count=('代码', 'count'), min_close=('收盘', 'first'), 后续1日最高价利润率=('后续1日最高价利润率', 'mean'), 后续2日最高价利润率=('后续2日最高价利润率', 'mean'))
@@ -1629,14 +1694,15 @@ def analyse_first_min_count_select(all_selected_samples, output_filename_path, p
     min_count_list = list(set(count_list))
     min_count_list = split_list(min_count_list, 100)
     min_count_list.sort()
-    # 如果output_filename_path存在，直接返回
-    if os.path.exists(output_filename_path):
-        return
-    # 判断output_filename_path路径是否存在，不存在则创建
-    if not os.path.exists(output_filename_path):
-        os.makedirs(output_filename_path)
-    min_output_filename_path = os.path.join(output_filename_path, 'min_count.csv')
 
+    # # 如果output_filename_path存在，直接返回
+    # if os.path.exists(output_filename_path):
+    #     return
+    # # 判断output_filename_path路径是否存在，不存在则创建
+    # if not os.path.exists(output_filename_path):
+    #     os.makedirs(output_filename_path)
+    # min_output_filename_path = os.path.join(output_filename_path, 'min_count.csv')
+    print(f"开始分析第一层参数min_count all 当前时间{datetime.now()} {origin_grouped.shape[0]} {min_count_list}")
     for min_count in min_count_list:
         # print(f"开始分析第一层参数min_count 当前时间{datetime.now()} min_count{min_count} {origin_grouped.shape[0]}")
         # 筛选出count大于min_count的数据
@@ -1644,12 +1710,18 @@ def analyse_first_min_count_select(all_selected_samples, output_filename_path, p
         more_result_df = get_detail_analysis(selected_samples)
         more_result_df['min_count'] = min_count
         more_result_df['is_more_min_count'] = True
+        more_result_df = more_result_df[more_result_df['total_count'] > 0]
+        more_result_df = more_result_df[more_result_df['day_2_profit_1_count_ratio'] <= 0.1]
+        more_result_df = remove_duplicate_rows(more_result_df)
         result_list.append(more_result_df)
 
         selected_samples = origin_grouped[origin_grouped['rf_select_count'] < min_count]
         less_result_df = get_detail_analysis(selected_samples)
         less_result_df['min_count'] = min_count
         less_result_df['is_more_min_count'] = False
+        less_result_df = less_result_df[less_result_df['total_count'] > 0]
+        less_result_df = less_result_df[less_result_df['day_2_profit_1_count_ratio'] <= 0.1]
+        less_result_df = remove_duplicate_rows(less_result_df)
         result_list.append(less_result_df)
         # print(f"完成分析第一层参数min_count 当前时间{datetime.now()} min_count{min_count} {origin_grouped.shape[0]}")
     if len(result_list) > 0:
@@ -1657,17 +1729,24 @@ def analyse_first_min_count_select(all_selected_samples, output_filename_path, p
     else:
         result_df = pd.DataFrame()
     # 删除total_count为0的数据
-    if 'total_count' in result_df.columns:
-        result_df = remove_duplicate_rows(result_df)
-        result_df = result_df[result_df['total_days'] > 3]
-        result_df = result_df[result_df['day_2_day_ratio'] <= 0.1]
+    result_df = result_df[result_df['total_count'] > 0]
+    result_df = result_df[result_df['day_2_profit_1_count_ratio'] <= 0.1]
+    result_df = remove_duplicate_rows(result_df)
+    # if 'total_count' in result_df.columns:
+    #     result_df = remove_duplicate_rows(result_df)
+    #     result_df = result_df[result_df['total_days'] > 3]
+    #     result_df = result_df[result_df['day_2_day_ratio'] <= 0.1]
+    #     # 遍历param_dict，将param_dict的值添加到result_df中
+    #     for key, value in param_dict.items():
+    #         result_df[key] = value
+    #     if result_df.shape[0] > 0:
+    #         result_df.to_csv(min_output_filename_path, index=False)
+    # else:
+    #     print(f'total_count not in columns{result_df} {all_selected_samples}')
         # 遍历param_dict，将param_dict的值添加到result_df中
-        for key, value in param_dict.items():
-            result_df[key] = value
-        if result_df.shape[0] > 0:
-            result_df.to_csv(min_output_filename_path, index=False)
-    else:
-        print(f'total_count not in columns{result_df} {all_selected_samples}')
+    for key, value in param_dict.items():
+        result_df[key] = value
+    return result_df
 
 def remove_duplicate_rows(df):
     """
@@ -1688,11 +1767,13 @@ def remove_duplicate_rows(df):
 
     # 根据包含"date_list"的列删除重复行
     df_filtered = df.drop_duplicates(subset=date_list_columns)
-    print(f"过滤前 {df.shape[0]} 删除重复行后的DataFrame大小: {df_filtered.shape[0]}")
+    # print(f"过滤前 {df.shape[0]} 删除重复行后的DataFrame大小: {df_filtered.shape[0]}")
     return df_filtered
 
 def analyse_first_cha_zhi_select(origin_selected_samples, output_filename_path, param_dict):
-    cha_zhi_result_list = []
+    if origin_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
     # 获取origin_selected_samples的所有不重复cha_thread，保留两位小数
     cha_thread_list = origin_selected_samples['cha_thread'].tolist()
     cha_thread_list = [round(cha_thread, 2) for cha_thread in cha_thread_list]
@@ -1702,9 +1783,16 @@ def analyse_first_cha_zhi_select(origin_selected_samples, output_filename_path, 
     cha_zhi_list.append(None)
     cha_zhi_list.reverse()
 
+    # # 如果output_filename_path存在，直接返回
+    # if os.path.exists(output_filename_path):
+    #     print(f"文件 {output_filename_path} 已存在")
+    #     return
+
+    cha_zhi_result_list = []
+    print(f"开始分析第一层参数cha_zhi all 当前时间{datetime.now()} {origin_selected_samples.shape[0]} {cha_zhi_list}")
     # 将all_selected_samples按照日期分组
     for cha_zhi in cha_zhi_list:
-
+        # print(f"开始分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} {origin_selected_samples.shape[0]}")
         # 保留all_selected_samples中cha_zhi大于等于0的数据
         if cha_zhi is not None:
             more_selected_samples = origin_selected_samples[origin_selected_samples['cha_thread'] >= cha_zhi]
@@ -1713,57 +1801,201 @@ def analyse_first_cha_zhi_select(origin_selected_samples, output_filename_path, 
             # 只保留每天cha_thread最大的数据
             more_selected_samples = origin_selected_samples.loc[origin_selected_samples.groupby('日期')['cha_thread'].idxmax()]
             less_selected_samples = origin_selected_samples.loc[origin_selected_samples.groupby('日期')['cha_thread'].idxmin()]
-        print(
-            f"开始分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]}")
-        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_more')
+        # print(f"开始分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]}")
+        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_cha_zhi_more')
         param_dict['cha_zhi'] = cha_zhi
         param_dict['is_cha_zhi_more'] = True
-        more_result_df = analyse_first_min_count_select(more_selected_samples, cha_output_filename_path, param_dict)
-        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_less')
+        analyse_first_abs_thread_select(more_selected_samples, cha_output_filename_path, param_dict)
+        cha_output_filename_path = os.path.join(output_filename_path, str(cha_zhi) + '_cha_zhi_less')
         param_dict['is_cha_zhi_more'] = False
-        less_result_df = analyse_first_min_count_select(less_selected_samples, cha_output_filename_path, param_dict)
-        print(f"完成分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} {origin_selected_samples.shape[0]} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]} cha_zhi进度{cha_zhi_list.index(cha_zhi)}/{len(cha_zhi_list)}")
-
+        analyse_first_abs_thread_select(less_selected_samples, cha_output_filename_path, param_dict)
+        # print(f"完成分析第一层参数cha_zhi 当前时间{datetime.now()} cha_zhi {cha_zhi} {origin_selected_samples.shape[0]} more_selected_samples {more_selected_samples.shape[0]} less_selected_samples {less_selected_samples.shape[0]} cha_zhi进度{cha_zhi_list.index(cha_zhi)}/{len(cha_zhi_list)}")
+        # cha_zhi_result_list.append(more_result_df)
+        # cha_zhi_result_list.append(less_result_df)
+    # if len(cha_zhi_result_list) > 0:
+    #     result_df = pd.concat(cha_zhi_result_list)
+    #     if 'total_count' in result_df.columns:
+    #         result_df = result_df[result_df['total_days'] > 0]
+    #         result_df = result_df[result_df['day_2_profit_1_count_ratio'] <= 0.1]
+    #         result_df = remove_duplicate_rows(result_df)
+    #         # # 遍历param_dict，将param_dict的值添加到result_df中
+    #         # for key, value in param_dict.items():
+    #         #     result_df[key] = value
+    #         if result_df.shape[0] > 0:
+    #             # 判断output_filename_path路径是否存在，不存在则创建
+    #             if not os.path.exists(output_filename_path):
+    #                 os.makedirs(output_filename_path)
+    #             min_output_filename_path = os.path.join(output_filename_path, 'cha_zhi.csv')
+    #             result_df.to_csv(min_output_filename_path, index=False)
+    #     else:
+    #         print(f'total_count not in columns{result_df} {origin_selected_samples}')
 
 def analyse_first_date_count_select_parallel(date_count, origin_selected_samples, model_info_list, output_filename_path, param_dict):
+    if origin_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
     more_model_name_list = [model_info['model_name'] for model_info in model_info_list if
                             model_info['date_count'] >= date_count]
     more_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(more_model_name_list)]
     less_model_name_list = [model_info['model_name'] for model_info in model_info_list if
                             model_info['date_count'] < date_count]
     less_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(less_model_name_list)]
-    print(
-        f"开始分析第一层参数date_count 当前时间{datetime.now()} date_count {date_count} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_origin_selected_samples {less_origin_selected_samples.shape[0]}")
-    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_more')
+    print(f"开始分析第一层参数date_count 当前时间{datetime.now()} date_count {date_count} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_origin_selected_samples {less_origin_selected_samples.shape[0]}")
+    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_date_count_more')
     param_dict['date_count'] = date_count
     param_dict['is_date_count_more'] = True
-    more_result_df = analyse_first_cha_zhi_select(more_origin_selected_samples, date_output_filename_path, param_dict)
-    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_less')
+    if more_origin_selected_samples.shape[0] == 0:
+        pass
+    else:
+        analyse_first_cha_zhi_select(more_origin_selected_samples, date_output_filename_path, param_dict)
+    date_output_filename_path = os.path.join(output_filename_path, str(date_count) + '_date_count_less')
     param_dict['is_date_count_more'] = False
-    less_result_df = analyse_first_cha_zhi_select(less_origin_selected_samples, date_output_filename_path, param_dict)
-    return more_result_df, less_result_df
+    if less_origin_selected_samples.shape[0] == 0:
+        pass
+    else:
+        analyse_first_cha_zhi_select(less_origin_selected_samples, date_output_filename_path, param_dict)
 
-def analyse_first_date_count_select(origin_selected_samples, model_info_list, output_filename_path, param_dict, processes=25):
+
+def analyse_first_date_count_select(origin_selected_samples, more_model_info_list, less_model_info_list, output_filename_path, param_dict, processes=25):
     """
     分析出第一层的选择数据,all_selected_samples为模型组 cha date_count筛选后的数据,返回结果会加上min_count限制和选择的方法限制(选择最高的 选择大于min_count的 选择单数据的 选择多数据的)
     :param origin_selected_samples:
     :param model_info_list:
     :return:
     """
-    date_count_list = [model_info['date_count'] for model_info in model_info_list]
-    date_count_split_list = list(set(date_count_list))
-    date_count_split_list = split_list(date_count_split_list, 100)
-    date_count_split_list.sort()
-    print(f"开始分析第一层参数date_count 当前时间{datetime.now()} {date_count_split_list}")
+    if origin_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
     pool = Pool(processes=processes)
-    results = []
-    for date_count in date_count_split_list:
-        result = pool.apply_async(analyse_first_date_count_select_parallel,
-                                  args=(date_count, origin_selected_samples, model_info_list, output_filename_path, param_dict))
-        results.append(result)
+    model_info_list = more_model_info_list
+    date_count_list = [model_info['date_count'] for model_info in model_info_list]
+    more_date_count_split_list = list(set(date_count_list))
+    more_date_count_split_list = split_list(more_date_count_split_list, 100)
+    more_date_count_split_list.sort()
+    more_model_name_list = [model_info['model_name'] for model_info in model_info_list]
+    param_dict['is_model_thread_more'] = True
+    more_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(more_model_name_list)]
 
+    # for date_count in date_count_split_list:
+    #     analyse_first_date_count_select_parallel(date_count, origin_selected_samples, model_info_list, output_filename_path, param_dict)
+    param_dict['is_model_thread_more'] = True
+    for date_count in more_date_count_split_list:
+        pool.apply_async(analyse_first_date_count_select_parallel,
+                                  args=(date_count, more_origin_selected_samples, model_info_list, output_filename_path, param_dict))
+
+    model_info_list = less_model_info_list
+    date_count_list = [model_info['date_count'] for model_info in model_info_list]
+    less_date_count_split_list = list(set(date_count_list))
+    less_date_count_split_list = split_list(less_date_count_split_list, 100)
+    less_date_count_split_list.sort()
+    less_model_name_list = [model_info['model_name'] for model_info in model_info_list]
+    less_origin_selected_samples = origin_selected_samples[origin_selected_samples['model_name'].isin(less_model_name_list)]
+    param_dict['is_model_thread_more'] = False
+    output_filename_path = output_filename_path.replace('_model_thread_more', '_model_thread_less')
+    for date_count in less_date_count_split_list:
+        pool.apply_async(analyse_first_date_count_select_parallel,
+                                  args=(date_count, less_origin_selected_samples, model_info_list, output_filename_path, param_dict))
+
+    print(f"开始分析第一层参数_paralleldate_count 当前时间{datetime.now()} more_date_count_split_list {more_date_count_split_list} more_origin_selected_samples {more_origin_selected_samples.shape[0]} less_date_count_split_list {less_date_count_split_list} less_origin_selected_samples {less_origin_selected_samples.shape[0]} processes {processes}")
     pool.close()
     pool.join()
+
+def get_failed_day(model_info_list):
+    """
+    获取model_info_list中失败的日期
+    :param model_info_list:
+    :return:
+    """
+    failed_day_set = set()
+    for model_info in model_info_list:
+        failed_day = model_info['date_count'] - model_info['max_score']
+        failed_day_set.add(failed_day)
+    # 将failed_day_set转换为list并且排序
+    failed_day_list = list(failed_day_set)
+    failed_day_list.sort()
+    return failed_day_list
+
+def get_model_thread(model_info_list):
+    """
+    获取model_info_list中的thread_day
+    :param model_info_list:
+    :return:
+    """
+    thread_day_set = set()
+    for model_info in model_info_list:
+        thread_day = round(model_info['abs_threshold'], 2)
+        thread_day_set.add(thread_day)
+    thread_day_list = list(thread_day_set)
+    thread_day_list.sort()
+    return thread_day_list
+
+def analyse_first_model_thread_select(origin_selected_samples, model_info_list, output_filename_path, param_dict, processes=25):
+    if origin_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
+    model_thread_list = get_model_thread(model_info_list)
+    for model_thread in model_thread_list:
+        param_dict['model_thread'] = model_thread
+        # 筛选出model_info_list中model_info['abs_threshold']大于等于model_thread的数据
+        more_model_info_list = [model_info for model_info in model_info_list if
+                           round(model_info['abs_threshold'], 2) >= model_thread]
+        model_thread_output_filename_path = os.path.join(output_filename_path, str(model_thread) + '_model_thread_more')
+        less_model_info_list = [model_info for model_info in model_info_list if round(model_info['abs_threshold'], 2) < model_thread]
+
+        analyse_first_date_count_select(origin_selected_samples, more_model_info_list, less_model_info_list, model_thread_output_filename_path, param_dict, processes=processes)
+
+
+
+def analyse_first_failed_day_select(origin_selected_samples, model_info_list, output_filename_path, param_dict, processes=25):
+    if origin_selected_samples.shape[0] == 0:
+        # print(f'all_selected_samples is empty {all_selected_samples}')
+        return pd.DataFrame()
+    failed_day_list = get_failed_day(model_info_list)
+    for failed_day in failed_day_list:
+        param_dict['failed_day'] = failed_day
+        # 筛选出model_info_list中model_info['date_count'] - model_info['max_score']大于等于failed_day的数据
+        more_model_info_list = [model_info for model_info in model_info_list if
+                           model_info['date_count'] - model_info['max_score'] >= failed_day]
+        param_dict['is_failed_day_more'] = True
+        if len(more_model_info_list) == 0:
+            pass
+        else:
+            failed_day_output_filename_path = os.path.join(output_filename_path, str(failed_day) + '_failed_day_more')
+            analyse_first_model_thread_select(origin_selected_samples, more_model_info_list, failed_day_output_filename_path, param_dict, processes=processes)
+
+        less_model_info_list = [model_info for model_info in model_info_list if
+                             model_info['date_count'] - model_info['max_score'] < failed_day]
+        param_dict['is_failed_day_more'] = False
+        if len(less_model_info_list) == 0:
+            pass
+        else:
+            failed_day_output_filename_path = os.path.join(output_filename_path, str(failed_day) + '_failed_day_less')
+            analyse_first_model_thread_select(origin_selected_samples, less_model_info_list, failed_day_output_filename_path, param_dict, processes=processes)
+
+
+
+def init_data(file_path, model_info_list):
+    need_columns = ['日期', '收盘', '后续1日最高价利润率', '后续2日最高价利润率', '代码', 'cha_thread', 'thread', 'date_count', 'model_name']
+    all_selected_samples = low_memory_load(file_path)
+    all_selected_samples = all_selected_samples[need_columns]
+    all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
+    # 将日期转换为字符串保留年月日
+    all_selected_samples['日期'] = all_selected_samples['日期'].dt.strftime('%Y-%m-%d')
+    # 去除日期为"2024-04-29"和"2024-04-30"的数据
+    print(f"开始处理数据 当前时间{datetime.now()} 长度{all_selected_samples.shape[0]}")
+    all_selected_samples = all_selected_samples[~all_selected_samples['日期'].isin(['2024-04-29', '2024-04-30'])]
+    more_model_name_list = [model_info['model_name'] for model_info in model_info_list]
+    all_selected_samples = all_selected_samples[
+        all_selected_samples['model_name'].isin(more_model_name_list)]
+    print(f"完成处理数据 当前时间{datetime.now()} 长度{all_selected_samples.shape[0]}")
+
+
+
+    if '后续2日最高价利润率' not in all_selected_samples.columns:
+        all_selected_samples['后续2日最高价利润率'] = 0
+    if '后续1日最高价利润率' not in all_selected_samples.columns:
+        all_selected_samples['后续1日最高价利润率'] = 0
+    return all_selected_samples
 
 def save_all_selected_samples(file_path, processes=25):
     """
@@ -1777,22 +2009,22 @@ def save_all_selected_samples(file_path, processes=25):
     # 获取file_path倒数第二层文件名
     param_base_name = os.path.basename(os.path.dirname(file_path))
 
+    all_model_name_dict, all_model_info_list = get_all_model_list()
 
-    all_selected_samples = low_memory_load(file_path)
-    all_selected_samples['日期'] = pd.to_datetime(all_selected_samples['日期'])
-    # 将日期转换为字符串保留年月日
-    all_selected_samples['日期'] = all_selected_samples['日期'].dt.strftime('%Y-%m-%d')
-    all_model_name_dict = get_all_model_list()
-    if '后续2日最高价利润率' not in all_selected_samples.columns:
-        all_selected_samples['后续2日最高价利润率'] = 0
-    if '后续1日最高价利润率' not in all_selected_samples.columns:
-        all_selected_samples['后续1日最高价利润率'] = 0
+
+
     for json_file, model_info_list in all_model_name_dict.items():
         output_filename_path = f'../final_zuhe/first_param/{param_base_name}/{base_name}/{json_file}'
         param_dict = {'json_file': json_file}
-
-        print(f"开始模型组第一层参数遍历 当前时间{datetime.now()} json_file {json_file} model_info_list {len(model_info_list)} {file_path}")
-        result_df = analyse_first_date_count_select(all_selected_samples, model_info_list, output_filename_path, param_dict, processes=processes)
+        if len(model_info_list) == 0:
+            continue
+        processes = int(1500 / len(model_info_list))
+        if processes > 30:
+            processes = 30
+        # processes = 1
+        all_selected_samples = init_data(file_path, model_info_list)
+        print(f"开始模型组第一层参数遍历 当前时间{datetime.now()} json_file {json_file} model_info_list {len(model_info_list)} process {processes} {file_path} {output_filename_path} {all_selected_samples.shape[0]}")
+        analyse_first_failed_day_select(all_selected_samples, model_info_list, output_filename_path, param_dict, processes=processes)
         print(f"完成模型组第一层参数遍历 当前时间{datetime.now()} json_file{json_file} model_info_list{len(model_info_list)} {file_path} 模型组进度{list(all_model_name_dict.keys()).index(json_file)}/{len(all_model_name_dict)}")
         # if len(first_param_result_list) > 0:
         #     first_param_result_df = pd.concat(first_param_result_list)
@@ -2298,14 +2530,33 @@ def read_json(file_path):
         return {}
 def get_all_model_list():
     all_model_name_dict = {}
+    all_model_info_list = []
+    for root, dirs, files in os.walk('../final_zuhe/other/'):
+        for file in files:
+            if file.startswith('new') and 'interval' in file and 'thread_day_1' in file:
+                full_name = os.path.join(root, file)
+                model_info = read_json(full_name)
+                all_model_name_dict[file] = model_info
+                exist_model_name_list = [item['model_name'] for item in all_model_info_list]
+                for item in model_info:
+                    if item['model_name'] not in exist_model_name_list:
+                        all_model_info_list.append(item)
+    # 删除长度为0的数据
+    all_model_name_dict = {key: value for key, value in all_model_name_dict.items() if len(value) > 0}
+    # 按照model_info的长度降序排列
+    all_model_name_dict = dict(sorted(all_model_name_dict.items(), key=lambda x: len(x[1]), reverse=False))
+    return all_model_name_dict, all_model_info_list
+
+def get_all_model_list_select():
+    all_model_name_dict = {}
     for root, dirs, files in os.walk('../final_zuhe/other/'):
         for file in files:
             if file.startswith('new'):
                 full_name = os.path.join(root, file)
                 model_info = read_json(full_name)
                 all_model_name_dict[file] = model_info
-    # 按照model_info的长度降序排列
-    all_model_name_dict = dict(sorted(all_model_name_dict.items(), key=lambda x: len(x[1]), reverse=True))
+    # 按照model_info的长度升序排列
+    all_model_name_dict = dict(sorted(all_model_name_dict.items(), key=lambda item: len(item[1])))
     return all_model_name_dict
 
 def gen_full_select():
@@ -2334,39 +2585,20 @@ def gen_full_select():
     with open('../final_zuhe/other/all_data.json', 'r') as file:
         model_info_list = json.load(file)
     file_path_list = [
-        # '../train_data/profit_1_day_1_ratio_0.25/',
+        '../train_data/profit_1_day_1_ratio_0.25/',
         # '../train_data/profit_1_day_1_ratio_0.3/',
         # '../train_data/profit_1_day_1_ratio_0.4/',
-        '../train_data/profit_1_day_1_ratio_0.5/',
+        # '../train_data/profit_1_day_1_ratio_0.75/',
         # '../train_data/profit_1_day_2_ratio_0.25/',
         # '../train_data/profit_1_day_2_ratio_0.3/',
         # '../train_data/profit_1_day_2_ratio_0.4/',
-        '../train_data/profit_1_day_2_ratio_0.5/',
+        # '../train_data/profit_1_day_2_ratio_0.5/',
         # '../train_data/profit_1_day_2_ratio_0.6/',
     ]
     for file_path in file_path_list:
-        output_filename = f'{file_path}bad_1_select.csv'
+        output_filename = f'{file_path}good_2_select.csv'
         if not os.path.exists(output_filename):
-            data_file_path = f'{file_path}bad_1.csv'
-            data = low_memory_load(data_file_path)
-            data['日期'] = pd.to_datetime(data['日期'])
-            # 获取data_file_path的磁盘大小
-            disk_size = os.path.getsize(data_file_path) / 1024 / 1024
-            print(f"{data_file_path} 磁盘大小为 {disk_size} MB")
-            if disk_size > 1600:
-                process_count = 1
-            elif disk_size > 700:
-                process_count = 2
-            elif disk_size > 400:
-                process_count = 3
-            elif disk_size > 100:
-                process_count = 4
-            else:
-                process_count = 5
-            all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=process_count, thread_count=1, output_file_path=output_filename)
-        output_filename = f'{file_path}good_1_select.csv'
-        if not os.path.exists(output_filename):
-            data_file_path = f'{file_path}good_1_merged.csv'
+            data_file_path = f'{file_path}good_2_merged.csv'
             data = low_memory_load(data_file_path)
             data['日期'] = pd.to_datetime(data['日期'])
             # 获取data_file_path的磁盘大小
@@ -2385,8 +2617,8 @@ def gen_full_select():
 
             all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=process_count, thread_count=1, output_file_path=output_filename)
 
-def select_first_code_process(all_model_name_dict, json_file, good_params_df, origin_selected_samples, all_result_list):
-    model_info_list = all_model_name_dict[json_file]
+def select_first_code_process_old(all_model_name_dict, json_file, good_params_df, origin_selected_samples, all_result_list):
+    origin_model_info_list = all_model_name_dict[json_file]
     filter_good_params_df = good_params_df[good_params_df['json_file'] == json_file]
     # 遍历filter_good_params_df
     for index, row in filter_good_params_df.iterrows():
@@ -2395,30 +2627,56 @@ def select_first_code_process(all_model_name_dict, json_file, good_params_df, or
         cha_zhi = row['cha_zhi']
         is_cha_zhi_more = row['is_cha_zhi_more']
         min_count = row['min_count']
-        strategy = row['strategy']
         is_more_min_count = row['is_more_min_count']
+        strategy = row['strategy']
+
+        abs_thread = row['abs_thread']
+        is_abs_thread_more = row['is_abs_thread_more']
+        model_thread = row['model_thread']
+        is_model_thread_more = row['is_model_thread_more']
+        failed_day = row['failed_day']
+        is_failed_day_more = row['is_failed_day_more']
+        if is_failed_day_more:
+            failed_day_model_info_list = [model_info for model_info in origin_model_info_list if
+                                    model_info['date_count'] - model_info['max_score'] >= failed_day]
+        else:
+            failed_day_model_info_list = [model_info for model_info in origin_model_info_list if
+                                    model_info['date_count'] - model_info['max_score'] < failed_day]
+        if is_model_thread_more:
+            model_thread_model_info_list = [model_info for model_info in failed_day_model_info_list if
+                           round(model_info['abs_threshold'], 2) >= model_thread]
+        else:
+            model_thread_model_info_list = [model_info for model_info in failed_day_model_info_list if
+                           round(model_info['abs_threshold'], 2) < model_thread]
+
         if is_date_count_more:
-            model_name_list = [model_info['model_name'] for model_info in model_info_list if
+            model_name_list = [model_info['model_name'] for model_info in model_thread_model_info_list if
                                model_info['date_count'] >= date_count]
         else:
-            model_name_list = [model_info['model_name'] for model_info in model_info_list if
+            model_name_list = [model_info['model_name'] for model_info in model_thread_model_info_list if
                                model_info['date_count'] < date_count]
         date_count_origin_selected_samples = origin_selected_samples[
             origin_selected_samples['model_name'].isin(model_name_list)]
+        if is_abs_thread_more:
+            abs_thread_origin_selected_samples = date_count_origin_selected_samples[
+                date_count_origin_selected_samples['thread'] >= abs_thread]
+        else:
+            abs_thread_origin_selected_samples = date_count_origin_selected_samples[
+                date_count_origin_selected_samples['thread'] < abs_thread]
         if cha_zhi is not None:
             if is_cha_zhi_more:
-                cha_zhi_origin_selected_samples = date_count_origin_selected_samples[
-                    date_count_origin_selected_samples['cha_thread'] >= cha_zhi]
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples[
+                    abs_thread_origin_selected_samples['cha_thread'] >= cha_zhi]
             else:
-                cha_zhi_origin_selected_samples = date_count_origin_selected_samples[
-                    date_count_origin_selected_samples['cha_thread'] < cha_zhi]
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples[
+                    abs_thread_origin_selected_samples['cha_thread'] < cha_zhi]
         else:
             if is_cha_zhi_more:
-                cha_zhi_origin_selected_samples = date_count_origin_selected_samples.loc[
-                    date_count_origin_selected_samples.groupby('日期')['cha_thread'].idxmax()]
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples.loc[
+                    abs_thread_origin_selected_samples.groupby('日期')['cha_thread'].idxmax()]
             else:
-                cha_zhi_origin_selected_samples = date_count_origin_selected_samples.loc[
-                    date_count_origin_selected_samples.groupby('日期')['cha_thread'].idxmin()]
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples.loc[
+                    abs_thread_origin_selected_samples.groupby('日期')['cha_thread'].idxmin()]
         cha_zhi_origin_selected_samples_group = cha_zhi_origin_selected_samples.groupby(['日期', '代码']).agg(
             rf_select_count=('代码', 'count'),
             min_close=('收盘', 'first'),
@@ -2441,14 +2699,51 @@ def select_first_code_process(all_model_name_dict, json_file, good_params_df, or
             all_result_list.extend(total_count_date_list)
     return all_result_list
 
-def get_first_good_param():
-    # good_params_df = pd.read_csv('../final_zuhe/other/first_param_profit_1_day_1_ratio_0.25_good_1_select.csv_new_good_all_model_reports_cuml_profit_1_day_2_ratio_0.25_all.json.csv')
-    # good_params_df = good_params_df[good_params_df['day_1_day'] < 1]
-    # good_params_df_other = pd.read_csv('../final_zuhe/other/first_param_profit_1_day_1_ratio_0.25_bad_1_select.csv_new_good_all_model_reports_cuml_profit_1_day_2_ratio_0.25_all.json.csv')
-    # good_params_df_other = good_params_df_other[good_params_df_other['day_1_day'] < 1]
-    # # 帮我找到good_params_df和good_params_df_other中json_file，date_count，is_date_count_more，cha_zhi，is_cha_zhi_more，min_count，strategy，is_more_min_count这几个字段相同的数据
-    # merge_columns = ['json_file', 'date_count', 'is_date_count_more', 'cha_zhi', 'is_cha_zhi_more', 'min_count',
-    #                  'strategy', 'is_more_min_count']
+def remove_duplicate_rows_day1(df):
+    """
+    删除DataFrame中的重复行,根据包含"date_list"的列的值来判断是否相同。
+    在去重时,选择保留total_days最大的行,如果total_days相同,选择total_count最大的行。
+
+    Args:
+        df (DataFrame): 输入的DataFrame。
+
+    Returns:
+        DataFrame: 删除重复行后的DataFrame。
+    """
+    # 找出包含"date_list"的列
+    date_list_columns = [col for col in df.columns if 'day_1_count_date_list' in col]
+    # 找出date_list_columns值全是空的行
+    empty_date_list_rows = df[df[date_list_columns].isnull().all(axis=1)]
+    df = df.dropna(subset=date_list_columns)
+
+    # 如果没有包含"date_list"的列,则直接返回原始DataFrame
+    if not date_list_columns:
+        return df
+
+    # 按照total_days和total_count排序,确保在去重时保留所需的行
+    df_sorted = df.sort_values(by=['total_days', 'total_count'], ascending=False)
+
+    # 根据包含"date_list"的列删除重复行
+    df_filtered = df_sorted.drop_duplicates(subset=date_list_columns)
+    # 将之前找出的空行添加回去
+    df_filtered = pd.concat([df_filtered, empty_date_list_rows])
+
+    print(f"过滤前 {df.shape[0]} 删除重复行后的DataFrame大小: {df_filtered.shape[0]}")
+    return df_filtered
+
+def get_first_good_param(day_1_day_ratio=0.1, day_2_day_ratio=0.1, total_days=0, duplicate_rows=False, remove_false=False, file_path='../final_zuhe/first_param/data_old/second_all_selected_samples_20240102_20240430_good_inter_45_2024_profit_1.csvmerged.csv'):
+    # # 读取'../train_data/profit_1_day_1_ratio_0.5/good_1_merged.csv'和'../train_data/profit_1_day_1_ratio_0.25/good_1_merged.csv'数据，且只读取 日期和代码两列
+    # good_1_merged_0_5 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.7-0.8.csv', usecols=['日期', '代码'])
+    # good_1_merged_0_25 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.75/bad_1_merged.csv', usecols=['日期', '代码'])
+    # # 获取good_1_merged_0_25不重复的日期
+    # good_1_merged_0_25_date_list = good_1_merged_0_25['日期'].unique()
+    # good_1_merged_0_5_date_list = good_1_merged_0_5['日期'].unique()
+    # # good_1_merged_0_5 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.5/bad_1.csv', usecols=['日期', '代码'])
+    # # good_1_merged_0_25 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.25/bad_1.csv', usecols=['日期', '代码'])
+    # # 找到good_1_merged_0_5和good_1_merged_0_25中日期和代码相同的数据
+    # result = pd.merge(good_1_merged_0_5, good_1_merged_0_25, on=['日期', '代码'], how='inner')
+    # print()
+
     #
     # # 选择需要的列
     # good_params_df_subset = good_params_df[merge_columns]
@@ -2458,53 +2753,265 @@ def get_first_good_param():
     # same_good_params_df = pd.merge(good_params_df_subset, good_params_df_other_subset,
     #                                on=merge_columns,
     #                                how='inner')
-    good_params_df = pd.read_csv('../final_zuhe/other/good_df.csv')
+
+    # good_params_df = pd.read_csv('../final_zuhe/other/good_df_good_0.25.csv')
+    # bad_good_params_df = bad_good_params_df[bad_good_params_df['day_2_day'] <= 0]
+    # bad_good_params_df = bad_good_params_df[bad_good_params_df['day_1_day'] >0 ]
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.5/bad_1_select.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.5/good_1_select.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.75/good_1_select.csvmerged.csv')
+    good_params_df = pd.read_csv(file_path)
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_inter_day1.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_inter_day1.csv/new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_6-7_train_thread_day_1.jsonallmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_inter_day1.csv/new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_5-6_train_thread_day_1.jsonallmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_inter_day1.csv/new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_4-5_train_thread_day_1.jsonallmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_good_inter_45_2024.csvallmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data_old/second_all_selected_samples_20240102_20240430_good_inter_45_2024.csv/new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_4-5_all_pretty_good.jsonallmerged.csv')
+
+    if remove_false:
+        # 找出列名包含is_的列
+        bool_columns = ['is_more_min_count', 'is_failed_day_more', 'is_model_thread_more', 'is_date_count_more', 'is_cha_zhi_more', 'is_abs_thread_more']
+        # bool_columns = ['is_more_min_count', 'is_model_thread_more', 'is_date_count_more', 'is_cha_zhi_more', 'is_abs_thread_more']
+        # 过滤掉good_params_df中值为false的行
+        for col in bool_columns:
+            good_params_df = good_params_df[good_params_df[col]]
+
+    # 获取所有的json_file，并且去重
+    # json_file_list = good_params_df['json_file'].unique()
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.25/good_1_select_interval_0.8-0.9.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.25/good_1_select_interval_0.6-0.7.csvmerged.csv')
     # good_params_df = remove_duplicate_rows(good_params_df)
-    # good_params_df = good_params_df[good_params_df['day_2_day'] <= 1]
-    good_params_df = good_params_df[good_params_df['day_1_day'] <= 0]
-    good_params_df = good_params_df[good_params_df['total_days'] >= 7]
-    # good_params_df = good_params_df[good_params_df['total_days'] >= 5]
+    # good_params_df = good_params_df[good_params_df['day_2_day'] == 0]
+    # good_params_df = good_params_df[good_params_df['day_1_day'] == 0]
+    # good_params_df = good_params_df[(good_params_df['day_1_count'] - good_params_df['day_2_count']) > 15]
+    good_params_df = good_params_df[good_params_df['day_1_profit_1_day_ratio'] <= day_1_day_ratio]
+    good_params_df = good_params_df[good_params_df['day_2_profit_1_day_ratio'] <= day_2_day_ratio]
+
+
+
+
+    # good_params_df = good_params_df[good_params_df['day_1_count_ratio'] <= 0]
+    # good_params_df = good_params_df[good_params_df['day_2_count_ratio'] < 0.01]
+    # good_params_df = good_params_df[good_params_df['total_count'] > total_days]
+    good_params_df = good_params_df[good_params_df['total_days'] > total_days]
+    # good_params_df = good_params_df[good_params_df['day_1_count_ratio'] <= good_params_df['day_1_day_ratio']]
+    # good_params_df = good_params_df[good_params_df['json_file'] <= 'new_good_all_model_reports_cuml_all_all.json']
+    # good_params_df = good_params_df[good_params_df['day_1_count_date_list'] == '2024-01-19_002085']
+    # good_params_df = good_params_df[good_params_df['cha_zhi'] == 0]
+    # good_params_df = good_params_df[good_params_df['min_count'] == 10]
+    # good_params_df = good_params_df[good_params_df['json_file'] == 'new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_5-6_train_thread_day_1.json']
+    # good_params_df = good_params_df[good_params_df['total_count_date_list'] <= '2018-10-24_002686,2020-09-23_603022,2021-02-03_601888,2021-10-21_603596,2022-05-05_600405,2023-03-09_600941,2023-07-11_001270']
     # 帮我找到good_params_df和good_params_df_other中json_file，date_count，is_date_count_more，cha_zhi，is_cha_zhi_more，min_count，strategy，is_more_min_count这几个字段有重复的数据
     # good_params_df = good_params_df.groupby(['json_file', 'date_count', 'is_date_count_more', 'cha_zhi', 'is_cha_zhi_more', 'min_count', 'strategy', 'is_more_min_count']).agg(param_count=('date_count', 'count')).reset_index()
     # good_params_df = good_params_df[good_params_df['param_count'] > 1]
+    if duplicate_rows:
+        good_params_df = remove_duplicate_rows_day1(good_params_df)
+    # good_params_df = remove_duplicate_rows_day1_with_null(good_params_df)
     return good_params_df
 
-    # 读取'../final_zuhe/other下面的所有.csv文件
-    # all_file_list = []
-    # for root, dirs, files in os.walk('../final_zuhe/other/'):
-    #     for file in files:
-    #         if file.endswith('.csv') and 'first_param' in file:
-    #             full_name = os.path.join(root, file)
-    #             all_file_list.append(full_name)
-    # good_df_list = []
-    # for file_path in all_file_list:
-    #     temp_df = pd.read_csv(file_path, dtype={'代码': str})
-    #     good_df_list.append(temp_df)
-    # good_df = pd.concat(good_df_list, ignore_index=True)
-    # good_df = remove_duplicate_rows(good_df)
-    # # 将good_df保存到文件
-    # good_df.to_csv('../final_zuhe/other/good_df.csv', index=False)
-    return good_df
+def count_total_sort(first_select_data):
+    """
+    计算综合的排名
+    :param first_select_data:
+    :return:
+    """
+    # 创建一个空的 DataFrame，用于存储分组后的数据
+    result_df = pd.DataFrame()
+    if first_select_data.empty:
+        return result_df
+    # 按照日期分组
+    first_select_data_group = first_select_data.groupby('日期')
+    for date, group in first_select_data_group:
+        need_sort_columns = ['rf_select_count', 'cha_thread_min', 'cha_thread_max', 'cha_thread_mean']
+        # 分别计算每行数据中 rf_select_count, cha_thread_min, cha_thread_max, cha_thread_mean 的排名，按照从大到小排名
+        for column in need_sort_columns:
+            group[f'{column}_rank'] = group[column].rank(method='min', ascending=False)
+        # 计算每行数据中 rf_select_count, cha_thread_min, cha_thread_max, cha_thread_mean 的总和
+        group['total_rank'] = group['rf_select_count_rank'] + group['cha_thread_min_rank'] + group[
+            'cha_thread_max_rank'] + group['cha_thread_mean_rank']
+        # 按照 total_rank 降序排列
+        group = group.sort_values(by='rf_select_count', ascending=False)
+        # 将每个分组的结果添加到 result_df
+        result_df = pd.concat([result_df, group])
 
-def select_first_code(file_path='../train_data/profit_1_day_1_ratio_0.25/bad_1_select.csv'):
+    # 重置索引，返回结果
+    result_df.reset_index(drop=True, inplace=True)
+    return result_df
+
+def get_first_good_param_old(day_1_day_ratio=0.1, day_2_day_ratio=0.1, total_days=0, duplicate_rows=False, file_path=''):
+    # # 读取'../train_data/profit_1_day_1_ratio_0.5/good_1_merged.csv'和'../train_data/profit_1_day_1_ratio_0.25/good_1_merged.csv'数据，且只读取 日期和代码两列
+    # good_1_merged_0_5 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.7-0.8.csv', usecols=['日期', '代码'])
+    # good_1_merged_0_25 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.75/bad_1_merged.csv', usecols=['日期', '代码'])
+    # # 获取good_1_merged_0_25不重复的日期
+    # good_1_merged_0_25_date_list = good_1_merged_0_25['日期'].unique()
+    # good_1_merged_0_5_date_list = good_1_merged_0_5['日期'].unique()
+    # # good_1_merged_0_5 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.5/bad_1.csv', usecols=['日期', '代码'])
+    # # good_1_merged_0_25 = pd.read_csv('../train_data/profit_1_day_1_ratio_0.25/bad_1.csv', usecols=['日期', '代码'])
+    # # 找到good_1_merged_0_5和good_1_merged_0_25中日期和代码相同的数据
+    # result = pd.merge(good_1_merged_0_5, good_1_merged_0_25, on=['日期', '代码'], how='inner')
+    # print()
+
+    #
+    # # 选择需要的列
+    # good_params_df_subset = good_params_df[merge_columns]
+    # good_params_df_other_subset = good_params_df_other[merge_columns]
+    #
+    # # 帮我找到good_params_df和good_params_df_other中json_file，date_count，is_date_count_more，cha_zhi，is_cha_zhi_more，min_count，strategy，is_more_min_count这几个字段相同的数据
+    # same_good_params_df = pd.merge(good_params_df_subset, good_params_df_other_subset,
+    #                                on=merge_columns,
+    #                                how='inner')
+
+    # good_params_df = pd.read_csv('../final_zuhe/other/good_df_good_0.25.csv')
+    # bad_good_params_df = bad_good_params_df[bad_good_params_df['day_2_day'] <= 0]
+    # bad_good_params_df = bad_good_params_df[bad_good_params_df['day_1_day'] >0 ]
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.5/bad_1_select.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.5/good_1_select.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.75/good_1_select.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_good_inter_45_2024_profit_1.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/data/second_all_selected_samples_20240102_20240430_inter_day1.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.25/good_1_select_interval_0.8-0.9.csvmerged.csv')
+    # good_params_df = pd.read_csv('../final_zuhe/first_param/profit_1_day_1_ratio_0.25/good_1_select_interval_0.6-0.7.csvmerged.csv')
+    # good_params_df = remove_duplicate_rows(good_params_df)
+    # good_params_df = good_params_df[good_params_df['day_2_day'] == 0]
+    # good_params_df = good_params_df[good_params_df['day_1_day'] == 0]
+    # good_params_df = good_params_df[(good_params_df['day_1_count'] - good_params_df['day_2_count']) > 15]
+    good_params_df = pd.read_csv(file_path)
+    good_params_df = good_params_df[good_params_df['day_1_day_ratio'] <= day_1_day_ratio]
+    good_params_df = good_params_df[good_params_df['day_2_day_ratio'] <= day_2_day_ratio]
+    # good_params_df = good_params_df[good_params_df['day_1_count_ratio'] <= 0]
+    # good_params_df = good_params_df[good_params_df['day_2_count_ratio'] < 0.01]
+    # good_params_df = good_params_df[good_params_df['total_count'] > 50]
+    good_params_df = good_params_df[good_params_df['total_days'] > total_days]
+    # good_params_df = good_params_df[good_params_df['day_1_count_ratio'] <= good_params_df['day_1_day_ratio']]
+    # good_params_df = good_params_df[good_params_df['json_file'] <= 'new_good_all_model_reports_cuml_all_all.json']
+    # good_params_df = good_params_df[good_params_df['day_1_count_date_list'] == '2024-01-19_002085']
+    # good_params_df = good_params_df[good_params_df['cha_zhi'] == 0]
+    # good_params_df = good_params_df[good_params_df['min_count'] == 10]
+    # good_params_df = good_params_df[good_params_df['total_count_date_list'] <= '2018-10-24_002686,2020-09-23_603022,2021-02-03_601888,2021-10-21_603596,2022-05-05_600405,2023-03-09_600941,2023-07-11_001270']
+    # 帮我找到good_params_df和good_params_df_other中json_file，date_count，is_date_count_more，cha_zhi，is_cha_zhi_more，min_count，strategy，is_more_min_count这几个字段有重复的数据
+    # good_params_df = good_params_df.groupby(['json_file', 'date_count', 'is_date_count_more', 'cha_zhi', 'is_cha_zhi_more', 'min_count', 'strategy', 'is_more_min_count']).agg(param_count=('date_count', 'count')).reset_index()
+    # good_params_df = good_params_df[good_params_df['param_count'] > 1]
+    if duplicate_rows:
+        good_params_df = remove_duplicate_rows_day1(good_params_df)
+    # good_params_df = remove_duplicate_rows_day1_with_null(good_params_df)
+    return good_params_df
+
+def select_first_code_process(all_model_name_dict, json_file, good_params_df, origin_selected_samples, all_result_list):
+    origin_model_info_list = all_model_name_dict[json_file]
+    filter_good_params_df = good_params_df[good_params_df['json_file'] == json_file]
+    # 遍历filter_good_params_df
+    for index, row in filter_good_params_df.iterrows():
+        date_count = row['date_count']
+        is_date_count_more = row['is_date_count_more']
+        cha_zhi = row['cha_zhi']
+        is_cha_zhi_more = row['is_cha_zhi_more']
+        min_count = row['min_count']
+        is_more_min_count = row['is_more_min_count']
+        strategy = row['strategy']
+
+        abs_thread = row['abs_thread']
+        is_abs_thread_more = row['is_abs_thread_more']
+        model_thread = row['model_thread']
+        is_model_thread_more = row['is_model_thread_more']
+        failed_day = row['failed_day']
+        is_failed_day_more = row['is_failed_day_more']
+        if is_failed_day_more:
+            failed_day_model_info_list = [model_info for model_info in origin_model_info_list if
+                                    model_info['max_score'] - model_info['date_count'] >= failed_day]
+        else:
+            failed_day_model_info_list = [model_info for model_info in origin_model_info_list if
+                                    model_info['max_score'] - model_info['date_count'] < failed_day]
+        if is_model_thread_more:
+            model_thread_model_info_list = [model_info for model_info in failed_day_model_info_list if
+                           round(model_info['abs_threshold'], 2) >= model_thread]
+        else:
+            model_thread_model_info_list = [model_info for model_info in failed_day_model_info_list if
+                           round(model_info['abs_threshold'], 2) < model_thread]
+
+        if is_date_count_more:
+            model_name_list = [model_info['model_name'] for model_info in model_thread_model_info_list if
+                               model_info['date_count'] >= date_count]
+        else:
+            model_name_list = [model_info['model_name'] for model_info in model_thread_model_info_list if
+                               model_info['date_count'] < date_count]
+        date_count_origin_selected_samples = origin_selected_samples[
+            origin_selected_samples['model_name'].isin(model_name_list)]
+        if is_abs_thread_more:
+            abs_thread_origin_selected_samples = date_count_origin_selected_samples[
+                date_count_origin_selected_samples['thread'] >= abs_thread]
+        else:
+            abs_thread_origin_selected_samples = date_count_origin_selected_samples[
+                date_count_origin_selected_samples['thread'] < abs_thread]
+        if cha_zhi is not None:
+            if is_cha_zhi_more:
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples[
+                    abs_thread_origin_selected_samples['cha_thread'] >= cha_zhi]
+            else:
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples[
+                    abs_thread_origin_selected_samples['cha_thread'] < cha_zhi]
+        else:
+            if is_cha_zhi_more:
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples.loc[
+                    abs_thread_origin_selected_samples.groupby('日期')['cha_thread'].idxmax()]
+            else:
+                cha_zhi_origin_selected_samples = abs_thread_origin_selected_samples.loc[
+                    abs_thread_origin_selected_samples.groupby('日期')['cha_thread'].idxmin()]
+        cha_zhi_origin_selected_samples_group = cha_zhi_origin_selected_samples.groupby(['日期', '代码']).agg(
+            rf_select_count=('代码', 'count'),
+            min_close=('收盘', 'first'),
+            后续1日最高价利润率=('后续1日最高价利润率', 'mean'),
+            后续2日最高价利润率=('后续2日最高价利润率', 'mean'))
+        cha_zhi_origin_selected_samples_group = cha_zhi_origin_selected_samples_group.reset_index()
+        if is_more_min_count:
+            min_count_origin_selected_samples_group = cha_zhi_origin_selected_samples_group[
+                cha_zhi_origin_selected_samples_group['rf_select_count'] >= min_count]
+        else:
+            min_count_origin_selected_samples_group = cha_zhi_origin_selected_samples_group[
+                cha_zhi_origin_selected_samples_group['rf_select_count'] < min_count]
+        result_df = get_detail_analysis(min_count_origin_selected_samples_group)
+        # 获取result_df中strategy列为strategy的数据
+        result_df = result_df[result_df['strategy'] == strategy]
+        # 获取result_df中total_count_date_list的值
+        total_count_date_list = result_df['total_count_date_list'].values[0]
+        if total_count_date_list:
+            total_count_date_list = total_count_date_list.split(',')
+            all_result_list.extend(total_count_date_list)
+    return all_result_list
+
+def select_first_code(file_path='../train_data/profit_1_day_1_ratio_0.25/bad_1_select.csv', good_params_df=None, is_need_find=False):
     all_result_list = []
-    base_name = os.path.basename(file_path)
-    origin_selected_samples = low_memory_load(file_path)
-    compare_origin_selected_samples = low_memory_load('../train_data/2024_data_2024.csv')
-    compare_origin_selected_samples['日期'] = pd.to_datetime(compare_origin_selected_samples['日期'])
-    compare_origin_selected_samples = compare_origin_selected_samples[compare_origin_selected_samples.columns.drop(list(compare_origin_selected_samples.filter(regex='信号')))]
+    # 如果file_path是DataFrame，直接使用
+    if isinstance(file_path, pd.DataFrame):
+        origin_selected_samples = file_path
+        # 获取origin_selected_samples的第一个日期
+        date_str = origin_selected_samples['日期'].values[0]
+        base_name = f'{date_str}_first_select'
+    else:
+        base_name = os.path.basename(file_path)
+        origin_selected_samples = low_memory_load(file_path)
+    if origin_selected_samples.empty:
+        return pd.DataFrame()
+    # origin_selected_samples = origin_selected_samples[origin_selected_samples['cha_thread'] >= 0]
+    # compare_origin_selected_samples = low_memory_load('../train_data/full_2024_compare.csv')
+    # compare_origin_selected_samples['日期'] = pd.to_datetime(compare_origin_selected_samples['日期'])
     origin_selected_samples['日期'] = pd.to_datetime(origin_selected_samples['日期'])
+    need_find = False
     if '后续1日最高价利润率' not in origin_selected_samples.columns:
         origin_selected_samples['后续1日最高价利润率'] = 0
+        need_find = True
     if '后续2日最高价利润率' not in origin_selected_samples.columns:
         origin_selected_samples['后续2日最高价利润率'] = 0
-    good_params_df = get_first_good_param()
+        need_find = True
+
+    if good_params_df is None:
+        good_params_df = get_first_good_param()
+
     print(f"共有 {good_params_df.shape[0]} 个参数")
     json_file_list = list(good_params_df['json_file'].unique())
-    all_model_name_dict = get_all_model_list()
+    all_model_name_dict = get_all_model_list_select()
 
     # 创建进程池
-    pool = Pool(processes=10)
+    pool = Pool(processes=20)
     # 使用进程池的map方法并行处理json_file_list
     result_lists = pool.starmap(select_first_code_process, [(all_model_name_dict, json_file, good_params_df, origin_selected_samples, []) for json_file in json_file_list])
     # 关闭进程池
@@ -2518,23 +3025,226 @@ def select_first_code(file_path='../train_data/profit_1_day_1_ratio_0.25/bad_1_s
     all_result_dict = Counter(all_result_list)
     all_result_dict = dict(sorted(all_result_dict.items(), key=lambda item: item[1], reverse=True))
     print(f"{len(all_result_dict)} 个数据")
-    with open(f'../final_zuhe/select/first_all_selected_{base_name}.json', 'w') as file:
-        json.dump(all_result_dict, file)
+    # with open(f'../final_zuhe/select/first_all_selected_{base_name}.json', 'w') as file:
+    #     json.dump(all_result_dict, file)
     result_list = []
-    for date, count in all_result_dict.items():
-        date, code = date.split('_')
-        if compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (compare_origin_selected_samples['代码'] == code)].empty:
-            print(f"{date} {code} 不存在")
-        else:
-            select_data = compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (compare_origin_selected_samples['代码'] == code)].iloc[0]
+    if need_find and is_need_find:
+        for date, count in all_result_dict.items():
+            date, code = date.split('_')
+            if compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (
+                    compare_origin_selected_samples['代码'] == code)].empty:
+                print(f"{date} {code} 不存在")
+            else:
+                select_data = compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (
+                            compare_origin_selected_samples['代码'] == code)].iloc[0]
+                select_datas = origin_selected_samples[
+                    (origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)]
+                # 计算select_datas中 cha_thread的最大值和最小值,还有均值，同时也计算thread的最大值和最小值，还有均值，然后将这些值添加到select_data中
+                select_data['cha_thread_max'] = select_datas['cha_thread'].max()
+                select_data['cha_thread_min'] = select_datas['cha_thread'].min()
+                select_data['cha_thread_mean'] = select_datas['cha_thread'].mean()
+                select_data['thread_max'] = select_datas['thread'].max()
+                select_data['thread_min'] = select_datas['thread'].min()
+                select_data['thread_mean'] = select_datas['thread'].mean()
+                select_data['rf_select_count'] = count
+                result_list.append(select_data)
+    else:
+        for date, count in all_result_dict.items():
+            date, code = date.split('_')
+            select_datas = origin_selected_samples[
+                (origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)]
+            select_data = origin_selected_samples[
+                (origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)].iloc[0]
+            # 计算select_datas中 cha_thread的最大值和最小值,还有均值，同时也计算thread的最大值和最小值，还有均值，然后将这些值添加到select_data中
+            select_data['cha_thread_max'] = select_datas['cha_thread'].max()
+            select_data['cha_thread_min'] = select_datas['cha_thread'].min()
+            select_data['cha_thread_mean'] = select_datas['cha_thread'].mean()
+            select_data['thread_max'] = select_datas['thread'].max()
+            select_data['thread_min'] = select_datas['thread'].min()
+            select_data['thread_mean'] = select_datas['thread'].mean()
             select_data['rf_select_count'] = count
             result_list.append(select_data)
+    result_df = pd.DataFrame()
+    if len(result_list) > 0:
+        result_df = pd.DataFrame(result_list)
+        result_df['当前时间'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result_df.to_csv(f'../final_zuhe/select/first_all_selected_{base_name}.csv', index=False)
+    return result_df
+
+def select_first_code_old(file_path='../train_data/profit_1_day_1_ratio_0.25/bad_1_select.csv', good_params_df=None, is_need_find=False):
+    all_result_list = []
+    # 如果file_path是DataFrame，直接使用
+    if isinstance(file_path, pd.DataFrame):
+        origin_selected_samples = file_path
+        # 获取当前时间的字符串，保留到天
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        base_name = f'{date_str}_first_select'
+    else:
+        base_name = os.path.basename(file_path)
+        origin_selected_samples = low_memory_load(file_path)
+    if origin_selected_samples.empty:
+        return pd.DataFrame()
+    # origin_selected_samples = origin_selected_samples[origin_selected_samples['cha_thread'] >= 0]
+    # compare_origin_selected_samples = low_memory_load('../train_data/full_2024_compare.csv')
+    # compare_origin_selected_samples['日期'] = pd.to_datetime(compare_origin_selected_samples['日期'])
+    origin_selected_samples['日期'] = pd.to_datetime(origin_selected_samples['日期'])
+    need_find = False
+    if '后续1日最高价利润率' not in origin_selected_samples.columns:
+        origin_selected_samples['后续1日最高价利润率'] = 0
+        need_find = True
+    if '后续2日最高价利润率' not in origin_selected_samples.columns:
+        origin_selected_samples['后续2日最高价利润率'] = 0
+        need_find = True
+
+    if good_params_df is None:
+        good_params_df = get_first_good_param()
+
+    print(f"共有 {good_params_df.shape[0]} 个参数")
+    json_file_list = list(good_params_df['json_file'].unique())
+    all_model_name_dict = get_all_model_list_select()
+
+    # 创建进程池
+    pool = Pool(processes=20)
+    # 使用进程池的map方法并行处理json_file_list
+    result_lists = pool.starmap(select_first_code_process_old, [(all_model_name_dict, json_file, good_params_df, origin_selected_samples, []) for json_file in json_file_list])
+    # 关闭进程池
+    pool.close()
+    pool.join()
+
+    # 合并所有进程的结果
+    for result_list in result_lists:
+        all_result_list.extend(result_list)
+
+    all_result_dict = Counter(all_result_list)
+    all_result_dict = dict(sorted(all_result_dict.items(), key=lambda item: item[1], reverse=True))
+    print(f"{len(all_result_dict)} 个数据")
+    # with open(f'../final_zuhe/select/first_all_selected_{base_name}.json', 'w') as file:
+    #     json.dump(all_result_dict, file)
+    result_list = []
+    if need_find and is_need_find:
+        for date, count in all_result_dict.items():
+            date, code = date.split('_')
+            if compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (compare_origin_selected_samples['代码'] == code)].empty:
+                print(f"{date} {code} 不存在")
+            else:
+                select_data = compare_origin_selected_samples[(compare_origin_selected_samples['日期'] == date) & (compare_origin_selected_samples['代码'] == code)].iloc[0]
+                select_datas = origin_selected_samples[(origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)]
+                # 计算select_datas中 cha_thread的最大值和最小值,还有均值，同时也计算thread的最大值和最小值，还有均值，然后将这些值添加到select_data中
+                select_data['cha_thread_max'] = select_datas['cha_thread'].max()
+                select_data['cha_thread_min'] = select_datas['cha_thread'].min()
+                select_data['cha_thread_mean'] = select_datas['cha_thread'].mean()
+                select_data['thread_max'] = select_datas['thread'].max()
+                select_data['thread_min'] = select_datas['thread'].min()
+                select_data['thread_mean'] = select_datas['thread'].mean()
+                select_data['rf_select_count'] = count
+                result_list.append(select_data)
+    else:
+        for date, count in all_result_dict.items():
+            date, code = date.split('_')
+            select_datas = origin_selected_samples[(origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)]
+            select_data = origin_selected_samples[(origin_selected_samples['日期'] == date) & (origin_selected_samples['代码'] == code)].iloc[0]
+            # 计算select_datas中 cha_thread的最大值和最小值,还有均值，同时也计算thread的最大值和最小值，还有均值，然后将这些值添加到select_data中
+            select_data['cha_thread_max'] = select_datas['cha_thread'].max()
+            select_data['cha_thread_min'] = select_datas['cha_thread'].min()
+            select_data['cha_thread_mean'] = select_datas['cha_thread'].mean()
+            select_data['thread_max'] = select_datas['thread'].max()
+            select_data['thread_min'] = select_datas['thread'].min()
+            select_data['thread_mean'] = select_datas['thread'].mean()
+            select_data['rf_select_count'] = count
+            result_list.append(select_data)
+    result_df = pd.DataFrame()
     if len(result_list) > 0:
         result_df = pd.DataFrame(result_list)
         result_df.to_csv(f'../final_zuhe/select/first_all_selected_{base_name}.csv', index=False)
+    return result_df
 
 
 
+def update_second_param():
+    # update_2024_data()
+
+    file_list = []
+    for root, dirs, files in os.walk('../final_zuhe/other'):
+        for file in files:
+            if 'profit_1_day_2' in file and 'interval' in file and '0531' in file:
+                file_list.append(file)
+    data = low_memory_load('../train_data/2024_data_2024.csv')
+    # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-0603_real_time.csv', low_memory=False)
+    data['日期'] = pd.to_datetime(data['日期'])
+    # 获取data的最大和最小日期，保留到天,并且拼接为字符串
+    date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
+    for file in file_list:
+        key_name = file.split('profit')[1]
+        output_file_path = f'../temp/data/second_all_selected_samples_{date_str}_{key_name}.csv'
+        with open(f'../final_zuhe/other/{file}', 'r') as files:
+            temp_dict = json.load(files)
+            all_selected_samples = get_all_good_data_with_model_name_list_new(data, temp_dict, process_count=1, thread_count=1, output_file_path=output_file_path)
+
+    file_list = []
+    for root, dirs, files in os.walk('../final_zuhe/other'):
+        for file in files:
+            if 'profit_1_day_1' in file and 'interval' in file and '0531' in file:
+                file_list.append(file)
+    data = low_memory_load('../train_data/2024_data_2024.csv')
+    # data = pd.read_csv('../final_zuhe/real_time/select_RF_2024-0603_real_time.csv', low_memory=False)
+    data['日期'] = pd.to_datetime(data['日期'])
+    # 获取data的最大和最小日期，保留到天,并且拼接为字符串
+    date_str = f"{data['日期'].min().strftime('%Y%m%d')}_{data['日期'].max().strftime('%Y%m%d')}"
+    for file in file_list:
+        key_name = file.split('profit')[1]
+        output_file_path = f'../temp/data/second_all_selected_samples_{date_str}_{key_name}.csv'
+        with open(f'../final_zuhe/other/{file}', 'r') as files:
+            temp_dict = json.load(files)
+            all_selected_samples = get_all_good_data_with_model_name_list_new(data, temp_dict, process_count=1, thread_count=1, output_file_path=output_file_path)
+
+def read_csv_file(file_path_list):
+    temp_data_list = []
+    for file_path in file_path_list:
+        temp_data_list.append(pd.read_csv(file_path))
+    print(f"读取 {len(file_path_list)} 个文件")
+    return pd.concat(temp_data_list, ignore_index=True)
+
+def merger_all_param_select(file_path='../final_zuhe/first_param/profit_1_day_1_ratio_0.5/bad_1_select.csv'):
+    # 读取file_path下面的所有.csv文件
+    all_file_list = []
+    for root, dirs, files in os.walk(file_path):
+        for file in files:
+            if file.endswith('.csv'):
+                full_name = os.path.join(root, file)
+                all_file_list.append(full_name)
+    # 将all_file_list写入'../final_zuhe/other/all_file_list.json'
+    with open('../final_zuhe/other/all_file_list.json', 'w') as file:
+        json.dump(all_file_list, file)
+
+    # # 读取'../final_zuhe/other/all_file_list.json'
+    # with open('../final_zuhe/other/all_file_list.json', 'r') as file:
+    #     all_file_list = json.load(file)
+    print(f"共有 {len(all_file_list)} 个文件")
+    processes = 100
+    # 将all_file_list分成processes份
+    all_file_list = [all_file_list[i:i + processes] for i in range(0, len(all_file_list), processes)]
+    print(f"共有 {len(all_file_list)} 个文件")
+    # 使用多进程读取所有的csv文件
+    with Pool(processes=20) as pool:
+        all_data_list = pool.map(read_csv_file, all_file_list)
+
+    if len(all_data_list) > 0:
+        # 合并所有的数据
+        all_data = pd.concat(all_data_list, ignore_index=True)
+        all_data = remove_duplicate_rows(all_data)
+        all_data.to_csv(f'{file_path}allmerged.csv', index=False)
+
+def gen_first_param_dict(train_data='profit_1_day_1'):
+    good_param_path = f'../final_zuhe/first_param/{train_data}_param_df.csv'
+    good_param_df = pd.read_csv(good_param_path)
+    all_model_info_list_dict_path = f'../final_zuhe/first_param/{train_data}_all_model_info_list.json'
+    all_model_info_list_dict = read_json(all_model_info_list_dict_path)
+    return good_param_df, all_model_info_list_dict
+
+def copy_model(model_info):
+    abs_model_path = model_info['model_path']
+    model_path = os.path.join('../temp/back_model', os.path.basename(abs_model_path))
+    shutil.copy(abs_model_path, model_path)
 
 def example():
     """
@@ -2543,11 +3253,22 @@ def example():
     """
     # file_path = '../train_data/profit_1_day_1_ratio_0.5/bad_1_select.csv'
     # save_all_selected_samples(file_path)
-    file_path = '../train_data/profit_1_day_1_ratio_0.5/good_1_select.csv'
-    save_all_selected_samples(file_path, processes=25)
     # gen_full_select()
-    return
-
+    # file_path = '../train_data/profit_1_day_1_ratio_0.5/good_1_select.csv'
+    # save_all_selected_samples(file_path, processes=5)
+    # file_path = '../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.8-0.9.csv'
+    # save_all_selected_samples(file_path)
+    # file_path = '../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.7-0.8.csv'
+    # save_all_selected_samples(file_path)
+    # file_path = '../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.6-0.7.csv'
+    # save_all_selected_samples(file_path)
+    # file_path = '../train_data/profit_1_day_1_ratio_0.25/good_1_select_interval_0.5-0.6.csv'
+    # save_all_selected_samples(file_path)
+    # file_path = '../temp/data/second_all_selected_samples_20240102_20240430_inter_day1.csv'
+    # file_path = '../temp/data/second_all_selected_samples_20240102_20240430_inter_day1.csv'
+    # save_all_selected_samples(file_path, processes=25)
+    # update_second_param()
+    # return
     # select_first_code('../temp/data/second_all_selected_samples_20240507_20240507.csv')
 
 
@@ -2573,13 +3294,62 @@ def example():
 
 
     # # 使用模型在阈值范围内选股
+    # with open('../final_zuhe/other/new_good_all_model_reports_cuml_profit_1_day_1_ratio_0.25_bad_0_interval_3-4_train_thread_day_2_0525.json', 'r') as file:
+    #     model_info_list = json.load(file)
+
+    # # 遍历../final_zuhe/other下的所有json文件，找出其中包含thread_day_2_0525的文件
+    # file_list = []
+    # for root, dirs, files in os.walk('../final_zuhe/other'):
+    #     for file in files:
+    #         if 'profit_1_day_1' in file and 'interval' in file and '0531' in file:
+    #             file_list.append(file)
+    # temp_model_list = []
+    # model_info_list = []
+    # for file in file_list:
+    #     with open(f'../final_zuhe/other/{file}', 'r') as file:
+    #         temp_dict = json.load(file)
+    #         temp_model_list.append(temp_dict)
+    #         model_info_list.extend(temp_dict)
+
+    # # 遍历../final_zuhe/other下的所有json文件，找出其中包含thread_day_2_0525的文件
+    # file_list = []
+    # for root, dirs, files in os.walk('../final_zuhe/other'):
+    #     for file in files:
+    #         if 'thread_day_2' in file and 'profit_1_day_1' in file and 'interval' in file and '0525' in file:
+    #             file_list.append(file)
+    # temp_model_list = []
+    # model_info_list = []
+    # for file in file_list:
+    #     with open(f'../final_zuhe/other/{file}', 'r') as file:
+    #         temp_dict = json.load(file)
+    #         temp_model_list.append(temp_dict)
+    #         model_info_list.extend(temp_dict)
+
+    # balance_disk()
+
     # with open('../final_zuhe/other/all_data.json', 'r') as file:
     #     model_info_list = json.load(file)
-    # # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-04-29_real_time.csv')
-    # # data['日期'] = pd.to_datetime(data['日期'])
-    # data = low_memory_load('../train_data/profit_1_day_1_ratio_0.7/good_1_merged.csv')
-    # data['日期'] = pd.to_datetime(data['日期'])
-    # all_selected_samples = get_all_good_data_with_model_name_list_new(data, model_info_list, process_count=3, thread_count=3)
+    # with open('../final_zuhe/other/new_good_all_model_reports_cuml_all_all.json', 'r') as file:
+    #     model_info_list = json.load(file)
+    # data = low_memory_load('../final_zuhe/real_time/select_RF_2024-06-21_real_time.csv')
+    # data = low_memory_load('../train_data/profit_1_day_1_ratio_0.25/good_1_merged.csv')
+    data = low_memory_load('../train_data/2024_data_2024.csv')
+    data['日期'] = pd.to_datetime(data['日期'])
+    data = data[data['日期'] >= '2024-01-01']
+    key_signal_columns = [column for column in data.columns if '最高价利润率' in column]
+    key_signal_columns.append('涨跌幅')
+    key_signal_columns.extend(['日期', '代码'])
+    final_data = data[key_signal_columns]
+    # 将data写入'../final_zuhe/other/2024_data_2024_simple.json'
+    final_data.to_csv('../final_zuhe/other/2024_data_2024_simple.csv', index=False)
+    return
+
+    # 筛选出model_info_list中max_score大于10的数据
+    # model_info_list = [model_info for model_info in model_info_list if model_info['max_score'] > 10]
+    good_param_df, all_model_info_list_dict1 = gen_first_param_dict(train_data='profit_1_day_1')
+    good_param_df, all_model_info_list_dict2 = gen_first_param_dict(train_data='profit_1_day_2')
+    all_model_info_list_dict = all_model_info_list_dict1 + all_model_info_list_dict2
+    all_selected_samples = get_all_good_data_with_model_name_list_new(data, all_model_info_list_dict1, process_count=5, thread_count=4)
     # # 对已经通过模型选择的数据，进行第一层参数的选择，然后再进行第二层参数的选择
     # data = pd.read_csv('../temp/back/good_param_select_2024-04-30.csv')
     # mul_select('../temp/data/all_selected_samples_20240430_20240430.csv')
