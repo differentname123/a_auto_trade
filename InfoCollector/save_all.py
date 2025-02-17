@@ -53,6 +53,9 @@ def get_price(symbol, start_time, end_time, period="daily"):
     else:
         result = ak.stock_zh_a_hist_min_em(symbol=symbol, period=period, start_date=start_time, end_date=end_time,
                                            adjust="qfq")
+    # 如果 股票代码 在 result将它重命名为 代码
+    if '股票代码' in result.columns:
+        result.rename(columns={'股票代码': '代码'}, inplace=True)
     return result
 
 
