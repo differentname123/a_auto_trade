@@ -1013,7 +1013,7 @@ def update_2024_data_simple():
     all_data_df = load_and_merge_data(all_files)
     print(f'加载所有数据 耗时：{time.time() - start_time:.2f}秒')
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])
-    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2024-01-01')]
+    all_data_df_2024 = all_data_df[all_data_df['日期'] >= pd.Timestamp('2025-01-01')]
     key_signal_columns = [column for column in all_data_df_2024.columns if '后续' in column]
     key_signal_columns.append('涨跌幅')
     key_signal_columns.extend(['日期', '代码'])
