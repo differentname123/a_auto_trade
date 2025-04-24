@@ -18,6 +18,7 @@ from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
+import akshare as ak
 
 from InfoCollector.save_all import save_all_data_mul
 from StrategyExecutor.common import load_data, load_file_chunk, write_json, read_json, load_data_filter, \
@@ -1002,7 +1003,20 @@ def update_2024_data_simple():
     #     for file in files:
     #         os.remove(os.path.join(root, file))
 
-    save_all_data_mul()
+    # save_all_data_mul()
+
+    stock_data_df = ak.stock_zh_a_spot_em()
+    exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
+    exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+    need_code_set = {code for code in stock_data_df['代码'] if
+                     code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    new_exclude_code_set = set(stock_data_df['代码']) - need_code_set
+    new_exclude_code_set.update(exclude_code_set)
+
+    # 筛选出满足条件的股票数据
+    filtered_stock_data_df = stock_data_df[~stock_data_df['代码'].isin(new_exclude_code_set)]
+    # 获取filtered_stock_data_df的所有代码
+    code_list = filtered_stock_data_df['代码'].tolist()
 
 
     print(f'开始加载所有数据 耗时：{time.time() - start_time:.2f}秒')
@@ -1010,6 +1024,10 @@ def update_2024_data_simple():
     file_path = '../daily_data_exclude_new_can_buy'
     # 获取目录下所有文件的完整路径
     all_files = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
+    # 过滤all_files，只保留名称包含code_list的文件
+    all_files = [file for file in all_files if any(code in file for code in code_list)]
+    print(f'all_files的数量为{len(all_files)}')
+
     all_data_df = load_and_merge_data(all_files)
     print(f'加载所有数据 耗时：{time.time() - start_time:.2f}秒')
     all_data_df['日期'] = pd.to_datetime(all_data_df['日期'])

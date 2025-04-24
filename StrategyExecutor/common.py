@@ -193,7 +193,7 @@ def load_file_chunk_filter(file_chunk, start_date='2024-01-01' ,end_date='2026-0
         chunk_data = [item for sublist in chunk_data for item in sublist]
         return pd.concat(chunk_data)
     except Exception:
-        # traceback.print_exc()
+        traceback.print_exc()
         return pd.DataFrame()
 
 def write_json(file_path, data):
@@ -239,6 +239,25 @@ def load_data(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
+def calculate_future_high_prices(data):
+    """
+    计算后续1，2，3日的最高价。
+
+    参数:
+    - data: DataFrame，包含市场数据，其中应包含一个名为'最高价'的列。
+
+    返回值:
+    - 修改后的DataFrame，包含新增的后续1，2，3日最高价列。
+    """
+    # 计算后续1，2，3日的最高价
+    data[f'后续1日开盘价利润率'] = round((data['开盘'].shift(-1) - data['收盘']) / data['收盘'] * 100, 2)
+    for days in [1, 2, 3]:
+        # 获取后续最高价的利润率
+        data[f'后续{days}日最高价利润率'] = round((data['最高'].shift(-days).rolling(window=days, min_periods=1).max() - data['收盘']) / data['收盘'] * 100, 2)
+        data[f'后续{days}日最低价利润率'] = round((data['最低'].shift(-days).rolling(window=days, min_periods=1).min() - data['收盘']) / data['收盘'] * 100, 2)
+        data[f'后续{days}日涨跌幅'] = round((data['收盘'].shift(-days) - data['收盘']) / data['收盘'] * 100, 2)
+
+    return data
 
 def load_data_filter(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     """
@@ -249,6 +268,8 @@ def load_data_filter(file_path, start_date='2018-01-01', end_date='2024-01-01'):
     :return: 分段的数据列表
     """
     data = pd.read_csv(file_path, low_memory=False)
+    data = calculate_future_high_prices(data)
+
     name, code = parse_filename(file_path)
     if '时间' in data.columns:
         data = data.rename(columns={'时间': '日期'})
@@ -290,7 +311,6 @@ def load_data_filter(file_path, start_date='2018-01-01', end_date='2024-01-01'):
 
     # 过滤掉segment长度小于26的数据
     segments = [segment for segment in segments if len(segment) >= 26]
-
 
     return segments
 
