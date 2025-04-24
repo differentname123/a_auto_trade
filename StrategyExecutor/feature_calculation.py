@@ -993,14 +993,14 @@ def update_2024_data_simple():
     :return:
     """
     start_time = time.time()
-    save_path = '../daily_data_exclude_new_can_buy'
-    # 删除source_path和save_path下的所有文件
-    for root, _, files in os.walk(save_path):
-        for file in files:
-            os.remove(os.path.join(root, file))
-    for root, _, files in os.walk(save_path):
-        for file in files:
-            os.remove(os.path.join(root, file))
+    # save_path = '../daily_data_exclude_new_can_buy'
+    # # 删除source_path和save_path下的所有文件
+    # for root, _, files in os.walk(save_path):
+    #     for file in files:
+    #         os.remove(os.path.join(root, file))
+    # for root, _, files in os.walk(save_path):
+    #     for file in files:
+    #         os.remove(os.path.join(root, file))
 
     save_all_data_mul()
 

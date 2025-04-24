@@ -174,7 +174,7 @@ def save_stock_data(stock_data, exclude_code):
     name = stock_data['名称'].replace('*', '')
     code = stock_data['代码']
     if code not in exclude_code:
-        price_data = get_price(code, '20170101', '20291021', period='daily')
+        price_data = get_price(code, '20230101', '20291021', period='daily')
         filename = '../daily_data_exclude_new_can_buy/{}_{}.txt'.format(name, code)
         # price_data不为空才保存
         if not price_data.empty and len(price_data) > 26:
@@ -625,16 +625,25 @@ def save_all_data():
 @timeit
 def save_all_data_mul(save_fun=save_stock_data):
     stock_data_df = ak.stock_zh_a_spot_em()
-    all_code_set = set(stock_data_df['代码'].tolist())
+    # all_code_set = set(stock_data_df['代码'].tolist())
+    #
+    # exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
+    # exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+    #
+    # need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    # new_exclude_code_set = all_code_set - need_code_set
+    # new_exclude_code_set.update(exclude_code_set)
 
-    exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
-    exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
+    # 扫描'../daily_data_exclude_new_can_buy'下面的所有文件
+    exclude_code_set = set()
+    for file in os.listdir('../daily_data_exclude_new_can_buy'):
+        if file.endswith('.txt'):
+            code = file.split('_')[1].split('.')[0]
+            exclude_code_set.add(code)
+    new_exclude_code_set = exclude_code_set
+    print(f"exclude_code_set: {len(exclude_code_set)}")
 
-    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
-    new_exclude_code_set = all_code_set - need_code_set
-    new_exclude_code_set.update(exclude_code_set)
-
-    with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(save_fun, stock_data, new_exclude_code_set) for _, stock_data in stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
             try:
@@ -814,17 +823,17 @@ def anlyse_money_data():
     money_detail_df.to_csv(f'../final_zuhe/other/money_detail.csv', index=False)
 
 if __name__ == '__main__':
-    # 删除../money_detail下面的所有文件
-    for file in os.listdir('../money_detail'):
-        os.remove(f'../money_detail/{file}')
-    save_all_data_mul(save_fun=save_money_stock_data)
-    anlyse_money_data()
+    # # 删除../money_detail下面的所有文件
+    # for file in os.listdir('../money_detail'):
+    #     os.remove(f'../money_detail/{file}')
+    # save_all_data_mul(save_fun=save_money_stock_data)
+    # anlyse_money_data()
 
 
     # money_detail()
     # save_index_data()
-    # # price_data = get_price('002492', '20230101', '20290124', period='1')
-    # # print(price_data)
+    price_data = get_price('002492', '20230101', '20290124', period='1')
+    print(price_data)
     # #
     # # stock_zh_b_minute_df = ak.stock_zh_b_minute(symbol='sh900901', period='1', adjust="qfq")
     # # print(stock_zh_b_minute_df)
