@@ -61,8 +61,11 @@ from StrategyExecutor.zuhe_daily_strategy import gen_full_all_basic_signal, filt
 
 pd.options.mode.chained_assignment = None  # 关闭SettingWithCopyWarning
 import warnings
+
 warnings.filterwarnings('ignore', message='.*DataFrame is highly fragmented.*')
 MODEL_PATH = '../model/all_models'
+
+
 def get_buy_price(close_price):
     """
     根据收盘价，返回买入价格
@@ -73,6 +76,7 @@ def get_buy_price(close_price):
     buy_price = close_price * 1.0025
     buy_price = math.ceil(buy_price * 100) / 100
     return buy_price
+
 
 def get_sell_price(buy_price):
     """
@@ -155,17 +159,20 @@ def backtest_strategy_low_profit(data):
             days_held = j - buy_index
             if profit < 0.1:
                 days_held = 3
-            results.append([name, symbol, buy_date, buy_date, buy_price, sell_date, sell_price, profit, total_profit, total_cost,
-                            days_held, high_list, i])
+            results.append(
+                [name, symbol, buy_date, buy_date, buy_price, sell_date, sell_price, profit, total_profit, total_cost,
+                 days_held, high_list, i])
 
         i += 1
 
     results_df = pd.DataFrame(results,
-                              columns=['名称', '代码', '日期', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price', 'Profit',
+                              columns=['名称', '代码', '日期', 'Buy Date', 'Buy Price', 'Sell Date', 'Sell Price',
+                                       'Profit',
                                        'Total_Profit', 'total_cost',
                                        'Days Held', 'high_list', 'Buy_Index'])
 
     return results_df
+
 
 def backtest_strategy_low_profit_target_data_specia(data, date, price):
     """
@@ -247,6 +254,7 @@ def backtest_strategy_low_profit_target_data_specia(data, date, price):
                                        'Days Held', 'high_list', 'Buy_Index'])
 
     return results_df
+
 
 def backtest_strategy_low_profit_target_data(data, date):
     """
@@ -382,6 +390,7 @@ def load_data(file_path):
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
 
+
 def load_full_data(file_path):
     """
     加载全部数据，不进行时间截断
@@ -402,6 +411,7 @@ def load_full_data(file_path):
     data.reset_index(drop=True, inplace=True)
     data['Buy_Signal'] = (data['涨跌幅'] < 0.95 * data['Max_rate'])
     return data
+
 
 def load_data_limit(file_path, limit=100):
     try:
@@ -538,7 +548,9 @@ def gen_signal(data, combination):
     :return:
     """
     # 获取combination中的列名，然后作为key进行与操作
-    data['Buy_Signal'] = ((data['涨跌幅'] >= -(data['Max_rate'] - 1.0 / data['收盘'])) & (data['涨跌幅'] <= (data['Max_rate'] - 1.0 / data['收盘'])) & (data['收盘'] >= 3) & (data['Max_rate'] > 0.1))
+    data['Buy_Signal'] = ((data['涨跌幅'] >= -(data['Max_rate'] - 1.0 / data['收盘'])) & (
+                data['涨跌幅'] <= (data['Max_rate'] - 1.0 / data['收盘'])) & (data['收盘'] >= 3) & (
+                                      data['Max_rate'] > 0.1))
     for column in combination:
         data['Buy_Signal'] = data['Buy_Signal'] & data[column]
     return data
@@ -791,7 +803,8 @@ def back_layer_all(file_path, gen_signal_func=gen_full_all_basic_signal, backtes
         print(
             f'level:{level}, zero_combinations_set:{len(zero_combinations_set)}, basic_indicators:{len(basic_indicators)}, newest_indicators:{len(newest_indicators)}, result_combination_list:{len(result_combination_list)}, full_combination_list:{len(full_combination_list)}')
         level += 1
-        result_combination_list = ['振幅_大于_10_日均线_signal:最低_20日_大极值signal:最高_小于_20_日均线_signal'.split(':')]
+        result_combination_list = [
+            '振幅_大于_10_日均线_signal:最低_20日_大极值signal:最高_小于_20_日均线_signal'.split(':')]
         if result_combination_list == []:
             if newest_indicators == []:
                 break
@@ -841,7 +854,8 @@ def find_st_periods(posts):
 
     # 去除posts中notice_type包含 '深交所' 或 '上交所' 的帖子,或者是None
     posts = [post for post in posts if
-             post['notice_type'] is not None and '深交所' not in post['notice_type'] and '上交所' not in post['notice_type']]
+             post['notice_type'] is not None and '深交所' not in post['notice_type'] and '上交所' not in post[
+                 'notice_type']]
 
     for i in range(len(posts) - 1):
         current_post = posts[i]
@@ -934,6 +948,7 @@ def find_st_periods_strict(announcements):
 
     return st_periods
 
+
 def get_good_statistic(date):
     bad_statistics = {}
     bad_output_file_path = '../final_zuhe/back/' + date + 'bad_back.json'
@@ -941,6 +956,7 @@ def get_good_statistic(date):
     for k, v in statistics.items():
         bad_statistics.update(v['satisfied_combinations'])
     return bad_statistics
+
 
 def judge_json(json_data):
     if 'all' in json_data.keys():
@@ -955,6 +971,7 @@ def judge_json(json_data):
     else:
         return False
     return True
+
 
 # def judge_json(json_data):
 #     if 'all' not in json_data.keys():
@@ -1002,7 +1019,6 @@ def get_good_combinations():
     #                    or (v['than_1_average_days_held'] >= 2.01 and v['ratio'] <= 0.06 and v['three_befor_year_count_thread_ratio'] <= 0.06)
     #                    }
 
-
     # statistics_new = {k: v for k, v in statistics.items() if v['trade_count'] > 10 and (v['three_befor_year_count'] >= 10)} # 100交易次数以上 13859
     # # statistics_new = {k: v for k, v in statistics_new.items() if v['three_befor_year_count_thread_ratio'] <= 0.10 and v['three_befor_year_rate'] >= 0.2}
     # good_ratio_keys = {k: v for k, v in statistics_new.items() if v['ratio'] <= 0.1 and v['1w_rate'] >= 100 and v['average_1w_profit'] >= 100 and v['three_befor_year_count_thread_ratio'] <= 0.1 }
@@ -1030,9 +1046,11 @@ def get_good_combinations():
     # # statistics_all.update(statistics_1w)
     # # statistics_all.update(statistics_1w_rate)
 
-    statistics_all.update(good_ratio_keys) # 761
-    statistics_all = dict(sorted(statistics_all.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
+    statistics_all.update(good_ratio_keys)  # 761
+    statistics_all = dict(
+        sorted(statistics_all.items(), key=lambda x: (-x[1]['all']['ratio'], x[1]['all']['trade_count']), reverse=True))
     write_json('../final_zuhe/good_statistics.json', statistics_all)
+
 
 def filter_combinations_good(zero_combinations_set, good_keys):
     """
@@ -1041,6 +1059,7 @@ def filter_combinations_good(zero_combinations_set, good_keys):
     final_combinations_set = good_keys
     return [comb.split(':') for comb in final_combinations_set if
             not any(frozenset(comb.split(':')) >= zc for zc in zero_combinations_set)], zero_combinations_set
+
 
 def process_file_op(file_path, target_date, good_keys, good_statistics, gen_signal_func, index_data):
     # 为每个文件执行的处理逻辑
@@ -1084,6 +1103,7 @@ def process_file_op(file_path, target_date, good_keys, good_statistics, gen_sign
                 '收盘': target_data['收盘'].values[0], '涨跌幅': target_data['涨跌幅'].values[0],
                 'Max_rate': int(target_data['Max_rate'].values[0])}
     return None
+
 
 def process_file(file_path, target_date, good_keys, good_statistics, gen_signal_func):
     # 为每个文件执行的处理逻辑
@@ -1201,10 +1221,11 @@ def get_newest_stock():
     final_statistics = {key: good_statistics[key] for key in final_combinations}
     print(str(target_date) + '的组合数量为：' + str(len(final_combinations)))
     get_target_date_good_stocks_mul_op('../daily_data_exclude_new_can_buy', target_date,
-                                    gen_full_all_basic_signal, final_combinations, final_statistics, index_data)
+                                       gen_full_all_basic_signal, final_combinations, final_statistics, index_data)
     # 结束计时
     end_time = time.time()
     print('耗时：', end_time - start_time)
+
 
 def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     # 开始计时
@@ -1247,10 +1268,9 @@ def get_target_date_good_stocks_mul(file_path, target_date, gen_signal_func):
     end_time = time.time()
     print('耗时：', end_time - start_time)
 
+
 def get_target_date_good_stocks_mul_op(file_path, target_date, gen_signal_func, good_keys, good_statistics, index_data):
-
     start_time = time.time()
-
 
     # 将 target_date 转换为 datetime 一次
     target_date = pd.to_datetime(target_date)
@@ -1259,7 +1279,8 @@ def get_target_date_good_stocks_mul_op(file_path, target_date, gen_signal_func, 
     pool = Pool(multiprocessing.cpu_count())
     file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(file_path) for file in files]
     results = pool.starmap(process_file_op,
-                           [(file, target_date, good_keys, good_statistics, gen_signal_func, index_data) for file in file_paths])
+                           [(file, target_date, good_keys, good_statistics, gen_signal_func, index_data) for file in
+                            file_paths])
     pool.close()
     pool.join()
 
@@ -1427,6 +1448,7 @@ def find_threshold_close(data, index, step, max_rate, gen_signal_func, search_di
 
     return threshold_close
 
+
 def find_threshold_close_target_date(data, index, step, max_rate, gen_signal_func, search_direction, now_status):
     """ 寻找阈值收盘价 """
     original_close = data.at[index, '收盘']
@@ -1444,7 +1466,8 @@ def find_threshold_close_target_date(data, index, step, max_rate, gen_signal_fun
             if abs(updated_change_rate) > max_rate:
                 break
 
-            if now_status != gen_signal_func(sub_data).loc[sub_data['日期'] == sub_data.at[index, '日期'], 'Buy_Signal'].iloc[0]:
+            if now_status != \
+                    gen_signal_func(sub_data).loc[sub_data['日期'] == sub_data.at[index, '日期'], 'Buy_Signal'].iloc[0]:
                 threshold_close = temp_close
                 break
 
@@ -1484,6 +1507,7 @@ def get_threshold_close(data, gen_signal_func=gen_daily_buy_signal_26, step=0.01
 
     return buy_data
 
+
 def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_signal_26, step=0.01):
     """
     获取data生成买入信号的收盘价阈值
@@ -1495,8 +1519,6 @@ def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_si
     data['Buy_Signal'] = True
     signal_data = gen_signal_func(data)
     target_data = signal_data[signal_data['日期'] == date]
-
-
 
     if target_data.empty:
         return target_data
@@ -1510,7 +1532,8 @@ def get_threshold_close_target_date(date, data, gen_signal_func=gen_daily_buy_si
     # 将Max_rate转换为int
     Max_rate = int(Max_rate)
     threshold_close_up = find_threshold_close_target_date(data, index, step, Max_rate, gen_signal_func, 1, now_status)
-    threshold_close_down = find_threshold_close_target_date(data, index, -step, Max_rate, gen_signal_func, 1, now_status)
+    threshold_close_down = find_threshold_close_target_date(data, index, -step, Max_rate, gen_signal_func, 1,
+                                                            now_status)
 
     # 记录阈值收盘价
     target_data.at[index, 'threshold_close_up'] = threshold_close_up
@@ -1646,8 +1669,6 @@ def count_min_profit_rate(file_path, all_df_file_path, gen_signal_func=mix):
     # get_best_threshold('../back/complex/high_list.csv', 2)
     # 将all_df写入'../back/complex/all_df_full.csv'
     all_df.to_csv('../back/complex/all_df_full.csv', index=False)
-
-
 
 
 def simulate_strategy_profitable(data, sell_thresholds):
@@ -1860,10 +1881,12 @@ def back_select(file_path):
         all_df['grouth_rate'] = 100 * all_df['Profit'] / all_df['total_cost']
 
         all_df.to_csv(output_file_path, index=False)
-        print("date:{}, trade_count:{},bad_count:{},bad_ratio:{}, 1w_profit:{}".format(date, trade_count, bad_count, ratio, average_1w_profit))
+        print("date:{}, trade_count:{},bad_count:{},bad_ratio:{}, 1w_profit:{}".format(date, trade_count, bad_count,
+                                                                                       ratio, average_1w_profit))
         return all_df
     else:
         return None
+
 
 def back_select_target_date(file_path):
     """
@@ -1915,10 +1938,12 @@ def back_select_target_date(file_path):
         all_df['grouth_rate'] = 100 * all_df['Profit'] / all_df['total_cost']
 
         all_df.to_csv(output_file_path, index=False)
-        print("date:{}, trade_count:{},bad_count:{},bad_ratio:{}, 1w_profit:{}".format(date, trade_count, bad_count, ratio, average_1w_profit))
+        print("date:{}, trade_count:{},bad_count:{},bad_ratio:{}, 1w_profit:{}".format(date, trade_count, bad_count,
+                                                                                       ratio, average_1w_profit))
         return all_df
     else:
         return None
+
 
 def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
     """
@@ -1947,6 +1972,7 @@ def back_range_select(start_time='2023-12-04', end_time='2023-12-17'):
         all_df = pd.concat(all_back_result, ignore_index=True)
         all_df.to_csv('../final_zuhe/back/back.csv', index=False)
         return all_df
+
 
 def back_range_select_real_time_RF(start_time='2023-12-04', end_time='2023-12-17'):
     """
@@ -1982,6 +2008,7 @@ def back_range_select_real_time_RF(start_time='2023-12-04', end_time='2023-12-17
     # # 将all_selected_samples保存到out_put_file_path
     # if all_selected_samples and len(all_selected_samples) > 0:
     #     all_selected_samples.to_csv(out_put_file_path, index=False)
+
 
 def back_range_select_real_time(start_time='2023-12-04', end_time='2023-12-17'):
     """
@@ -2026,6 +2053,7 @@ def back_range_select_real_time(start_time='2023-12-04', end_time='2023-12-17'):
         all_df['this_pici_ratio'] = ratio
         all_df.to_csv(out_put_file_path, index=False)
         return all_df
+
 
 def back_range_RF_real_time(start_time='2023-12-04', end_time='2023-12-17'):
     """
@@ -2114,7 +2142,7 @@ def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
         final_statistics = {key: good_statistics[key] for key in final_combinations}
         print(str(date) + '的组合数量为：' + str(len(final_combinations)))
         get_target_date_good_stocks_mul_op('../daily_data_exclude_new_can_buy', date,
-                                        gen_full_all_basic_signal, final_combinations, final_statistics, index_data)
+                                           gen_full_all_basic_signal, final_combinations, final_statistics, index_data)
         date = date.strftime('%Y-%m-%d')
         file_path = '../final_zuhe/select/select_' + date + '.json'
         back_result = back_select(file_path)
@@ -2135,26 +2163,205 @@ def back_range_select_op(start_time='2023-12-04', end_time='2023-12-17'):
         all_df.to_csv(out_put_file_path, index=False)
         return all_df
 
-def save_and_analyse_stock_data_real_time_RF_thread_new(stock_data_list, exclude_code, target_date, need_skip=False):
+def merge_newest_data(data_df: pd.DataFrame, stock_data, latest_trade_date) -> pd.DataFrame:
+    """
+    将单日最新的股票数据合并到现有DataFrame中，处理潜在的重复（更新现有行）并确保排序。
+
+    Args:
+        data_df: 包含历史股票数据的现有DataFrame。
+                 预期列包括 ['日期', '代码', '开盘', '收盘', '最高',
+                 '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率']。
+        stock_data: 包含单只股票最新日数据的字典。
+                    示例: {'代码': '000514', '最新价': 4.57, ...}。
+                    必须包含 '代码' 和与 data_df 列对应的键。
+        latest_trade_date: stock_data 中的数据日期。
+                           必须是 datetime.datetime 类型。
+
+    Returns:
+        一个包含最新数据合并后的新DataFrame，按日期和代码排序。
+    """
+    # 1. 数据准备和映射
+    # 定义 stock_data keys 到 data_df columns 的映射
+    # 注意：'最新价' 映射到 '收盘', '今开' 映射到 '开盘'
+    # 使用 .get() 确保即使 stock_data 缺少某个键也不会出错
+
+    # latest_trade_date 现在保证是 datetime.datetime 类型
+    # 将其格式化为 'YYYY-MM-DD' 字符串以匹配 DataFrame 中 '日期' 列的预期格式
+    date_str = latest_trade_date.strftime('%Y-%m-%d')
+
+
+    # 如果updated_df中代码有不同的值，打印警告
+    unique_codes = data_df['代码'].unique()
+    if len(unique_codes) > 1:
+        print(f"同一个文件存在多个代码: {unique_codes}")
+    # 判断stock_data['代码']是否在unique_codes中
+    if str(stock_data.get('代码', '')) not in unique_codes:
+        print(f"新数据 {stock_data.get('代码', '')} 未在历史code出现: {unique_codes}")
+        return data_df # 返回原始 DataFrame
+
+    new_row_data = {
+        '日期': date_str, # 使用格式化后的字符串日期
+        '代码': str(stock_data.get('代码', '')), # 确保代码是字符串
+        '开盘': stock_data.get('今开', None),
+        '收盘': stock_data.get('最新价', None), # 最新价通常对应收盘价
+        '最高': stock_data.get('最高', None),
+        '最低': stock_data.get('最低', None),
+        '成交量': stock_data.get('成交量', None),
+        '成交额': stock_data.get('成交额', None),
+        '振幅': stock_data.get('振幅', None),
+        '涨跌幅': stock_data.get('涨跌幅', None),
+        '涨跌额': stock_data.get('涨跌额', None),
+        '换手率': stock_data.get('换手率', None),
+    }
+
+    # 验证关键数据是否存在
+    if not new_row_data['代码']:
+        print("Warning: '代码' not found in stock_data. Cannot add/update row.")
+        return data_df # 返回原始 DataFrame
+
+    # 创建一个包含最新数据的单行 DataFrame
+    new_row_df = pd.DataFrame([new_row_data])
+
+    # 2. 处理添加或更新 (使用索引对齐和 combine_first 是一个健壮的方式)
+
+    # 如果原始 DataFrame 是空的，直接返回新的数据行。
+    # new_row_df 已经包含了所有预期的列 (来自 new_row_data keys)
+    if data_df.empty:
+         # 对于空 DataFrame，直接返回新行即可
+         return new_row_df # 单行 DataFrame 不需排序
+
+    # --- 如果 data_df 非空，继续合并/更新 ---
+
+    # 复制原始 DataFrame 以免修改原始对象（如果需要）
+    # 如果希望修改原始对象，可以去掉 .copy()
+    updated_df = data_df.copy()
+
+    # 确保 new_row_df 的列顺序与 data_df 一致，且包含 data_df 的所有列
+    # 这是 combine_first 工作的前提 (索引外的列名必须一致)
+    # reindex 会根据 data_df.columns 调整 new_row_df 的列，没有的会添加 None/NaN
+    new_row_df = new_row_df.reindex(columns=data_df.columns)
+
+
+    # 使用 '日期' 和 '代码' 作为临时索引进行对齐
+    # 设置索引可能会改变列的顺序，后续需要恢复
+    # 注意：这里假设 data_df['日期'] 也是字符串格式 'YYYY-MM-DD'
+    updated_df = updated_df.set_index(['日期'])
+    new_row_df_indexed = new_row_df.set_index(['日期'])
+
+    # 使用 combine_first 进行合并/更新：
+    # - 如果 new_row_df_indexed 的索引不存在于 updated_df 中，则添加新行。
+    # - 如果 new_row_df_indexed 的索引已存在，则用 new_row_df_indexed 中的值更新 updated_df 中对应的值 (非NaN)。
+    # - combine_first 是 new_row 优先
+    updated_df = new_row_df_indexed.combine_first(updated_df)
+
+    # 重置索引，将 '日期' 和 '代码' 变回列
+    updated_df = updated_df.reset_index()
+
+    # 确保最终的列顺序与原始 data_df 一致
+    # reindex 后 reset_index 会恢复列，但顺序可能变，这里再reindex一次确保
+    updated_df = updated_df.reindex(columns=data_df.columns)
+    # 删除重复的日期，只报了一行
+    updated_df = updated_df.drop_duplicates(subset=['日期', '代码'], keep='last')
+
+
+    # 3. 排序
+    # 按照日期和代码进行排序，确保时间顺序正确
+    # ignore_index=True 会重置排序后的索引
+    # 确保用于排序的列存在
+    sort_cols = ['日期', '代码']
+    if all(col in updated_df.columns for col in sort_cols):
+        updated_df.sort_values(by=sort_cols, inplace=True, ignore_index=True)
+    else:
+        print(f"Warning: Sorting columns {sort_cols} not found after merge. Skipping sort.")
+
+
+
+    return updated_df
+
+
+def get_latest_trading_date():
+    """
+    获取 A 股最近一个交易日期。
+
+    如果当前日期是交易日，则返回当前日期。
+    如果当前日期是休市日（周末或节假日），则返回上一个交易日的日期。
+
+    Returns:
+        datetime.date: 最近一个交易日的日期。
+        None: 如果无法获取交易日历数据。
+    """
+    try:
+        # 获取新浪提供的股票交易日历数据
+        trade_date_df = ak.tool_trade_date_hist_sina()
+
+        if trade_date_df is None or trade_date_df.empty:
+            print("Error: Failed to retrieve trading date data from akshare.")
+            return None
+
+        trade_dates_series = pd.to_datetime(trade_date_df['trade_date']).dt.date
+        trade_dates = sorted(trade_dates_series.tolist())
+        # *** 修改结束 ***
+
+        # 获取当前日期
+        today = datetime.today().date()
+        # 判断当前日期是否在交易日历中
+        if today in trade_dates:
+            return today
+        else:
+            # 如果当前日期不是交易日，找到交易日历中小于当前日期的最大日期
+            latest_trade_date = None
+            # 从后往前查找更快
+            for trade_date in reversed(trade_dates):
+                if trade_date < today:
+                    latest_trade_date = trade_date
+                    break
+            return latest_trade_date
+
+    except Exception as e:
+        # 捕获更具体的错误，例如 akshare 数据获取失败、pandas 处理失败等
+        print(f"An error occurred: {e}")
+        return None
+
+def save_and_analyse_stock_data_real_time_RF_thread_new(stock_data_list, latest_trade_date, target_date, need_skip=False):
     """
     拉取并且分析股票数据
     :param stock_data:
     :param exclude_code:
     :return:
     """
+    data_dir = '../daily_data_exclude_new_can_buy'
+
+
     all_result_list = []
     for stock_data in stock_data_list:
         code = stock_data['代码']
         name = stock_data['名称'].replace('*', '')
-        if code not in exclude_code or need_skip:
-            # code = '603985'
-            # 开始计时
-            start = time.time()
+        if True:
             try:
-                price_data = get_price(code, '20230101', '20291021', period='daily')
+                found_filename = None
+                price_data = DataFrame()  # Ensure price_data is empty in case of error
+                # Check if the directory exists
+                if not os.path.isdir(data_dir):
+                    print(f"Error: Data directory not found: {data_dir}")
+                else:
+                    files = os.listdir(data_dir)
+
+                    for filename in files:
+                        if code in filename and filename.endswith('.txt'):
+                            found_filename = os.path.join(data_dir, filename)
+                            break
+
+                    if found_filename:
+                        price_data = pd.read_csv(found_filename, dtype={'代码': str})
+                        price_data = merge_newest_data(price_data, stock_data, latest_trade_date)
+                        price_data.to_csv(found_filename, index=False)
+                    else:
+                        print(f"No data file found for code {code} in {data_dir}")
+
             except Exception as e:
+                # Catch any errors during directory listing, file reading, merging, or saving
                 print('code: {}, error: {}'.format(code, e))
-                price_data = DataFrame()
+                price_data = DataFrame()  # Ensure price_data is empty in case of error
             price_data['code'] = code
             # price_data不为空才保存
             if not price_data.empty:
@@ -2179,6 +2386,7 @@ def save_and_analyse_stock_data_real_time_RF_thread_new(stock_data_list, exclude
         # 保存stock_data_list
         write_json('../final_zuhe/real_time/{}.json'.format(target_date), stock_data_list)
         return None
+
 
 def save_and_analyse_stock_data_real_time_RF_thread(stock_data_list, exclude_code, target_date, need_skip=False):
     """
@@ -2221,6 +2429,7 @@ def save_and_analyse_stock_data_real_time_RF_thread(stock_data_list, exclude_cod
         write_json('../final_zuhe/real_time/{}.json'.format(target_date), stock_data_list)
         return None
 
+
 def get_good_price_RF():
     """
     扫描../final_zuhe/real_time下面所有数据，并加载模型进行预测
@@ -2258,7 +2467,8 @@ def get_good_price_RF():
         try:
             all_selected_samples = get_all_good_data_with_model_list(all_data, all_rf_model_list)
             if all_selected_samples is not None and not all_selected_samples.empty:
-                new_selected_samples = all_selected_samples.groupby(['日期', '名称', '收盘', 'code']).size().reset_index(
+                new_selected_samples = all_selected_samples.groupby(
+                    ['日期', '名称', '收盘', 'code']).size().reset_index(
                     name='选中数量')
                 # 将计算得到的数量合并回原始DataFrame，以便我们可以基于数量筛选
                 selected_samples_with_count = pd.merge(all_selected_samples, new_selected_samples,
@@ -2267,12 +2477,14 @@ def get_good_price_RF():
                 # 筛选出数量大于等于2的条目
                 all_selected_samples = selected_samples_with_count[selected_samples_with_count['选中数量'] >= 2]
                 # 处理合并后的DataFrame
-                grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'), current_price=('current_price', 'min'))
+                grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
+                                                                   current_price=('current_price', 'min'))
 
                 # 将结果保存到out_put_path
                 with open(out_put_path, 'a') as f:
                     for code, row in grouped.iterrows():
-                        f.write('{}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'], row['current_price']))
+                        f.write(
+                            '{}, {}, {}, {}\n'.format(code, row['min_close'], row['max_close'], row['current_price']))
         except Exception as e:
             print('处理文件失败：{}'.format(e))
 
@@ -2283,7 +2495,8 @@ def get_good_price_RF():
         print('文件处理完成')
 
 
-def save_and_analyse_stock_data_real_time_RF(stock_data, exclude_code, target_date, all_rf_model_list, output_file_path, need_skip=False):
+def save_and_analyse_stock_data_real_time_RF(stock_data, exclude_code, target_date, all_rf_model_list, output_file_path,
+                                             need_skip=False):
     """
     拉取并且分析股票数据
     :param stock_data:
@@ -2320,7 +2533,9 @@ def save_and_analyse_stock_data_real_time_RF(stock_data, exclude_code, target_da
         print('name: {}, code: {}, time: {}'.format(name, code, end - start))
 
 
-def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
+def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date, good_keys, good_statistics,
+                                          output_file_path, index_data, need_skip=False,
+                                          gen_signal_func=gen_full_all_basic_signal):
     """
     拉取并且分析股票数据
     :param stock_data:
@@ -2360,7 +2575,9 @@ def save_and_analyse_stock_data_real_time(stock_data, exclude_code, target_date,
         end = time.time()
         # print("{}耗时：{}".format(name, end - start))
 
-def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
+
+def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys, good_statistics, output_file_path,
+                                index_data, need_skip=False, gen_signal_func=gen_full_all_basic_signal):
     """
     拉取并且分析股票数据
     :param stock_data:
@@ -2421,12 +2638,14 @@ def save_and_analyse_stock_data(stock_data, exclude_code, target_date, good_keys
                     f.write(code + ',' + str(get_buy_price(price)) + '\n')
                 print("{}耗时：{}".format(name, end - start))
 
+
 def gen_first_param_dict(train_data='profit_1_day_1'):
     good_param_path = f'../final_zuhe/first_param/{train_data}_param_df.csv'
     good_param_df = pd.read_csv(good_param_path)
     all_model_info_list_dict_path = f'../final_zuhe/first_param/{train_data}_all_model_info_list.json'
     all_model_info_list_dict = read_json(all_model_info_list_dict_path)
     return good_param_df, all_model_info_list_dict
+
 
 def gen_first_param_dict_old(train_data='profit_1_day_1'):
     param_dict = {}
@@ -2445,12 +2664,13 @@ def gen_first_param_dict_old(train_data='profit_1_day_1'):
 
     # 获取'../final_zuhe/first_param/0524下的所有json文件
     for root, dirs, files in os.walk('../final_zuhe/first_param/0524'):
-    # for root, dirs, files in os.walk('../final_zuhe/first_param/profit_1_day_2_0530'):
+        # for root, dirs, files in os.walk('../final_zuhe/first_param/profit_1_day_2_0530'):
         for file in files:
             # 获取对应的磁盘大小
             full_path = os.path.join(root, file)
             file_size = os.path.getsize(full_path) / 1024 / 1024
-            if file.endswith('.csv') and file_size < 100000 and 'thread_day_3' not in file and '8-9' not in file and 'thread_day_3' not in file:
+            if file.endswith(
+                    '.csv') and file_size < 100000 and 'thread_day_3' not in file and '8-9' not in file and 'thread_day_3' not in file:
                 key_name = f'{file.split("interval_")[1].split("_train")[0]}_{file.split("train_thread_")[1].split(".json")[0]}_{train_data}'
                 temp_param_dict = {}
 
@@ -2496,6 +2716,7 @@ def gen_first_param_dict_old(train_data='profit_1_day_1'):
     all_model_info_list_dict = {key: value for key, value in all_model_info_list_dict.items() if key in param_dict}
     return param_dict, all_model_info_list_dict
 
+
 def choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict, first_param_dict):
     try:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2504,9 +2725,10 @@ def choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict
             f.write('\n\n\n')  # 写入一行空行
         for model_name, all_model_info_list in all_model_info_list_dict.items():
             print('开始处理模型：{}'.format(model_name))
-            all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list, process_count=4,
+            all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list,
+                                                                              process_count=4,
                                                                               thread_count=4)
-            if all_selected_samples is  None or  all_selected_samples.empty:
+            if all_selected_samples is None or all_selected_samples.empty:
                 continue
 
             # if first_param_dict.get(model_name) is not None:
@@ -2550,25 +2772,29 @@ def choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict
                     f.write('\n')  # 写入一行空行
                     for code, row in grouped.iterrows():
                         f.write('{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{:<10},{}\n'.format(code, row['min_close'],
-                                                                                              row['max_close'],
-                                                                                              row['current_price'],
-                                                                                              row['count'], model_name,
-                                                                                              row['name'],
-                                                                                              current_time))
+                                                                                               row['max_close'],
+                                                                                               row['current_price'],
+                                                                                               row['count'], model_name,
+                                                                                               row['name'],
+                                                                                               current_time))
 
 
     except Exception as e:
         traceback.print_exc()
         print('处理文件失败：{}'.format(e))
 
+
 def save_and_analyse_all_data_RF_real_time_thread_new(target_date, param_dict, all_model_info_list_dict, date_str_hour):
     """
     多线程拉取最新数据并且分析出结果
     :return:
     """
+
     start = time.time()
-    out_put_path = '../final_zuhe/select/{}real_time_good_price.txt'.format(target_date)
+    latest_trade_date = get_latest_trading_date()
+    print('最新交易日期：{}'.format(latest_trade_date))
     stock_data_df = ak.stock_zh_a_spot_em()
+    # stock_data_df = pd.read_csv('../temp/stock_data_df.csv', dtype={'代码': str})
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
     need_code_set = {code for code in stock_data_df['代码'] if
@@ -2579,18 +2805,19 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date, param_dict, a
 
     # 筛选出满足条件的股票数据
     filtered_stock_data_df = stock_data_df[~stock_data_df['代码'].isin(new_exclude_code_set)]
+    print('筛选后的数据量：{}'.format(filtered_stock_data_df.shape[0]))
 
     # 将满足条件的DataFrame分成100个子列表
     stock_data_lists = np.array_split(filtered_stock_data_df, 96)
 
     # 准备多进程执行的参数列表
-    args = [(stock_data_list.to_dict('records'), new_exclude_code_set, target_date) for stock_data_list in
+    args = [(stock_data_list.to_dict('records'), latest_trade_date, target_date) for stock_data_list in
             stock_data_lists]
     # for arg in args:
     #     save_and_analyse_stock_data_real_time_RF_thread_new(*arg)
 
     # 使用多进程执行
-    with Pool(processes=10) as pool:  # 根据你的机器性能调整进程数
+    with Pool(processes=multiprocessing.cpu_count()) as pool:  # 根据你的机器性能调整进程数
         results = pool.starmap(save_and_analyse_stock_data_real_time_RF_thread_new, args)
 
     # 剔除results中的None
@@ -2603,13 +2830,15 @@ def save_and_analyse_all_data_RF_real_time_thread_new(target_date, param_dict, a
     print('待处理的数据量：{} 更新数据耗时{}'.format(len(all_result_df), time.time() - start))
     # choose_good_code_total(all_result_df, out_put_path, all_model_info_list_dict, param_dict)
     output_file_path = f'../temp/day1_data/second_all_selected_samples_{target_date}.csv'
-    all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict, date_str_hour,
+    all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict,
+                                                                      date_str_hour,
                                                                       process_count=5,
                                                                       thread_count=4, output_file_path=output_file_path)
 
     end = time.time()
     print(f'处理完成，耗时：{end - start}秒')
     # time.sleep(60)
+
 
 def save_and_analyse_all_data_RF_real_time_thread(target_date):
     """
@@ -2663,7 +2892,8 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
             # # 筛选出数量大于等于2的条目
             # all_selected_samples = selected_samples_with_count[selected_samples_with_count['选中数量'] >= 2]
             # 处理合并后的DataFrame
-            grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'), current_price=('current_price', 'min'))
+            grouped = all_selected_samples.groupby('code').agg(max_close=('收盘', 'max'), min_close=('收盘', 'min'),
+                                                               current_price=('current_price', 'min'))
             # 将结果保存到out_put_path
             with open(out_put_path, 'a') as f:
                 for code, row in grouped.iterrows():
@@ -2675,6 +2905,7 @@ def save_and_analyse_all_data_RF_real_time_thread(target_date):
     end = time.time()
     print(f'处理完成，耗时：{end - start}秒')
     # time.sleep(60)
+
 
 def save_and_analyse_all_data_RF_real_time(target_date):
     """
@@ -2692,14 +2923,15 @@ def save_and_analyse_all_data_RF_real_time(target_date):
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
 
-    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    need_code_set = {code for code in all_code_set if
+                     code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
     new_exclude_code_set = all_code_set - need_code_set
     new_exclude_code_set.update(exclude_code_set)
 
-
     # save_and_analyse_stock_data_real_time_RF(stock_data_df.iloc[0], new_exclude_code_set, target_date, all_rf_model_list,output_file_path, need_skip=True)
     for _, stock_data in stock_data_df.iterrows():
-        save_and_analyse_stock_data_real_time_RF(stock_data, new_exclude_code_set, target_date, all_rf_model_list, output_file_path, need_skip=True)
+        save_and_analyse_stock_data_real_time_RF(stock_data, new_exclude_code_set, target_date, all_rf_model_list,
+                                                 output_file_path, need_skip=True)
     # with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
     #     futures = [executor.submit(save_and_analyse_stock_data_real_time_RF, stock_data, new_exclude_code_set, target_date, all_rf_model_list, output_file_path) for _, stock_data in stock_data_df.iterrows()]
     #     for future in concurrent.futures.as_completed(futures):
@@ -2725,6 +2957,7 @@ def save_and_analyse_all_data_RF_real_time(target_date):
     #                 print(e)
     #     print("总数：{}，总价：{}".format(total_count, total_price))
 
+
 def save_and_analyse_all_data_mul_real_time(target_date):
     """
     多线程拉取最新数据并且分析出结果
@@ -2744,7 +2977,8 @@ def save_and_analyse_all_data_mul_real_time(target_date):
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
 
-    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    need_code_set = {code for code in all_code_set if
+                     code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
     new_exclude_code_set = all_code_set - need_code_set
     new_exclude_code_set.update(exclude_code_set)
     index_data = save_index_data()
@@ -2760,7 +2994,9 @@ def save_and_analyse_all_data_mul_real_time(target_date):
     # save_and_analyse_stock_data_real_time(stock_data_df.iloc[0], new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=True)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-        futures = [executor.submit(save_and_analyse_stock_data_real_time, stock_data, new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data) for _, stock_data in stock_data_df.iterrows()]
+        futures = [executor.submit(save_and_analyse_stock_data_real_time, stock_data, new_exclude_code_set, target_date,
+                                   good_keys, good_statistics, output_file_path, index_data) for _, stock_data in
+                   stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
@@ -2784,6 +3020,7 @@ def save_and_analyse_all_data_mul_real_time(target_date):
                     print(e)
         print("总数：{}，总价：{}".format(total_count, total_price))
 
+
 def save_and_analyse_all_data_mul(target_date):
     """
     多线程拉取最新数据并且分析出结果
@@ -2803,7 +3040,8 @@ def save_and_analyse_all_data_mul(target_date):
     exclude_code_set = set(ak.stock_kc_a_spot_em()['代码'].tolist())
     exclude_code_set.update(ak.stock_cy_a_spot_em()['代码'].tolist())
 
-    need_code_set = {code for code in all_code_set if code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
+    need_code_set = {code for code in all_code_set if
+                     code.startswith(('000', '002', '003', '001', '600', '601', '603', '605'))}
     new_exclude_code_set = all_code_set - need_code_set
     new_exclude_code_set.update(exclude_code_set)
     index_data = save_index_data()
@@ -2819,7 +3057,10 @@ def save_and_analyse_all_data_mul(target_date):
     # save_and_analyse_stock_data(stock_data_df.iloc[0], new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data, need_skip=True)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-        futures = [executor.submit(save_and_analyse_stock_data, stock_data, new_exclude_code_set, target_date, good_keys, good_statistics, output_file_path, index_data) for _, stock_data in stock_data_df.iterrows()]
+        futures = [
+            executor.submit(save_and_analyse_stock_data, stock_data, new_exclude_code_set, target_date, good_keys,
+                            good_statistics, output_file_path, index_data) for _, stock_data in
+            stock_data_df.iterrows()]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
@@ -2842,6 +3083,7 @@ def save_and_analyse_all_data_mul(target_date):
                 print(e)
     print("总数：{}，总价：{}".format(total_count, total_price))
 
+
 def process_file_all(fullname, out_put_file_path, new_index_data_df):
     origin_data_df = load_full_data(fullname)
     origin_data_df = gen_full_all_basic_signal(origin_data_df)
@@ -2853,15 +3095,18 @@ def process_file_all(fullname, out_put_file_path, new_index_data_df):
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
     # 找出origin_data_df中全为
     false_columns = origin_data_df.columns[(origin_data_df == False).all()]
-    false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path), '{}false_columns.txt'.format(os.path.basename(fullname)))
+    false_columns_output_filename = os.path.join('{}_false'.format(out_put_file_path),
+                                                 '{}false_columns.txt'.format(os.path.basename(fullname)))
     # origin_data_df = clear_other_clo(origin_data_df)
     # 过滤掉origin_data_df['涨跌幅']大于(origin_data_df['Max_rate'] 1/origin_data_df['收盘'])的数据
-    origin_data_df = origin_data_df[origin_data_df['涨跌幅'] <= (origin_data_df['Max_rate'] - 1.0/ origin_data_df['收盘'])]
-    #将false_columns写入文件
+    origin_data_df = origin_data_df[
+        origin_data_df['涨跌幅'] <= (origin_data_df['Max_rate'] - 1.0 / origin_data_df['收盘'])]
+    # 将false_columns写入文件
     with open(false_columns_output_filename, 'w') as f:
         f.write('\n'.join(false_columns.tolist()))
     origin_data_df['Buy Date'] = pd.to_datetime(origin_data_df['Buy Date'])
     origin_data_df.to_csv(output_filename, index=False)
+
 
 def process_file_zhibiao(fullname, out_put_file_path):
     origin_data_df = load_full_data(fullname)
@@ -2870,6 +3115,7 @@ def process_file_zhibiao(fullname, out_put_file_path):
     origin_data_df = origin_data_df.merge(back_result_df, on=['日期'], how='left')
     output_filename = os.path.join(out_put_file_path, os.path.basename(fullname))
     origin_data_df.to_csv(output_filename, index=False)
+
 
 def gen_all_back():
     """
@@ -2890,6 +3136,7 @@ def gen_all_back():
         pool.close()
         pool.join()
 
+
 def gen_all_zhibiao():
     """
     为所有数据生成所有指标（天，周，月，上证）并写入文件，这样后续就不用每次新生成，大大节约时间
@@ -2907,7 +3154,6 @@ def gen_all_zhibiao():
         pool.join()
 
 
-
 def process_file_target_date(fullname, date, gen_daily_buy_signal_26):
     """
     处理单个文件
@@ -2915,10 +3161,12 @@ def process_file_target_date(fullname, date, gen_daily_buy_signal_26):
     data = load_data(fullname)
     buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
     if not buy_data.empty:
-        if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+        if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (
+        not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
             print(buy_data)
             return buy_data
     return None
+
 
 def process_file_target_date_min_RF(file_path, date):
     """
@@ -2942,14 +3190,15 @@ def process_file_target_date_min_RF(file_path, date):
     # 将min_data中的日期转换为datetime类型
     min_data['日期'] = pd.to_datetime(min_data['日期'])
     # 找到min_data中日期大于date且小于date+1的数据
-    min_data = min_data[(min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
+    min_data = min_data[
+        (min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
     target_data = data[data['日期'] == date]
     # 获取target_data的上一个数据，不要使用日期来判断
     if target_data.empty:
         print('处理{}耗时:{}'.format(out_put_file_path, time.time() - start_time))
         return None
     target_data_index = target_data.index
-    befor_target_data = data.loc[target_data_index - 1] # # 将min_data按照日期逆序排列
+    befor_target_data = data.loc[target_data_index - 1]  # # 将min_data按照日期逆序排列
     pre_close = befor_target_data['收盘'].values[0]
     # 遍历min_data
     for index, row in min_data.iterrows():
@@ -2979,6 +3228,7 @@ def process_file_target_date_min_RF(file_path, date):
     print('处理{}耗时:{}'.format(out_put_file_path, end_time - start_time))
     return all_result_df
 
+
 def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     """
     处理单个文件
@@ -2991,7 +3241,8 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     # 将min_data中的日期转换为datetime类型
     min_data['日期'] = pd.to_datetime(min_data['日期'])
     # 找到min_data中日期大于date且小于date+1的数据
-    min_data = min_data[(min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
+    min_data = min_data[
+        (min_data['日期'] > pd.to_datetime(date)) & (min_data['日期'] < pd.to_datetime(date) + timedelta(days=1))]
     target_data = data[data['日期'] == date]
     # # 将min_data按照日期逆序排列
     # min_data = min_data.sort_values(by='日期', ascending=False)
@@ -3017,20 +3268,23 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
                 buy_data.at[buy_data.index[0], 'price'] = row['收盘']
                 print(buy_data)
                 buy_data_list.append(buy_data)
-                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0][
+                    'threshold_close_down'] > row['后续最低']):
                     # 复制一份buy_data
                     buy_data = buy_data.copy()
                     buy_data.at[buy_data.index[0], 'price'] = buy_data.iloc[0]['threshold_close_down']
                     print(buy_data)
                     buy_data_list.append(buy_data)
             else:
-                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0]['threshold_close_down'] > row['后续最低']):
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_down']) and buy_data.iloc[0][
+                    'threshold_close_down'] > row['后续最低']):
                     # 复制一份buy_data
                     buy_data = buy_data.copy()
                     buy_data.at[buy_data.index[0], 'price'] = buy_data.iloc[0]['threshold_close_down']
                     print(buy_data)
                     buy_data_list.append(buy_data)
-                if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['收盘'] > row['后续最低']):
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_up']) and buy_data.iloc[0]['收盘'] > row[
+                    '后续最低']):
                     # 复制一份buy_data
                     buy_data = buy_data.copy()
                     buy_data.at[buy_data.index[0], 'price'] = row['收盘']
@@ -3042,6 +3296,7 @@ def process_file_target_date_min(file_path, date, gen_daily_buy_signal_26):
     end_time = time.time()
     print('处理{}耗时:{}'.format(fullname, end_time - start_time))
     return None
+
 
 def get_target_thread(date='2024-01-22'):
     """
@@ -3075,9 +3330,11 @@ def get_target_thread(date='2024-01-22'):
     back_select_target_date(output_filename)
     return all_data
 
+
 def contains_english_letter(s):
     # 使用正则表达式检查字符串中是否包含英文字母
     return bool(re.search(r'[a-zA-Z]', s))
+
 
 def get_target_thread_min_RF(date='2024-01-22'):
     """
@@ -3112,7 +3369,6 @@ def get_target_thread_min_RF(date='2024-01-22'):
 
     # 创建进程池
     pool = multiprocessing.Pool(multiprocessing.cpu_count())
-
 
     # 处理每个文件
     results = [pool.apply_async(process_file_target_date_min_RF, args=(f, date)) for f in all_files]
@@ -3149,6 +3405,7 @@ def get_target_thread_min_RF(date='2024-01-22'):
         print('get_target_date_good_stocks time cost: {}'.format(end_time - start_time))
     return all_df
 
+
 def get_target_thread_min(date='2024-01-22'):
     """
     获取指定时间满足好指标的每个股票的阈值
@@ -3173,7 +3430,8 @@ def get_target_thread_min(date='2024-01-22'):
     pool = multiprocessing.Pool(multiprocessing.cpu_count())
 
     # 处理每个文件
-    results = [pool.apply_async(process_file_target_date_min, args=(f, date, gen_daily_buy_signal_26)) for f in all_files]
+    results = [pool.apply_async(process_file_target_date_min, args=(f, date, gen_daily_buy_signal_26)) for f in
+               all_files]
 
     # 收集结果
     all_data = [res.get() for res in results if res.get() is not None]
@@ -3198,6 +3456,7 @@ def get_target_thread_min(date='2024-01-22'):
     back_select_target_date(output_filename)
     return all_df
 
+
 def get_target_date(date='2024-01-17'):
     """
     获取指定时间满足好指标的每个股票的阈值
@@ -3212,7 +3471,8 @@ def get_target_date(date='2024-01-17'):
             buy_data = get_threshold_close_target_date(date, data, gen_daily_buy_signal_26)
             if not buy_data.empty:
                 # 如果buy_data的第一行数据的threshold_close_up不为Nan，说明满足条件
-                if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
+                if (not np.isnan(buy_data.iloc[0]['threshold_close_up'])) or (
+                not np.isnan(buy_data.iloc[0]['threshold_close_down'])):
                     all_data.append(buy_data)
                     print(buy_data)
     return all_data
@@ -3224,6 +3484,7 @@ def load_file_chunk(file_chunk):
     """
     chunk_data = [load_data(fname) for fname in file_chunk]
     return pd.concat(chunk_data)
+
 
 def get_all_data_perfomance():
     """
@@ -3272,6 +3533,7 @@ def get_all_data_perfomance():
 
     return result_dict
 
+
 def load_all_data():
     """
     加载所有数据
@@ -3310,6 +3572,7 @@ def load_all_data():
 
     end_time = time.time()
     print('总耗时：', end_time - start_time)
+
 
 def load_all_data_performance(ratio_threshold=0.0):
     """
@@ -3359,6 +3622,7 @@ def load_all_data_performance(ratio_threshold=0.0):
     end_time = time.time()
     print('总耗时：', end_time - start_time)
 
+
 def get_common_line():
     file_path = '../model/selected_features.txt'
     file_path1 = '../model/selected_features_0.5.txt'
@@ -3377,6 +3641,7 @@ def get_common_line():
     print('file_1_set长度：', len(file_1_set))
     print('交集长度：', len(file_set & file_1_set))
     return file_set & file_1_set
+
 
 def get_RF_real_time_price_thread_new(file_path, target_date):
     """
@@ -3407,23 +3672,22 @@ def get_RF_real_time_price_thread_new(file_path, target_date):
     last_price = temp_origin_data.iloc[-1]['收盘']
     current_price = target_data.iloc[0]['收盘']
     target_data['current_price'] = current_price
-    max_rate = temp_origin_data.iloc[-1]['Max_rate']
-    highest_price = round(last_price * (100 + max_rate) / 100, 2)
-    lowest_price = round(last_price * (100 - max_rate) / 100, 2)
-    # current_highest_price = round(current_price * (100 + max_rate / 5) / 100, 2)
-    # current_lowest_price = round(current_price * (100 - max_rate / 5) / 100, 2)
-    current_highest_price = current_price + 0.02
-    current_lowest_price = current_price - 0.02
-    highest_price = min(highest_price, current_highest_price)
-    lowest_price = max(lowest_price, current_lowest_price)
-    # 计算步长step，step = (highest_price - lowest_price) / 1000，向上取整保留两位小数
-    step = math.ceil((highest_price - lowest_price) / 10) / 100
-    if step < 0.01:
-        step = 0.01
-
-
-    # 遍历last_price到highest_price和lowest_price之间的数据，步长最小为0.01，并且数据个数最多为1000个
-    price_list = np.arange(lowest_price, highest_price, step)
+    # max_rate = temp_origin_data.iloc[-1]['Max_rate']
+    # highest_price = round(last_price * (100 + max_rate) / 100, 2)
+    # lowest_price = round(last_price * (100 - max_rate) / 100, 2)
+    # # current_highest_price = round(current_price * (100 + max_rate / 5) / 100, 2)
+    # # current_lowest_price = round(current_price * (100 - max_rate / 5) / 100, 2)
+    # current_highest_price = current_price + 0.02
+    # current_lowest_price = current_price - 0.02
+    # highest_price = min(highest_price, current_highest_price)
+    # lowest_price = max(lowest_price, current_lowest_price)
+    # # 计算步长step，step = (highest_price - lowest_price) / 1000，向上取整保留两位小数
+    # step = math.ceil((highest_price - lowest_price) / 10) / 100
+    # if step < 0.01:
+    #     step = 0.01
+    #
+    # # 遍历last_price到highest_price和lowest_price之间的数据，步长最小为0.01，并且数据个数最多为1000个
+    # price_list = np.arange(lowest_price, highest_price, step)
     price_list = [current_price]
     for price in price_list:
         price = round(price, 2)
@@ -3445,6 +3709,7 @@ def get_RF_real_time_price_thread_new(file_path, target_date):
         return None
     result_df = pd.concat(result_list, axis=0).reset_index(drop=True)
     return result_df
+
 
 def get_RF_real_time_price_thread(file_path, target_date):
     """
@@ -3489,7 +3754,6 @@ def get_RF_real_time_price_thread(file_path, target_date):
     if step < 0.01:
         step = 0.01
 
-
     # 遍历last_price到highest_price和lowest_price之间的数据，步长最小为0.01，并且数据个数最多为1000个
     price_list = np.arange(lowest_price, highest_price, step)
     price_list = [current_price]
@@ -3513,6 +3777,7 @@ def get_RF_real_time_price_thread(file_path, target_date):
         return None
     result_df = pd.concat(result_list, axis=0).reset_index(drop=True)
     return result_df
+
 
 def get_RF_real_time_price(file_path, target_date, all_rf_model_list):
     """
@@ -3550,7 +3815,6 @@ def get_RF_real_time_price(file_path, target_date, all_rf_model_list):
     if step < 0.01:
         step = 0.01
 
-
     # 遍历last_price到highest_price和lowest_price之间的数据，步长最小为0.01，并且数据个数最多为1000个
     price_list = np.arange(lowest_price, highest_price, step)
     for price in price_list:
@@ -3585,7 +3849,8 @@ def fix_RF_data(file_path='../final_zuhe/min_data/2024-01-02_RF_target_thread.cs
     target_date = pd.to_datetime(target_date)
     origin_data = pd.read_csv(file_path, dtype={'代码': str})
     print('加载数据量：', len(origin_data))
-    origin_data = origin_data[(origin_data['收盘'] <= origin_data['current_price'] + 0.02) & (origin_data['收盘'] >= origin_data['current_price'] - 0.02)]
+    origin_data = origin_data[(origin_data['收盘'] <= origin_data['current_price'] + 0.02) & (
+                origin_data['收盘'] >= origin_data['current_price'] - 0.02)]
     # 将origin_data按照代码分组
     grouped = origin_data.groupby('代码')
     for code, group in grouped:
@@ -3614,9 +3879,9 @@ def fix_RF_data(file_path='../final_zuhe/min_data/2024-01-02_RF_target_thread.cs
                 origin_data.loc[group.index, '后续第二天最高'] = target_data.iloc[2]['最高']
                 origin_data.loc[group.index, '后续第二天收盘'] = target_data.iloc[2]['收盘']
 
-
     # 最后将结果又重新写入文件
     origin_data.to_csv(file_path, index=False)
+
 
 def predict_min_data():
     # 读取文件
@@ -3672,6 +3937,7 @@ def low_memory_load(file_path):
 
     return df
 
+
 def downcast_dtypes(df):
     """
     将DataFrame中的float64转换为float32，将int64转换为int32
@@ -3686,6 +3952,7 @@ def downcast_dtypes(df):
 
     return df
 
+
 if __name__ == '__main__':
     # file_path = '../final_zuhe/statistics_target_key.json'
     # # file_path = '../back/gen/statistics_all.json'
@@ -3693,7 +3960,6 @@ if __name__ == '__main__':
     # compute_all_round_value(file_path)
     # compute_1w_rate_day_held(file_path)
     # filter_good_zuhe()
-
 
     # get_good_combinations()
     # save_and_analyse_all_data_mul('2024-01-22')
@@ -3743,7 +4009,7 @@ if __name__ == '__main__':
     # 延时100s
     # time.sleep(15000)
     # date_list = ['2024-06-13', '2024-06-12', '2024-06-11', '2024-06-07', '2024-06-06', '2024-06-05', '2024-06-04', '2024-06-03']
-    date_list = ['2025-04-29']
+    date_list = ['2025-05-21']
 
     # data = low_memory_load('../final_zuhe/other/2024_data_2024_simple.csv')
     # # 获取data中的所有不重复的日期
@@ -3761,16 +4027,21 @@ if __name__ == '__main__':
     param_dict2, all_model_info_list_dict2 = gen_first_param_dict(train_data='profit_1_day_2')
     # while True:
     for date in date_list:
+        print(f'开始处理 当前时间：{datetime.strptime(datetime.now().strftime("%Y-%m-%d %H:%M"), "%Y-%m-%d %H:%M")}')
+
         date_str_hour = str(time.strftime('%H:%M:%S', time.localtime()))
         save_and_analyse_all_data_RF_real_time_thread_new(date, param_dict1, all_model_info_list_dict1, date_str_hour)
         output_file_path = '../final_zuhe/real_time/select_RF_{}_real_time.csv'.format(date)
         all_result_df = pd.read_csv(output_file_path, low_memory=False, dtype={'代码': str})
         all_result_df['日期'] = pd.to_datetime(all_result_df['日期'])
         output_file_path = f'../temp/day2_data/second_all_selected_samples_{date}.csv'
-        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict2, date_str_hour,
+        all_selected_samples = get_all_good_data_with_model_name_list_new(all_result_df, all_model_info_list_dict2,
+                                                                          date_str_hour,
                                                                           process_count=5,
                                                                           thread_count=4,
                                                                           output_file_path=output_file_path)
+        print(f'处理完成 当前时间：{datetime.strptime(datetime.now().strftime("%Y-%m-%d %H:%M"), "%Y-%m-%d %H:%M")}')
+
     # save_and_analyse_all_data_RF_real_time_thread_new('2024-03-13')
     # predict_min_data()
     # back_range_select_real_time_RF(start_time='2024-01-01', end_time='2024-02-27')
@@ -3795,9 +4066,7 @@ if __name__ == '__main__':
     # print(buy_data)
     # back_range_RF_real_time(start_time='2024-01-03', end_time='2024-02-05')
 
-
     # statistics_zuhe_gen_both_single_every_period('../back/gen/single')
-
 
     # 读取../back/complex/all_df.csv
 
@@ -3808,7 +4077,6 @@ if __name__ == '__main__':
     # all_date_count = all_df.groupby('日期').size()
     # print(all_date_count)
     # data = pd.read_csv('../daily_data_exclude_new_can_buy_with_back/东方电子_000682.txt', low_memory=False)
-
 
     # count_min_profit_rate('../daily_data_exclude_new_can_buy', '../back/complex/all_df.csv', gen_signal_func=mix)
     # back_all_stock('../daily_data_exclude_new_can_buy/', '../back/complex', gen_signal_func=mix, backtest_func=backtest_strategy_low_profit)

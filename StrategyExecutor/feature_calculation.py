@@ -1015,6 +1015,8 @@ def update_2024_data_simple():
 
     # 筛选出满足条件的股票数据
     filtered_stock_data_df = stock_data_df[~stock_data_df['代码'].isin(new_exclude_code_set)]
+    print('筛选后的数据量：{}'.format(filtered_stock_data_df.shape[0]))
+
     # 获取filtered_stock_data_df的所有代码
     code_list = filtered_stock_data_df['代码'].tolist()
 
