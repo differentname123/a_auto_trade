@@ -6,6 +6,41 @@
 :last_date:
     2024-01-30 15:24
 :description:
+这段代码构建了一个基于 GPU 加速环境下的模型训练框架，主要用于对金融或交易数据进行随机森林模型的超参搜索和训练。下面给出整体功能的概述：
+
+环境与依赖设置
+
+代码最开始通过 os.environ['CUDA_VISIBLE_DEVICES'] = '0' 指定使用 GPU（这里指定索引为 0 的 GPU）来加速训练。
+引入了 cuml（GPU 版本的机器学习库）、cudf（GPU DataFrame 库）、sklearn.model_selection.ParameterGrid 以及 joblib（用于模型持久化）等库。
+数据加载与预处理
+
+函数 load_test_data 使用自定义的 low_memory_load 方法读取 CSV 文件，并转换为 GPU DataFrame。
+该函数还选择了一些关键列（如包含“最高价利润率”的列、日期、代码及信号列）并进行了数据类型降精度以减少内存占用。
+模型训练与保存
+
+train_and_dump_model 函数完成模型的训练过程：
+利用传入的训练数据（特征和标签）对随机森林分类器模型进行拟合。
+模型训练结束后，通过 joblib.dump 将训练好的模型保存成指定的 .joblib 文件，并记录保存的模型名称和大小信息到一个跟踪文件中。
+超参组合搜索与过滤
+
+通过 ParameterGrid 根据预设的随机森林参数（如 n_estimators、max_depth、min_samples_split、min_samples_leaf）生成所有可能的超参组合进行遍历训练。
+其中，函数 skip_params（以及辅助函数 are_other_affecting_params_same 和 are_params_triggering_problem）实现了对超参组合的过滤，避免训练那些可能导致模型体积过大或存在其他问题的参数组合。
+针对不同时间窗口的模型训练
+
+函数 train_all_model 根据传入的数据文件和不同的“天数阈值”（如 1 天、2 天、3 天）来构造标签：
+根据不同的“后续N日最高价利润率”来定义正负样本（比如判断是否达到设定的利润阈值），并计算正样本的比例。
+然后调用 train_models 对每种天数配置下的训练数据进行超参搜索训练。
+模型管理与多线程设计
+
+build_models 函数作为整体入口，负责遍历不同的数据文件路径，收集已存在的模型，然后依次或通过线程调用 worker（进而调用 train_all_model）来训练新的模型。
+同时，代码借助多线程（尽管部分线程启动代码被注释）来提升训练效率。
+模型参数解析与目标模型训练
+
+除了批量训练外，部分函数（如 parse_filename 与 construct_final_path）通过正则表达式解析模型文件名中保存的超参信息，以便用于后续的重新训练或筛选目标模型。
+train_target_model 函数读取某个文件中的目标模型列表，对这些模型进行重新训练或补充训练，确保所需模型存在。
+整体流程
+
+当直接运行该脚本时，会执行 build_models() 函数，启动整个训练流程，对指定数据目录下的 CSV 文件进行加载、特征提取、标签构造、超参搜索、模型训练、模型保存以及结果记录。
 
 """
 import os
