@@ -6,4 +6,4 @@
 StrategyExecutor/full_zehe1.py 拉取最新数据并使用两组模型预测结果
 CommonRandomForestClassifier_debug_4.py 分析预测结果 排序得到final_zuhe/other/1zonghe_anlyse_selectday1.csv和final_zuhe/other/1zonghe_anlyse_selectday2.csv
 
-训练好的模型已经备份到google 云盘：https://drive.google.com/drive/folders/1u4_yJjHoi9crywQM0s8LjlVWJOZ5ZBgx?usp=drive_link
+训练好的模型已经备份到google 云盘：https://drive.google.com/drive/folders/1qAqBwSJjZtng7hlwafdNgKvu-5XHklaS?usp=drive_link
