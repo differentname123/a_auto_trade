@@ -1,9 +1,11 @@
 环境说明: windows的wsl下面使用conda安装的的rapids-24.02版本（为了训练随机森林模型），安装命令参考：https://docs.rapids.ai/install/#selector
 
 1.模型的训练,训练出指定数据的所以参数组合的模型：  StrategyExecutor/getAllRandomForestClassifier.py
+2.性能报告的获取：getAllRandomForestClassifierReportCUML.py，会获取训练集和测试集上面的表现结果
+3.选择出好的模型：getAllRandomForestClassifierReportSort.py
+4.最后的使用:
 
+    StrategyExecutor/full_zehe1.py 拉取最新数据并使用两组模型预测结果
+    CommonRandomForestClassifier_debug_4.py 分析预测结果 排序得到final_zuhe/other/1zonghe_anlyse_selectday1.csv和final_zuhe/other/1zonghe_anlyse_selectday2.csv
 
-StrategyExecutor/full_zehe1.py 拉取最新数据并使用两组模型预测结果
-CommonRandomForestClassifier_debug_4.py 分析预测结果 排序得到final_zuhe/other/1zonghe_anlyse_selectday1.csv和final_zuhe/other/1zonghe_anlyse_selectday2.csv
-
-训练好的模型已经备份到google 云盘：https://drive.google.com/drive/folders/1h3ID0SMzB7iD5G4HABn5uwru1hCrf1A5?usp=drive_link
+训练好的模型已经备份到google 云盘：        整体项目:https://drive.google.com/drive/folders/1h3ID0SMzB7iD5G4HABn5uwru1hCrf1A5?usp=drive_link

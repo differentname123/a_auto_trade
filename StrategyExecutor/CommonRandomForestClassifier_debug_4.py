@@ -3214,7 +3214,7 @@ def double_second(date_str):
 def test():
     # analyse_real_time_select('../temp/other/1final_zonghe_anlyse_select_01_02_03_04_05_06_07_08_09.csv')
     date_str = '2025-05-30'
-    # double_second(date_str)
+    double_second(date_str)
     model_day_list = ['day_3']
     target_day_list = ['day1', 'day2']
     result_df_list = []
