@@ -2275,7 +2275,9 @@ def merge_newest_data(data_df: pd.DataFrame, stock_data, latest_trade_date) -> p
         print(f"Warning: Sorting columns {sort_cols} not found after merge. Skipping sort.")
 
 
-
+    # 只保留目标列
+    target_columns = ['日期', '代码', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率']
+    updated_df = updated_df[target_columns]
     return updated_df
 
 
@@ -4009,7 +4011,7 @@ if __name__ == '__main__':
     # 延时100s
     # time.sleep(15000)
     # date_list = ['2024-06-13', '2024-06-12', '2024-06-11', '2024-06-07', '2024-06-06', '2024-06-05', '2024-06-04', '2024-06-03']
-    date_list = ['2025-06-04']
+    date_list = ['2025-06-06']
 
     # data = low_memory_load('../final_zuhe/other/2024_data_2024_simple.csv')
     # # 获取data中的所有不重复的日期
