@@ -645,21 +645,21 @@ def generate_features_for_all_files(source_path, save_path):
     :return: None
     """
     # 删除source_path和save_path下的所有文件
-    for root, _, files in os.walk(save_path):
-        for file in files:
-            os.remove(os.path.join(root, file))
-    for root, _, files in os.walk(source_path):
-        for file in files:
-            os.remove(os.path.join(root, file))
+    # for root, _, files in os.walk(save_path):
+    #     for file in files:
+    #         os.remove(os.path.join(root, file))
+    # for root, _, files in os.walk(source_path):
+    #     for file in files:
+    #         os.remove(os.path.join(root, file))
 
     save_all_data_mul()
-    with Pool() as pool:
-        for root, _, files in os.walk(source_path):
-            for file in files:
-                full_path = os.path.join(root, file)
-                pool.apply_async(generate_features_for_file, args=(full_path, save_path))
-        pool.close()
-        pool.join()
+    # with Pool() as pool:
+    #     for root, _, files in os.walk(source_path):
+    #         for file in files:
+    #             full_path = os.path.join(root, file)
+    #             pool.apply_async(generate_features_for_file, args=(full_path, save_path))
+    #     pool.close()
+    #     pool.join()
 
 def load_and_merge_data(batch):
     start_time = time.time()

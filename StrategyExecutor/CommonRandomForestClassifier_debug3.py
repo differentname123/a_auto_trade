@@ -2863,7 +2863,7 @@ def choose_mid_buy(final_result_df):
 
 def get_second_choice():
     # 去除date_list最后两个日期
-    date_list = ['2025-05-30']
+    date_list = ['2025-06-05']
     # date_list = ['2024-08-08', '2024-08-09', '2024-08-12', '2024-08-13', '2024-08-14', '2024-08-15', '2024-08-16', '2024-08-19', '2024-08-20', '2024-08-21']
     model_day = 'day_3'
     target_day = 'day1'
