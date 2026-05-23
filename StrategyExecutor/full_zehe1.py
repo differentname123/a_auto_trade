@@ -3954,8 +3954,47 @@ def downcast_dtypes(df):
 
     return df
 
+def get_model_dir():
+    param_dict1, all_model_info_list_dict1 = gen_first_param_dict(train_data='profit_1_day_1')
+    param_dict2, all_model_info_list_dict2 = gen_first_param_dict(train_data='profit_1_day_2')
+    all_model_path = []
+    for value in all_model_info_list_dict1:
+        all_model_path.append(value['model_path'])
+    for value in all_model_info_list_dict2:
+        all_model_path.append(value['model_path'])
+
+    # 获取不重复的目录
+    model_dir_set = set()
+    for model_path in all_model_path:
+        model_dir = os.path.dirname(model_path)
+        model_dir_set.add(model_dir)
+    print('模型目录数量：', len(model_dir_set))
+
+    # 只保留包含 '/mnt/w/project/python_project/a_auto_trade/model/all_models/' 的模型
+    filtered_model_dir_set = [model_dir for model_dir in all_model_path if '/mnt/w/project/python_project/a_auto_trade/model/all_models/' in model_dir]
+    
+    # 遍历'/mnt/w/project/python_project/a_auto_trade/model/all_models/'下面的所有模型，并且获取未在filtered_model_dir_set中的模型
+    base_model_path = '/mnt/w/project/python_project/a_auto_trade/model/all_models/'
+    missing_model_dirs = []
+    all_models = []
+    for root, ds, fs in os.walk(base_model_path):
+        for f in fs:
+            fullname = os.path.join(root, f)
+            all_models.append(fullname)
+            if fullname not in filtered_model_dir_set:
+                missing_model_dirs.append(fullname)
+    print(f"总模型数量：{len(all_models)} 未使用模型数量：{len(missing_model_dirs)} 排除数量：{len(filtered_model_dir_set)}")
+    print()
+    # 删除missing_model_dirs中的模型
+    for missing_model in missing_model_dirs:
+        os.remove(missing_model)
+
+    
+
 
 if __name__ == '__main__':
+    # get_model_dir()
+
     # file_path = '../final_zuhe/statistics_target_key.json'
     # # file_path = '../back/gen/statistics_all.json'
     # compute_more_than_one_day_held(file_path)
@@ -4011,7 +4050,7 @@ if __name__ == '__main__':
     # 延时100s
     # time.sleep(15000)
     # date_list = ['2024-06-13', '2024-06-12', '2024-06-11', '2024-06-07', '2024-06-06', '2024-06-05', '2024-06-04', '2024-06-03']
-    date_list = ['2025-06-06']
+    date_list = ['2025-10-28']
 
     # data = low_memory_load('../final_zuhe/other/2024_data_2024_simple.csv')
     # # 获取data中的所有不重复的日期
