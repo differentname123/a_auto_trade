@@ -245,18 +245,33 @@ def _worker_process_combo(combo_files):
         }
 
 
-def run_batch_evaluation(nav_dir='fund_data/nav', output_csv='fund_data/fof_evaluation_results.csv',
-                         combo_size=2, max_workers=10):
+def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv='fund_data/fof_evaluation_results.csv',
+                         combo_size=2, max_workers=20):
     """
-    核心调度函数：扫描目录、生成组合、分配多进程并发任务、落盘CSV
+    核心调度函数：读取汇总数据过滤、生成组合、分配多进程并发任务、落盘CSV
     """
-    # 1. 扫描目录下所有包含 'nav_adj.csv' 的文件
+    # 1. 读取 all_funds_result 数据并过滤
     target_files = []
-    if os.path.exists(nav_dir):
-        for root, _, files in os.walk(nav_dir):
-            for file in files:
-                if 'nav_adj.csv' in file:
-                    target_files.append(os.path.join(root, file))
+    if os.path.exists(result_csv):
+        df_results = pd.read_csv(result_csv)
+        # 【增强版过滤条件】：
+        # 1. 存续时间 > 300 天
+        # 2. 年化收益 > 10%
+        # 3. 缺失率 < 2% (保证数据质量)
+        # 4. 连续0收益天数 < 5天 (过滤僵尸基金)
+        # 5. 最大回撤 > -50% (过滤极端劣质表现)
+        condition = (
+                (df_results['total_active_days'] > 600) &
+                (df_results['annualized_return'] > 0.2) &
+                (df_results['missing_ratio'] < 0.02) &
+                (df_results['max_zeros'] < 5) &
+                (df_results['max_drawdown'] > -0.5)
+        )
+        df_filtered = df_results[condition]
+        target_files = df_filtered['adj_nav_file'].dropna().tolist()
+    else:
+        print(f"未找到汇总文件 {result_csv}，请先执行前置的数据获取及汇总流程。")
+        return
 
     if len(target_files) < combo_size:
         print(f"找到的文件数量不足 ({len(target_files)} 个)，无法生成大小为 {combo_size} 的组合。")
@@ -264,7 +279,7 @@ def run_batch_evaluation(nav_dir='fund_data/nav', output_csv='fund_data/fof_eval
 
     # 2. 获取两两(或多维)组合
     combos = list(itertools.combinations(target_files, combo_size))
-    print(f"扫描完毕: 共找到 {len(target_files)} 个数据文件。")
+    print(f"扫描完毕: 共找到 {len(target_files)} 个符合条件的数据文件。")
     print(f"任务构建: 将产生 {len(combos)} 种组合，开启 {max_workers} 个并行进程计算...")
     # combos = combos[:10000]
     # 3. 开始并发处理 (由于计算密集，使用 ProcessPoolExecutor 发挥多核性能)
@@ -301,8 +316,5 @@ def run_batch_evaluation(nav_dir='fund_data/nav', output_csv='fund_data/fof_eval
 if __name__ == '__main__':
     # 调用执行，全部采用默认参数要求
     run_batch_evaluation(
-        nav_dir='fund_data/nav',
         output_csv='fund_data/fof_evaluation_results.csv',
-        combo_size=2,
-        max_workers=10
     )

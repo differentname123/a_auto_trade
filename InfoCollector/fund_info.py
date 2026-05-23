@@ -1,11 +1,10 @@
 import glob
-
 import akshare as ak
 import pandas as pd
 import time
 import os
+import concurrent.futures
 from tqdm import tqdm
-import pandas as pd
 
 
 def create_folders():
@@ -93,7 +92,7 @@ def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
 
     for code in tqdm(codes_to_process, desc="下载进度"):
         requested_this_loop = False  # 记录本轮是否发起了真实网络请求
-        fund_name = fund_codes[code] # 【新增】获取当前基金名称
+        fund_name = fund_codes[code]  # 【新增】获取当前基金名称
 
         # --- 1. 获取历史净值 ---
         nav_file = f"fund_data/nav/{code}_nav.csv"
@@ -107,7 +106,7 @@ def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
                 else:
                     open(nav_file, 'w').close()  # 空数据也建空文件占位，防下次重复请求
             except Exception as e:
-                open(nav_file, 'w').close()      # 异常时也建空文件占位，防下次重复请求
+                open(nav_file, 'w').close()  # 异常时也建空文件占位，防下次重复请求
                 # 【修改】加上基金名称的打印
                 tqdm.write(f"⚠️ 跳过基金 {code} ({fund_name}) 的净值 (无数据/解析异常)")
 
@@ -120,9 +119,9 @@ def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
                 if not holdings_df.empty:
                     holdings_df.to_csv(holdings_file, index=False, encoding='utf-8-sig')
                 else:
-                    open(holdings_file, 'w').close() # 空数据建空文件占位
+                    open(holdings_file, 'w').close()  # 空数据建空文件占位
             except Exception as e:
-                open(holdings_file, 'w').close()     # 异常建空文件占位
+                open(holdings_file, 'w').close()  # 异常建空文件占位
                 # 【修改】加上基金名称的打印
                 tqdm.write(f"⚠️ 跳过基金 {code} ({fund_name}) 的重仓股 (无持仓/解析异常)")
 
@@ -130,7 +129,6 @@ def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
         # # 核心优化：只有真发起网络请求才睡1秒。若是已有文件直接跳过，1秒钟能直接跨过上千个进度！
         # if requested_this_loop:
         #     time.sleep(1)
-
 
 
 def calculate_adj_nav(df):
@@ -157,35 +155,37 @@ def calculate_adj_nav(df):
     return res_df
 
 
-def strict_veto_single_fund(df, fund_name="Unknown", date_col='净值日期', nav_col='单位净值',
-                            baseline_date=None):
+def calculate_fund_stats(df, fund_name="Unknown", date_col='净值日期', nav_col='单位净值'):
     """
-    FOF 绝对死刑过滤器 (100% 死亡判定)
-    此时传入的还是未复权的原始 df，主要检查数据完整性与死水状态。
+    将死刑判断改为数据统计，只记录基本情况放入 result 中。
     """
     result = {
         "fund_name": fund_name,
-        "is_dead": False,
-        "death_reason": ""
+        "adj_nav_file": None,
+        "total_active_days": 0,
+        "real_start": None,
+        "real_end": None,
+        "missing_ratio": 0.0,
+        "max_zeros": 0,
+        "max_drawdown": 0.0,
+        "annualized_return": 0.0,
+        "top_10_holdings": ""
     }
 
-    # ================= 1. 数据结构直接报废 =================
     if df is None or df.empty or nav_col not in df.columns or date_col not in df.columns:
-        result["is_dead"] = True
-        result["death_reason"] = "Invalid DataFrame structure or missing columns"
         return result
 
     temp_df = df.copy()
     temp_df[date_col] = pd.to_datetime(temp_df[date_col])
-    temp_df = temp_df.set_index(date_col).sort_index()
-    temp_df = temp_df[~temp_df.index.duplicated(keep='last')]
+    temp_df = temp_df.sort_values(by=date_col)
+    temp_df = temp_df.drop_duplicates(subset=[date_col], keep='last')
+    temp_df = temp_df.set_index(date_col)
+
     nav_series = temp_df[nav_col]
 
     # 剥离前后的全空数据，找到该基金真实的生命周期
     valid_series = nav_series.dropna()
     if valid_series.empty:
-        result["is_dead"] = True
-        result["death_reason"] = "All NAV data is NaN"
         return result
 
     real_start = valid_series.index[0]
@@ -193,101 +193,87 @@ def strict_veto_single_fund(df, fund_name="Unknown", date_col='净值日期', na
     active_series = nav_series.loc[real_start:real_end]
     total_active_days = len(active_series)
 
-    # ================= 2. 长度绝对死刑 =================
-    if total_active_days < 252:
-        result["is_dead"] = True
-        result["death_reason"] = f"Absolute short history: {total_active_days} days < 252 days"
-        return result
+    result["total_active_days"] = total_active_days
+    result["real_start"] = real_start.strftime('%Y-%m-%d')
+    result["real_end"] = real_end.strftime('%Y-%m-%d')
 
-    # ================= 3. 僵尸基金绝对死刑 =================
-    if baseline_date is None:
-        baseline_date = pd.Timestamp.today()
-    else:
-        baseline_date = pd.to_datetime(baseline_date)
+    if total_active_days > 0:
+        result["missing_ratio"] = float(active_series.isna().sum() / total_active_days)
 
-    if (baseline_date - real_end).days > 35:
-        result["is_dead"] = True
-        result["death_reason"] = f"Zombie fund: Last valid date {real_end.strftime('%Y-%m-%d')}"
-        return result
-
-    # ================= 4. 缺失率绝对死刑 =================
-    missing_ratio = active_series.isna().sum() / total_active_days
-    if missing_ratio > 0.05:
-        result["is_dead"] = True
-        result["death_reason"] = f"Fatal missing data: {missing_ratio:.2%} > 5%"
-        return result
-
-    # ================= 5. 流动性枯竭/伪造平滑绝对死刑 =================
-    # 核心优化：如果你传入的数据带有“日增长率”，直接用它来判定死水，避开分红造成的净值跳动误判
+    # 计算连续 0 收益（死水天数）
     if '日增长率' in temp_df.columns:
         rets = pd.to_numeric(temp_df.loc[real_start:real_end, '日增长率'], errors='coerce').fillna(0)
     else:
         nav_ffilled = active_series.ffill()
         rets = nav_ffilled.pct_change().fillna(0.0)
 
-    # 抓捕连续0收益（误差容忍度 1e-8）
     is_zero = (rets.abs() < 1e-8).astype(int)
     max_zeros = is_zero.groupby((is_zero == 0).cumsum()).sum().max()
-
-    if max_zeros > 10:
-        result["is_dead"] = True
-        result["death_reason"] = f"Stagnant pricing: {max_zeros} consecutive 0-return days"
-        return result
+    result["max_zeros"] = int(max_zeros) if pd.notna(max_zeros) else 0
 
     return result
 
 
 def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期', nav_col='单位净值'):
     """
-    基金数据处理流水线：读取文件 -> 初筛死刑判定 -> (若存活)计算复权净值 -> (可选)保存为新文件
+    基金数据处理流水线：提取统计指标 -> 提取前十大持仓 -> 无差别计算并保存复权净值
     """
-    if not os.path.exists(file_path):
-        return {"status": "error", "message": f"File not found: {file_path}", "df": None}
-
-    # 提取文件名作为基金标识
-    fund_name = os.path.basename(file_path).split('.')[0]
+    fund_name = os.path.basename(file_path).split('_')[0]
 
     # 1. 读取数据
     try:
         df = pd.read_csv(file_path)
     except Exception as e:
-        return {"status": "error", "message": f"Failed to read CSV: {e}", "df": None}
+        df = pd.DataFrame()
 
-    # 2. 执行死刑判定 (初筛)
-    veto_report = strict_veto_single_fund(df, fund_name=fund_name, date_col=date_col, nav_col=nav_col)
+    # 2. 基础指标计算 (不再做死刑淘汰)
+    result = calculate_fund_stats(df, fund_name=fund_name, date_col=date_col, nav_col=nav_col)
 
-    # 如果被判死刑，直接打回，不计算复权，也不保存
-    if veto_report["is_dead"]:
-        return {
-            "status": "rejected",
-            "message": veto_report["death_reason"],
-            "df": None
-        }
+    if not df.empty and date_col in df.columns and nav_col in df.columns:
+        # 3. 排序并计算复权净值
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.sort_values(by=date_col).reset_index(drop=True)
+        qualified_df = calculate_adj_nav(df)
 
-    # 3. 存活标的：按照日期排好序后，计算复权净值
-    # 为保证 calculate_adj_nav 中 .iloc[0] 拿到的是最早期的数据，先正向排序
-    df[date_col] = pd.to_datetime(df[date_col])
-    df = df.sort_values(by=date_col).reset_index(drop=True)
+        # 4. 基于复权净值计算衍生指标 (最大回撤、年化收益)
+        if '复权净值' in qualified_df.columns:
+            adj_series = qualified_df.set_index(date_col)['复权净值'].dropna()
+            if not adj_series.empty and result["total_active_days"] > 0:
+                start_val = adj_series.iloc[0]
+                end_val = adj_series.iloc[-1]
+                if start_val > 0:
+                    years = result["total_active_days"] / 252.0
+                    if years > 0:
+                        result["annualized_return"] = round(float((end_val / start_val) ** (1 / years) - 1), 6)
 
-    qualified_df = calculate_adj_nav(df)
+                roll_max = adj_series.cummax()
+                if not roll_max.empty and roll_max.max() > 0:
+                    drawdown = (adj_series - roll_max) / roll_max
+                    result["max_drawdown"] = round(float(drawdown.min()), 6)
 
-    # 4. 可选：保存通过且加工完的数据
-    saved_path = None
-    if save_qualified:
-        # 直接替换 .csv，加上后缀标识这是一个已清洗且包含复权净值的文件
-        saved_path = file_path.replace('.csv', '_adj.csv')
-        qualified_df.to_csv(saved_path, index=False)
+        # 5. 无差别保存复权结果
+        if save_qualified:
+            saved_path = file_path.replace('.csv', '_adj.csv')
+            qualified_df.to_csv(saved_path, index=False, encoding='utf-8-sig')
+            result["adj_nav_file"] = saved_path
 
-    return {
-        "status": "passed",
-        "message": "Qualified and adjusted NAV calculated.",
-        "df": qualified_df,
-        "saved_path": saved_path
-    }
+    # 6. 获取前十大持仓股票
+    holdings_pattern = f"fund_data/holdings/{fund_name}_holdings_*.csv"
+    holdings_files = glob.glob(holdings_pattern)
+    if holdings_files:
+        holdings_files.sort(reverse=True)  # 优先读取最新年份的文件
+        try:
+            hdf = pd.read_csv(holdings_files[0])
+            if '股票名称' in hdf.columns:
+                top_10 = hdf.head(10)['股票名称'].dropna().astype(str).tolist()
+                result["top_10_holdings"] = ",".join(top_10)
+        except Exception:
+            pass
+
+    return result
 
 
 def judge_fund_df():
-    # 使用 raw string (r"") 防止 Windows 路径下的转义字符报错
     target_dir = 'fund_data/nav'
 
     print(f"🚀 开始扫描目录: {target_dir}")
@@ -303,44 +289,50 @@ def judge_fund_df():
         print("⚠️ 未在该目录下找到任何 CSV 文件。")
         return
 
-    print(f"📂 共发现 {len(all_csv_files)} 个 CSV 文件，开始清洗过滤...\n" + "-" * 50)
+    print(f"📂 共发现 {len(all_csv_files)} 个 CSV 文件，开始计算统计指标并生成复权净值...\n" + "-" * 50)
 
-    # 统计数据
-    stats = {"passed": 0, "rejected": 0, "skipped": 0, "error": 0}
+    # 过滤出尚未处理过的原文件
+    files_to_process = [f for f in all_csv_files if not os.path.basename(f).endswith("_adj.csv")]
+    skipped_count = len(all_csv_files) - len(files_to_process)
 
-    for file_path in all_csv_files:
-        filename = os.path.basename(file_path)
+    stats = {"processed": 0, "skipped": skipped_count, "error": 0}
+    all_results = []
 
-        # 排除已经处理过的 _adj.csv 文件
-        if filename.endswith("_adj.csv"):
-            stats["skipped"] += 1
-            continue
+    if files_to_process:
+        # 使用进程池执行并行处理，并行度设置为 20
+        with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+            # 提交任务
+            futures = [executor.submit(process_fund_pipeline, file_path, True) for file_path in files_to_process]
 
-        fund_name = filename.split('.')[0]
+            # 使用 tqdm 进度条结合 concurrent.futures.as_completed 获取结果
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="处理进度"):
+                try:
+                    result = future.result()
+                    all_results.append(result)
 
-        # 执行流水线
-        result = process_fund_pipeline(file_path, save_qualified=True)
+                    if result.get("adj_nav_file"):
+                        stats["processed"] += 1
+                    else:
+                        stats["error"] += 1
+                except Exception as e:
+                    stats["error"] += 1
 
-        # 终端输出进度和结果
-        if result["status"] == "passed":
-            print(f"[ ✅ 准入 ] {fund_name.ljust(15)} -> {result['message']}")
-            stats["passed"] += 1
-        elif result["status"] == "rejected":
-            print(f"[ ❌ 淘汰 ] {fund_name.ljust(15)} -> 原因: {result['message']}")
-            stats["rejected"] += 1
-        else:
-            print(f"[ ⚠️ 报错 ] {fund_name.ljust(15)} -> 详情: {result['message']}")
-            stats["error"] += 1
+    # 统一将 result 汇总为 CSV 文件
+    if all_results:
+        results_df = pd.DataFrame(all_results)
+        output_csv = "fund_data/all_funds_result.csv"
+        results_df.to_csv(output_csv, index=False, encoding='utf-8-sig')
+        print(f"\n✅ 所有基金结果汇总完毕，已保存至: {output_csv}")
 
     # 打印最终总结报表
     print("-" * 50)
     print("📊 批量处理完成！总结报告:")
     print(f"   总文件数 : {len(all_csv_files)}")
-    print(f"   成功生成 : {stats['passed']}只基金进入候选池 (生成了 _adj.csv)")
-    print(f"   淘汰报废 : {stats['rejected']}只基金")
+    print(f"   成功处理 : {stats['processed']}只基金 (生成了 _adj.csv 并记录统计特征)")
     print(f"   跳过处理 : {stats['skipped']}个已存在的复权文件")
-    print(f"   处理报错 : {stats['error']}个文件")
+    print(f"   空数/报错 : {stats['error']}个文件")
     print("-" * 50)
+
 
 if __name__ == "__main__":
     judge_fund_df()
