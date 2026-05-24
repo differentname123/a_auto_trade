@@ -250,15 +250,52 @@ def _load_single_nav(f):
     return None
 
 
-def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_csv='fund_data/fund_correlations.csv',
+def precompute_correlations(result_csv='fund_data/all_funds_result.csv',
+                            corr_csv='fund_data/fund_correlations.csv',
+                            downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv',
                             max_workers=10):
     """
     加载所有基金记录的净值数据，进行时间对齐后计算相关性系数，并落盘存储。
+    修改后：支持额外提取极度悲观市场下的成对下行相关性矩阵 Downside_Correlation。
     """
-    print(f"\n[{get_current_time()}] ---------------- 开始计算全市场基金相关性矩阵 ----------------")
+    print(f"\n[{get_current_time()}] ---------------- 开始准备全市场相关性双矩阵 ----------------")
+
+    # ---------------- 1. 新增：提取下行相关性排雷矩阵 ----------------
+    downside_corr_matrix = pd.DataFrame()
+    if os.path.exists(downside_csv):
+        print(f"[{get_current_time()}] 正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
+        try:
+            df_2d = pd.read_csv(downside_csv)
+            if '组合文件名' in df_2d.columns and 'Downside_Correlation' in df_2d.columns:
+                records = []
+                for _, row in df_2d.iterrows():
+                    combo = row['组合文件名']
+                    if pd.isna(combo): continue
+                    parts = [p.strip() for p in str(combo).split('+')]
+                    if len(parts) == 2:
+                        records.append({'f1': f'fund_data/nav/{parts[0]}', 'f2': f'fund_data/nav/{parts[1]}', 'dc': row['Downside_Correlation']})
+                        records.append({'f1': f'fund_data/nav/{parts[1]}', 'f2': f'fund_data/nav/{parts[0]}', 'dc': row['Downside_Correlation']})
+                if records:
+                    # 使用 groupby.mean().unstack() 更健壮，避免脏数据导致重复轴崩溃
+                    df_records = pd.DataFrame(records)
+                    downside_corr_matrix = df_records.groupby(['f1', 'f2'])['dc'].mean().unstack()
+                    print(
+                        f"[{get_current_time()}] 成功构建下行相关性矩阵，保护网涵盖 {len(downside_corr_matrix)} 只标的。")
+        except Exception as e:
+            print(f"[{get_current_time()}] 提取 Downside_Correlation 矩阵失败: {e}")
+    else:
+        print(f"[{get_current_time()}] 未发现 2 维组合文件 {downside_csv}，跳过下行相关性提取。")
+
+    # ---------------- 2. 原有：全天候 Pearson 相关性矩阵逻辑 ----------------
+    # (如果文件存在，提前返回缓存，极其节约时间)
+    if os.path.exists(corr_csv):
+        print(f"[{get_current_time()}] 已发现现有全天候相关性文件 {corr_csv}，直接加载缓存...")
+        corr_matrix = pd.read_csv(corr_csv, index_col=0)
+        return corr_matrix, downside_corr_matrix
+
     if not os.path.exists(result_csv):
         print(f"[{get_current_time()}] 错误: 未找到汇总文件 {result_csv}")
-        return pd.DataFrame()
+        return pd.DataFrame(), downside_corr_matrix
 
     df_results = pd.read_csv(result_csv)
     files = df_results['adj_nav_file'].dropna().tolist()
@@ -276,7 +313,7 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_cs
 
     if not nav_series_list:
         print(f"[{get_current_time()}] 警告: 未能成功加载任何有效净值数据！")
-        return pd.DataFrame()
+        return pd.DataFrame(), downside_corr_matrix
 
     print(f"[{get_current_time()}] 净值读取完毕。成功加载 {len(nav_series_list)} 只基金。")
     print(f"[{get_current_time()}] 正在拼接内存结构并按日期自动对齐 (可能占用较高内存)...")
@@ -297,8 +334,8 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_cs
 
     print(f"[{get_current_time()}] 矩阵运算完成！正在落盘保存至: {corr_csv}")
     corr_matrix.to_csv(corr_csv)
-    print(f"[{get_current_time()}] ---------------- 相关性矩阵预处理流程顺利结束 ----------------\n")
-    return corr_matrix
+    print(f"[{get_current_time()}] ---------------- 相关性双矩阵预处理流程顺利结束 ----------------\n")
+    return corr_matrix, downside_corr_matrix
 
 
 # ================= 多进程并行调度模块 =================
@@ -387,11 +424,11 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
 
     # ================= 2. 财务表现与数据质量底线校验 =================
     condition = (
-            (df_filtered['total_active_days'] > 300) &
+            (df_filtered['total_active_days'] > 600) &
             (df_filtered['annualized_return'] > min_annual_return) &
-            (df_filtered['missing_ratio'] < 0.02) &
-            (df_filtered['max_zeros'] < 5) &
-            (df_filtered['max_drawdown'] > -0.5)
+            (df_filtered['missing_ratio'] <= 0.05) &
+            (df_filtered['max_zeros'] < 10) &
+            (df_filtered['max_drawdown'] > -0.7)
     )
 
     # 按照年化收益降序排列（确保后续相关性剔除时，始终保留收益更高的“头雁”基金）
@@ -409,11 +446,12 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
     return df_final
 
 
-def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4, max_workers=10, corr_threshold=0.9,
-                         corr_matrix=None):
+def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4, max_workers=10,
+                         corr_threshold=0.9, corr_matrix=None,
+                         downside_corr_matrix=None, downside_corr_threshold=0.8):
     """
     核心调度函数：读取汇总数据过滤、根据相关性去重、生成组合、分配多进程并发任务、落盘CSV
-    新增外部传入 corr_matrix，避免内部重复计算或重复读取文件
+    新增外部传入双相关性矩阵，并在优胜劣汰环节注入 Downside_Correlation 绝对阈值防御过滤。
     """
     original_count = 0
     initial_filtered_count = 0
@@ -426,7 +464,7 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
         df_results = pd.read_csv(result_csv)
         original_count = len(df_results)
 
-        df_filtered = filter_fund_pool(df_results, min_annual_return=0.15)
+        df_filtered = filter_fund_pool(df_results, min_annual_return=0.02)
         initial_filtered_count = len(df_filtered)
     # 防御性判断
     if initial_filtered_count == 0:
@@ -436,12 +474,11 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     # 2. 检查并加载相关性矩阵 (优先使用外部传入)
     if corr_matrix is None:
         corr_csv = 'fund_data/fund_correlations.csv'
+        downside_csv = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
         print(f"[{get_current_time()}] 步骤 2: 检查底层相关性矩阵是否存在...")
-        if not os.path.exists(corr_csv):
-            corr_matrix = precompute_correlations(result_csv, corr_csv, max_workers=max_workers)
-        else:
-            print(f"[{get_current_time()}] 已发现现有相关性文件 {corr_csv}，直接加载缓存...")
-            corr_matrix = pd.read_csv(corr_csv, index_col=0)
+        corr_matrix, ds_matrix = precompute_correlations(result_csv, corr_csv, downside_csv, max_workers=max_workers)
+        if downside_corr_matrix is None:
+            downside_corr_matrix = ds_matrix
     else:
         print(f"[{get_current_time()}] 步骤 2: 成功接收并使用外部传入的相关性矩阵...")
 
@@ -449,24 +486,49 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
         print(f"[{get_current_time()}] 警告: 无法加载相关性矩阵，将跳过相关性过滤。")
         target_files = df_filtered['adj_nav_file'].dropna().tolist()
     else:
-        # 3. 执行高相关性“优胜劣汰”过滤
-        print(f"[{get_current_time()}] 步骤 3: 启动优胜劣汰相关性过滤引擎 (剔除阈值: {corr_threshold})...")
+        # 3. 执行高相关性“优胜劣汰”过滤（引入多层过滤网，并追踪数据缺失）
+        print(
+            f"[{get_current_time()}] 步骤 3: 启动优胜劣汰过滤 (Pearson阈值: {corr_threshold}, Downside阈值: {downside_corr_threshold})...")
         selected_files = []
+        missing_pearson_funds = 0
+        corr_jump_count = 0
+        down_corr_jump_count = 0
+        missing_downside_pair_count = 0
+
         for f in df_filtered['adj_nav_file'].dropna():
+            # 缺失处理 1：如果源 Pearson 矩阵中根本没有这个基金，直接抛弃跳过
             if f not in corr_matrix.columns:
+                missing_pearson_funds += 1
                 continue
 
             is_highly_correlated = False
             # 与已经保留下来的优秀基金（排在前面的）对比
             for sel_f in selected_files:
+                # [第一层网] 全天候相关性拦截
                 if sel_f in corr_matrix.columns:
                     corr_val = corr_matrix.loc[f, sel_f]
-                    # 如果相关性过高，直接标记舍弃该基金
                     if pd.notna(corr_val) and corr_val > corr_threshold:
                         is_highly_correlated = True
+                        corr_jump_count += 1
                         break
 
-            # 只有与已选“种子”基金都不高度重合的情况下，才收入组合池
+                # [第二层核心网] 极端下行行情相关性拦截 (已移除 combo_size > 2 限制)
+                if downside_corr_matrix is not None and not downside_corr_matrix.empty:
+                    has_dc_data = False
+                    if f in downside_corr_matrix.index and sel_f in downside_corr_matrix.columns:
+                        dc_val = downside_corr_matrix.loc[f, sel_f]
+                        if pd.notna(dc_val):
+                            has_dc_data = True
+                            if dc_val > downside_corr_threshold:
+                                is_highly_correlated = True
+                                down_corr_jump_count += 1
+                                break
+
+                    # 缺失处理 2：如果对子在历史 2 维数据中缺失，采用默认安全放行策略
+                    if not has_dc_data:
+                        missing_downside_pair_count += 1
+
+            # 只有通过了双层拦截网，才被正式收入候选池
             if not is_highly_correlated:
                 selected_files.append(f)
 
@@ -478,16 +540,17 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     print(f"[{get_current_time()}] 🎯 基金池过滤漏斗统计:")
     print(f"  1. 原始总数量: {original_count} 只")
     print(f"  2. 初步条件过滤后: {initial_filtered_count} 只 (基于时间/收益/回撤/缺失等指标)")
-    print(f"  3. 相关性(<{corr_threshold})去重后: {final_fund_count} 只 (保留高优标的)")
+    print(f"  -> [数据追踪] 发现 {missing_pearson_funds} 只基金无 Pearson 数据，已被【直接剔除】 {corr_jump_count} 次高于 {corr_threshold} 的相关性跳跃，{down_corr_jump_count} 次高于 {downside_corr_threshold} 的下行相关性跳跃。")
+    if downside_corr_matrix is not None and not downside_corr_matrix.empty:
+        print(f"  -> [数据追踪] 发现 {missing_downside_pair_count} 次 Downside 校验无成对数据，已被【默认放行】(视为安全)")
+    print(f"  3. 双矩阵排雷去重后: {final_fund_count} 只 (保留最高优且极端独立标的)")
     print("=" * 50 + "\n")
     # =====================================================
-
     # 4. 动态确定输出文件及组合可行性判断
     if final_fund_count < combo_size:
         print(
             f"[{get_current_time()}] 放弃评估: 过滤后基金数量不足 ({final_fund_count} 个)，无法生成大小为 {combo_size} 的组合。")
         return
-
     output_csv = f'fund_data/fof_evaluation_results_{combo_size}d_pool{final_fund_count}.csv'
 
     # 新增跳过判断：如果目标组合评估文件已存在，则直接跳过本次评估
@@ -570,24 +633,25 @@ if __name__ == '__main__':
 
     result_csv_path = 'fund_data/all_funds_result.csv'
     corr_csv_path = 'fund_data/fund_correlations.csv'
+    downside_csv_path = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
 
-    # 提前在全局初始化并读取/计算 corr_matrix
-    print(f"[{get_current_time()}] 【全局初始化】正在准备全市场相关性矩阵...")
-    if not os.path.exists(corr_csv_path):
-        global_corr_matrix = precompute_correlations(result_csv_path, corr_csv_path, max_workers=GLOBAL_MAX_WORKERS)
-    else:
-        print(f"[{get_current_time()}] 已发现现有相关性文件 {corr_csv_path}，直接加载缓存...")
-        global_corr_matrix = pd.read_csv(corr_csv_path, index_col=0)
+    # 提前在全局初始化并读取/计算 corr_matrix 和 downside_corr_matrix
+    print(f"[{get_current_time()}] 【全局初始化】正在准备全市场相关性双重矩阵...")
+    global_corr_matrix, global_downside_corr_matrix = precompute_correlations(
+        result_csv=result_csv_path,
+        corr_csv=corr_csv_path,
+        downside_csv=downside_csv_path,
+        max_workers=GLOBAL_MAX_WORKERS
+    )
 
     for i in range(4):
         combo_size = 2 + i  # 从2维组合开始，逐步增加维度
         print(f"\n{'#' * 70}\n[{get_current_time()}] 【启动引擎】正在评估 {combo_size} 维 FOF 组合\n{'#' * 70}")
 
-        # 这里已经不用传 output_csv 参数了，它会在方法内基于最终保留数量动态拼出
-        # 且将全局的 corr_matrix 作为参数传入，满足条件1要求
         run_batch_evaluation(
             result_csv=result_csv_path,
             combo_size=combo_size,
             max_workers=GLOBAL_MAX_WORKERS,
-            corr_matrix=global_corr_matrix
+            corr_matrix=global_corr_matrix,
+            downside_corr_matrix=global_downside_corr_matrix  # 顺带把极值矩阵透传到底层
         )
