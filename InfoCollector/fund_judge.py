@@ -4,6 +4,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
 import scipy.stats as stats
+from tqdm import tqdm  # 新增导入 tqdm 进度条库
 
 
 def evaluate_fof_portfolio(df_list, date_col='净值日期', nav_col='复权净值',
@@ -246,7 +247,7 @@ def _worker_process_combo(combo_files):
 
 
 def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv='fund_data/fof_evaluation_results.csv',
-                         combo_size=2, max_workers=20):
+                         combo_size=4, max_workers=25):
     """
     核心调度函数：读取汇总数据过滤、生成组合、分配多进程并发任务、落盘CSV
     """
@@ -282,16 +283,15 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv
     print(f"扫描完毕: 共找到 {len(target_files)} 个符合条件的数据文件。")
     print(f"任务构建: 将产生 {len(combos)} 种组合，开启 {max_workers} 个并行进程计算...")
     # combos = combos[:10000]
+
     # 3. 开始并发处理 (由于计算密集，使用 ProcessPoolExecutor 发挥多核性能)
     results = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(_worker_process_combo, combo) for combo in combos]
 
-        for i, future in enumerate(as_completed(futures), 1):
+        # ================= 使用 tqdm 智能展示进度 =================
+        for future in tqdm(as_completed(futures), total=len(combos), desc="评估FOF组合进度", unit="组"):
             results.append(future.result())
-            # 可选：简单打印一下进度提示
-            if i % 10000 == 0 or i == len(combos):
-                print(f"进度: 已处理 {i} / {len(combos)} 个组合 百分百比: {i / len(combos) * 100:.2f}%")
 
     # 4. 汇总为 DataFrame 并统一落盘
     if results:
@@ -314,7 +314,19 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv
 
 # 如果您要在脚本中直接运行，可以调用以下启动代码：
 if __name__ == '__main__':
-    # 调用执行，全部采用默认参数要求
-    run_batch_evaluation(
-        output_csv='fund_data/fof_evaluation_results.csv',
-    )
+
+    for i in range(4):
+        combo_size = 1 + i  # 从4维组合开始，逐步增加维度
+        print(f"\n{'=' * 60}\n正在评估 {combo_size} 维组合...\n{'=' * 60}")
+        output_csv = f'fund_data/fof_evaluation_results_{combo_size}d.csv'
+        if os.path.exists(output_csv):
+            df = pd.read_csv(output_csv)
+            # 保留Total_Score 大于0的结果，认为是有效结果文件
+            df = df[df['Total_Score'] > 0] if 'Total_Score' in df.columns else pd.DataFrame()
+            if not df.empty and 'Total_Score' in df.columns and (df['Total_Score'] > 0).any():
+                print(f"已存在有效结果文件 {output_csv}，跳过 {combo_size} 维组合的评估。")
+            continue
+        run_batch_evaluation(
+            combo_size=combo_size,
+            output_csv=output_csv,
+        )
