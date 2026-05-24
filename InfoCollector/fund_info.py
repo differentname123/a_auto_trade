@@ -340,7 +340,7 @@ if __name__ == "__main__":
 
     df1 = pd.read_csv(result_csv_path, engine='python')
 
-    df_file = r'fund_data/fof_evaluation_results_3d_pool41.csv'
+    df_file = r'fund_data/fof_evaluation_results_2d_pool1081.csv'
     df = pd.read_csv(df_file, engine='python')
     # 只保留Total_Score大于0的行
     df = df[df['Total_Score'] > 0.1]
