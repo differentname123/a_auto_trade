@@ -531,8 +531,24 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 # 当前批次跑完，直接追加写入磁盘，清空内存
                 if batch_results:
                     results_df = pd.DataFrame(batch_results)
-                    cols = ['组合文件名'] + [c for c in results_df.columns if c != '组合文件名']
-                    results_df = results_df[cols]
+
+                    # 🚀 定义所有可能出现的列名大满贯 (Schema) 强制对齐
+                    all_possible_columns = [
+                        '组合文件名', 'Start_Date', 'End_Date', 'Total_Days', 'n_funds',
+                        'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
+                        'AR1_Coefficient', 'Annualized_Volatility', 'Sharpe_Ratio',
+                        'Calmar_Ratio', 'Daily_Win_Rate', 'Downside_Correlation',
+                        'VETO_Hurdle_Rate', 'VETO_Drawdown_Crash', 'VETO_Fake_Smooth',
+                        'VETO_Endless_Bleeding', 'VETO_Data_Distortion',
+                        'VETO_Perturbation_Death',
+                        'VETO_Hurdle_Rate_in_Perturb', 'VETO_Drawdown_Crash_in_Perturb',
+                        'VETO_Fake_Smooth_in_Perturb', 'VETO_Endless_Bleeding_in_Perturb',
+                        'VETO_Data_Distortion_in_Perturb',
+                        'error', 'Total_Score'
+                    ]
+
+                    # 🚀 强制对齐列：缺少的列会自动填充 NaN，确保每一批次的结构绝对一致
+                    results_df = results_df.reindex(columns=all_possible_columns)
 
                     mode = 'w' if is_first_write else 'a'
                     header = is_first_write
