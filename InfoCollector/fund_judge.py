@@ -1,6 +1,7 @@
 import os
 import itertools
 import math  # 新增导入 math 用于计算组合总数
+import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime  # 新增导入用于格式化日志时间
 import pandas as pd
@@ -322,6 +323,86 @@ def _worker_process_combo(combo_files):
         }
 
 
+
+
+def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_annual_return=0.15):
+    """
+    独立的基金池漏斗过滤函数：执行可申购白名单过滤与财务指标硬性过滤。
+
+    参数:
+        df_results: DataFrame, 包含所有基金的基础表现指标
+        active_cache: str, 最新可申购基金名单的 CSV 路径
+        min_annual_return: float, 允许入池的最低年化收益阈值
+
+    返回:
+        DataFrame: 经过严格过滤并按年化收益降序排列的精选基金池
+    """
+    if df_results is None or df_results.empty:
+        print("❌ 输入的 DataFrame 为空。")
+        return pd.DataFrame()
+
+    original_count = len(df_results)
+    df_filtered = df_results.copy()
+
+    # ================= 1. 实盘可申购状态（白名单）校验 =================
+    if os.path.exists(active_cache):
+        try:
+            df_active = pd.read_csv(active_cache, dtype=str)
+            if '基金代码' in df_active.columns:
+                active_codes_set = set(df_active['基金代码'].str.strip().str.zfill(6).tolist())
+
+                # 动态自适应：提取被过滤表的代码列
+                if '基金代码' in df_filtered.columns:
+                    target_codes = df_filtered['基金代码'].astype(str).str.strip().str.zfill(6)
+                elif 'fund_code' in df_filtered.columns:
+                    target_codes = df_filtered['fund_code'].astype(str).str.strip().str.zfill(6)
+                else:
+                    # 终极兜底：从文件名 "fund_data/000001_adj_nav.csv" 提取连续6位数字
+                    target_codes = df_filtered['adj_nav_file'].apply(
+                        lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})',
+                                                                                                      str(x)) else "000000"
+                    )
+
+                # 执行强制交集过滤
+                df_filtered = df_filtered[target_codes.isin(active_codes_set)].copy()
+                active_filtered_count = len(df_filtered)
+            else:
+                print(f"⚠️ [状态校验跳过] {active_cache} 中未找到 '基金代码' 列。")
+                active_filtered_count = original_count
+        except Exception as e:
+            print(f"⚠️ [状态校验异常] 读取白名单失败，跳过 ({str(e)})")
+            active_filtered_count = original_count
+    else:
+        print(f"ℹ️ [状态校验跳过] 未发现可申购白名单文件: {active_cache}")
+        active_filtered_count = original_count
+
+    if df_filtered.empty:
+        print("❌ 状态校验后无可用基金。")
+        return df_filtered
+
+    # ================= 2. 财务表现与数据质量底线校验 =================
+    condition = (
+            (df_filtered['total_active_days'] > 300) &
+            (df_filtered['annualized_return'] > min_annual_return) &
+            (df_filtered['missing_ratio'] < 0.02) &
+            (df_filtered['max_zeros'] < 5) &
+            (df_filtered['max_drawdown'] > -0.5)
+    )
+
+    # 按照年化收益降序排列（确保后续相关性剔除时，始终保留收益更高的“头雁”基金）
+    df_final = df_filtered[condition].sort_values(by='annualized_return', ascending=False)
+    final_count = len(df_final)
+
+    # ================= 3. 打印漏斗统计日志 =================
+    print("\n" + "=" * 55)
+    print("🎯 基金池初筛漏斗统计:")
+    print(f"  1. 初始输入总数    : {original_count} 只")
+    print(f"  2. 可申购状态通过  : {active_filtered_count} 只")
+    print(f"  3. 财务与质量达标  : {final_count} 只 (作为高优候选池)")
+    print("=" * 55 + "\n")
+
+    return df_final
+
 def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4, max_workers=10, corr_threshold=0.9):
     """
     核心调度函数：读取汇总数据过滤、根据相关性去重、生成组合、分配多进程并发任务、落盘CSV
@@ -337,27 +418,8 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
         df_results = pd.read_csv(result_csv)
         original_count = len(df_results)
 
-        # 【增强版过滤条件】：
-        # 1. 存续时间 > 300 天
-        # 2. 年化收益 > 10% (你的代码中是0.2即20%)
-        # 3. 缺失率 < 2% (保证数据质量)
-        # 4. 连续0收益天数 < 5天 (过滤僵尸基金)
-        # 5. 最大回撤 > -50% (过滤极端劣质表现)
-        condition = (
-                (df_results['total_active_days'] > 300) &
-                (df_results['annualized_return'] > 0.2) &
-                (df_results['missing_ratio'] < 0.02) &
-                (df_results['max_zeros'] < 5) &
-                (df_results['max_drawdown'] > -0.5)
-        )
-
-        # 按照年化收益降序排列（为了相关性剔除时，始终保留好一点/收益高的基金）
-        df_filtered = df_results[condition].sort_values(by='annualized_return', ascending=False)
+        df_filtered = filter_fund_pool(df_results, min_annual_return=0.15)
         initial_filtered_count = len(df_filtered)
-    else:
-        print(f"[{get_current_time()}] 未找到汇总文件 {result_csv}，请先执行前置的数据获取及汇总流程。")
-        return
-
     # 防御性判断
     if initial_filtered_count == 0:
         print(f"[{get_current_time()}] 初步条件过滤后，符合要求的基金数量为0，退出流程。")

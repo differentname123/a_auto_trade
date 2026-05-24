@@ -335,6 +335,16 @@ def judge_fund_df():
 
 
 if __name__ == "__main__":
+
+    df_file = r'fund_data/fof_evaluation_results_2d_pool263.csv'
+    df = pd.read_csv(df_file)
+    # 只保留Total_Score大于0的行
+    df_filtered = df[df['Total_Score'] > 0].copy()
+    # 按照Total_Score列降序排序
+    df_filtered = df_filtered.sort_values(by='Total_Score', ascending=False)
+
+
+
     judge_fund_df()
     #
     # # 1. 创建存放数据的目录
