@@ -1,5 +1,6 @@
 import os
 import itertools
+import math  # 新增导入 math 用于计算组合总数
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
 import numpy as np
@@ -262,7 +263,7 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv
         # 4. 连续0收益天数 < 5天 (过滤僵尸基金)
         # 5. 最大回撤 > -50% (过滤极端劣质表现)
         condition = (
-                (df_results['total_active_days'] > 600) &
+                (df_results['total_active_days'] > 300) &
                 (df_results['annualized_return'] > 0.2) &
                 (df_results['missing_ratio'] < 0.02) &
                 (df_results['max_zeros'] < 5) &
@@ -278,54 +279,71 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', output_csv
         print(f"找到的文件数量不足 ({len(target_files)} 个)，无法生成大小为 {combo_size} 的组合。")
         return
 
-    # 2. 获取两两(或多维)组合
-    combos = list(itertools.combinations(target_files, combo_size))
+    # 2. 获取两两(或多维)组合 (改为惰性迭代器 + 总数计算，绝对禁止转为list撑爆内存)
+    total_combos = math.comb(len(target_files), combo_size)
+    combos = itertools.combinations(target_files, combo_size)
+
     print(f"扫描完毕: 共找到 {len(target_files)} 个符合条件的数据文件。")
-    print(f"任务构建: 将产生 {len(combos)} 种组合，开启 {max_workers} 个并行进程计算...")
-    # combos = combos[:10000]
+    print(f"任务构建: 将产生 {total_combos} 种组合，开启 {max_workers} 个并行进程计算...")
 
-    # 3. 开始并发处理 (由于计算密集，使用 ProcessPoolExecutor 发挥多核性能)
-    results = []
+    # 3. 确保输出目录存在
+    output_dir = os.path.dirname(output_csv)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    # 4. 分块流式处理并落盘（彻底解决 137 OOM 内存杀手问题）
+    batch_size = 50000  # 内存中最多保留 5 万个任务/结果
+    is_first_write = True
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_worker_process_combo, combo) for combo in combos]
+        with tqdm(total=total_combos, desc="评估FOF组合进度", unit="组") as pbar:
+            while True:
+                # 每次只从无穷尽的组合中切出 batch_size 大小的一块丢进内存
+                batch_combos = list(itertools.islice(combos, batch_size))
+                if not batch_combos:
+                    break
 
-        # ================= 使用 tqdm 智能展示进度 =================
-        for future in tqdm(as_completed(futures), total=len(combos), desc="评估FOF组合进度", unit="组"):
-            results.append(future.result())
+                # 提交这一批次的任务
+                futures = [executor.submit(_worker_process_combo, combo) for combo in batch_combos]
 
-    # 4. 汇总为 DataFrame 并统一落盘
-    if results:
-        results_df = pd.DataFrame(results)
+                batch_results = []
+                for future in as_completed(futures):
+                    batch_results.append(future.result())
+                    pbar.update(1)
 
-        # 为了方便查看，把 '组合文件名' 强制移动到 DataFrame 的第一列
-        cols = ['组合文件名'] + [c for c in results_df.columns if c != '组合文件名']
-        results_df = results_df[cols]
+                # 当前批次跑完，直接追加写入磁盘，清空内存
+                if batch_results:
+                    results_df = pd.DataFrame(batch_results)
+                    cols = ['组合文件名'] + [c for c in results_df.columns if c != '组合文件名']
+                    results_df = results_df[cols]
 
-        # 确保输出目录存在
-        output_dir = os.path.dirname(output_csv)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
+                    mode = 'w' if is_first_write else 'a'
+                    header = is_first_write
+                    results_df.to_csv(output_csv, mode=mode, header=header, index=False, encoding='utf-8-sig')
+                    is_first_write = False
 
-        results_df.to_csv(output_csv, index=False, encoding='utf-8-sig')
-        print(f"全部计算完成！结果已成功保存至: {output_csv}")
-    else:
-        print("未能产生任何有效结果。")
+                # 强行释放本轮循环产生的千万级别对象占用
+                del futures
+                del batch_results
+                del batch_combos
+
+    print(f"全部计算完成！结果已成功保存至: {output_csv}")
 
 
 # 如果您要在脚本中直接运行，可以调用以下启动代码：
 if __name__ == '__main__':
 
     for i in range(4):
-        combo_size = 1 + i  # 从4维组合开始，逐步增加维度
+        combo_size = 4 + i  # 从4维组合开始，逐步增加维度
         print(f"\n{'=' * 60}\n正在评估 {combo_size} 维组合...\n{'=' * 60}")
         output_csv = f'fund_data/fof_evaluation_results_{combo_size}d.csv'
-        if os.path.exists(output_csv):
-            df = pd.read_csv(output_csv)
-            # 保留Total_Score 大于0的结果，认为是有效结果文件
-            df = df[df['Total_Score'] > 0] if 'Total_Score' in df.columns else pd.DataFrame()
-            if not df.empty and 'Total_Score' in df.columns and (df['Total_Score'] > 0).any():
-                print(f"已存在有效结果文件 {output_csv}，跳过 {combo_size} 维组合的评估。")
-            continue
+        # if os.path.exists(output_csv):
+        #     df = pd.read_csv(output_csv)
+        #     # 保留Total_Score 大于0的结果，认为是有效结果文件
+        #     df = df[df['Total_Score'] > 0] if 'Total_Score' in df.columns else pd.DataFrame()
+        #     if not df.empty and 'Total_Score' in df.columns and (df['Total_Score'] > 0).any():
+        #         print(f"已存在有效结果文件 {output_csv}，跳过 {combo_size} 维组合的评估。")
+        #     continue
         run_batch_evaluation(
             combo_size=combo_size,
             output_csv=output_csv,
