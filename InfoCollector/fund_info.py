@@ -335,15 +335,15 @@ def judge_fund_df():
 
 
 if __name__ == "__main__":
-    result_csv_path = 'fund_data/all_funds_result.csv'
-    result_csv_path = 'fund_data/fof_evaluation_results_2d_pool3917_filtered.csv'
+    # result_csv_path = 'fund_data/all_funds_result.csv'
+    # result_csv_path = 'fund_data/fof_evaluation_results_2d_pool3917_filtered.csv'
+    #
+    # df1 = pd.read_csv(result_csv_path, engine='python')
 
-    df1 = pd.read_csv(result_csv_path, engine='python')
-
-    df_file = r'fund_data/fof_evaluation_results_2d_pool1081.csv'
+    df_file = r'fund_data/fof_evaluation_results_3d_pool425_min_day_2000.csv'
     df = pd.read_csv(df_file, engine='python')
     # 只保留Total_Score大于0的行
-    df = df[df['Total_Score'] > 0.1]
+    df = df[df['Total_Score'] > 0.01]
     df = df[df['Total_Days'] > 600]
 
 
