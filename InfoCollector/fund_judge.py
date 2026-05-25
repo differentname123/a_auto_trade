@@ -100,6 +100,26 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
     # 防止 Numba 因 Pandas 切片底层内存不连续而触发崩溃或严重掉速
     fund_rets_arr = np.ascontiguousarray(fund_rets.values, dtype=np.float64)
 
+    # ================= [性能优化修正] 纯 NumPy 矩阵级向量化基线计算 (消灭 for 循环) =================
+    # 1. 瞬间计算所有子基金的复权净值矩阵 (n_days, n_funds)
+    fund_eq_arr = np.cumprod(1.0 + fund_rets_arr, axis=0)
+
+    # 2. 向量化计算所有子基金的 CAGR
+    fund_cagrs_arr = np.power(fund_eq_arr[-1, :], 252.0 / n_days) - 1.0
+    avg_cagr = float(np.mean(fund_cagrs_arr))
+
+    # 3. 向量化计算所有子基金的 MDD
+    cum_max_arr = np.maximum.accumulate(fund_eq_arr, axis=0)
+    cum_max_arr = np.clip(cum_max_arr, a_min=1.0, a_max=None)  # 防除0
+    drawdowns_arr = (fund_eq_arr - cum_max_arr) / cum_max_arr
+    fund_mdds_arr = np.min(drawdowns_arr, axis=0)
+    avg_mdd = float(np.mean(fund_mdds_arr))
+
+    # 4. 计算零协同底线卡玛
+    calmar_baseline = float(avg_cagr / abs(avg_mdd)) if abs(avg_mdd) > 1e-6 else 0.0
+
+    # =========================================================================================
+
     # ================= 2 & 3. 核心评估闭包引擎 =================
     def _evaluate_single_path(current_reb_days, offset=0, w_init=None):
         if w_init is None:
@@ -117,7 +137,10 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
             'Start_Date': merged_nav.index[0].strftime('%Y-%m-%d'),
             'End_Date': merged_nav.index[-1].strftime('%Y-%m-%d'),
             'Total_Days': n_days,
-            'n_funds': n_funds
+            'n_funds': n_funds,
+            'Avg_CAGR': avg_cagr,
+            'Avg_Max_Drawdown': avg_mdd,
+            'Calmar_Baseline': calmar_baseline
         }
 
         # --- 核心指标计算 ---
@@ -131,6 +154,16 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
         is_drawdown = drawdowns < 0
         recovery_groups = (~is_drawdown).cumsum()
         metrics['Max_Recovery_Days'] = int(is_drawdown.groupby(recovery_groups).sum().max())
+
+        # --- [极速修正 & 防Crash] 最差滚动 1 年收益率纯 NumPy 实现 ---
+        if n_days >= 252:
+            # 【重要修复】：在最前面补一个 1.0 的初始净值。
+            # 否则当 n_days 刚好等于 252 时，[252:] 切片会变成空数组，导致 np.min 崩溃！
+            eq_vals_with_init = np.concatenate((np.array([1.0], dtype=np.float64), synth_eq.values))
+            rolling_1y_ret_arr = (eq_vals_with_init[252:] / eq_vals_with_init[:-252]) - 1.0
+            metrics['Worst_Rolling_1Y_Return'] = float(np.min(rolling_1y_ret_arr))
+        else:
+            metrics['Worst_Rolling_1Y_Return'] = 0.0
 
         log_eq = np.log(synth_eq.clip(lower=1e-9).values)
 
@@ -153,8 +186,9 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
         vol_annual = synth_ret.std() * np.sqrt(252)
         metrics['Annualized_Volatility'] = float(vol_annual)
         metrics['Sharpe_Ratio'] = float(cagr / vol_annual) if vol_annual > 1e-6 else 0.0
-        metrics['Calmar_Ratio'] = float(cagr / abs(metrics['Max_Drawdown'])) if abs(
-            metrics['Max_Drawdown']) > 1e-6 else 0.0
+
+        current_calmar = float(cagr / abs(metrics['Max_Drawdown'])) if abs(metrics['Max_Drawdown']) > 1e-6 else 0.0
+        metrics['Calmar_Ratio'] = current_calmar
         metrics['Daily_Win_Rate'] = float((synth_ret > 0).sum() / n_days) if n_days > 0 else 0.0
 
         n_worst = max(5, int(len(synth_ret) * 0.05))
@@ -173,24 +207,42 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
         else:
             metrics['Downside_Correlation'] = 0.5
 
-        # --- 4. 底线判决 (Iron VETO) ---
+        # --- [逻辑闭环修正] 底线判决 (Iron VETO) ---
         vetoes = {
             "VETO_Hurdle_Rate": metrics['CAGR'] < hurdle_rate,
             "VETO_Drawdown_Crash": abs(metrics['Max_Drawdown']) > max_mdd_limit,
             "VETO_Fake_Smooth": (metrics['AR1_Coefficient'] > 0.35) and (vol_annual < 0.03),
             "VETO_Endless_Bleeding": metrics['Max_Recovery_Days'] > 180,
-            "VETO_Data_Distortion": (metrics_max_missing_ratio > 0.05) or (max_continuous_zeros > 10)
+            "VETO_Data_Distortion": (metrics_max_missing_ratio > 0.05) or (max_continuous_zeros > 10),
+            "VETO_Below_Calmar_Baseline": current_calmar <= (calmar_baseline * 1.10),
+            "VETO_Worst_1Y_Crash": metrics['Worst_Rolling_1Y_Return'] < -0.15
         }
         metrics.update(vetoes)
 
         if any(vetoes.values()):
             return metrics, 0.0
 
-        # --- 第一性原理综合打分 ---
-        excess_cagr = max(0.0, metrics['CAGR'] - hurdle_rate)
-        adj_mdd = max(abs(metrics['Max_Drawdown']), 0.01)
+        # --- [终极打分公式修正] 第一性原理综合打分 ---
+        # 1. 动力引擎：超额卡玛比率 (风险调整后收益的基座)
+        excess_cagr = max(0.0, metrics['CAGR'])
+        adj_mdd = max(abs(metrics['Max_Drawdown']), 0.01)  # 防除 0
+        base_calmar = excess_cagr / adj_mdd
 
-        base_score = (excess_cagr / adj_mdd) * metrics['Worst_Rolling_1Y_R2']
+        # 2. 减震系统：净值平滑度 (0 到 1 之间)
+        # 过滤掉那些靠单边暴涨拉高收益，但平时横盘或阴跌的伪劣组合
+        smoothness_factor = metrics['Worst_Rolling_1Y_R2']
+
+        # 3. 安全气囊：尾部灾难指数级惩罚因子 (0 到 1 之间)
+        # 巧妙吸收你加入 Worst_Rolling_1Y_Return 的诉求。
+        # 当滚动 1 年收益为正时，不惩罚 (乘数=1)；
+        # 当滚动 1 年亏损时，随着亏损加深，利用自然底数 e 进行加速惩罚。
+        worst_1y_ret = min(0.0, metrics['Worst_Rolling_1Y_Return'])
+        # 乘以 2.5 是敏锐度调节阀。亏 10% 扣分 22%，亏 20% 扣分 39%，亏 30% 扣分 53%
+        tail_risk_discount = float(np.exp(worst_1y_ret * 2.5))
+
+        # 组装基础得分：三个维度完美相乘，量纲完全统一
+        base_score = base_calmar * smoothness_factor * tail_risk_discount
+
         time_multiplier = min(1.0, np.sqrt(n_days / 756))
 
         if metrics['Downside_Correlation'] > 0.8:
@@ -313,7 +365,7 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv',
     downside_corr_matrix = pd.DataFrame()
 
     if os.path.exists(downside_corr_csv):
-        print(f"[{get_current_time()}] 已发现现有下行相关性文件 {downside_corr_csv}，直接加载缓存...")
+        print(f"[{get_current_time()}] 已发现现有现行相关性文件 {downside_corr_csv}，直接加载缓存...")
         downside_corr_matrix = pd.read_csv(downside_corr_csv, index_col=0)
     elif os.path.exists(downside_csv):
         print(f"[{get_current_time()}] 正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
@@ -562,11 +614,13 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     results_df = pd.DataFrame(batch_results)
 
                     # [优化点1] 删掉基本意义不大的 VETO 指标列和常量列，大幅度降低输出文件空间占用
+                    # --- 新增调整说明：在此列表的相应位置中添加了新要求的4个核心分析指标字段 ---
                     all_possible_columns = [
                         '组合文件名', 'Start_Date', 'End_Date', 'Total_Days',
                         'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
                         'AR1_Coefficient', 'Annualized_Volatility', 'Sharpe_Ratio',
                         'Calmar_Ratio', 'Daily_Win_Rate', 'Downside_Correlation',
+                        'Avg_CAGR', 'Avg_Max_Drawdown', 'Calmar_Baseline', 'Worst_Rolling_1Y_Return',
                         'error', 'Total_Score'
                     ]
 
@@ -605,8 +659,8 @@ if __name__ == '__main__':
         max_workers=GLOBAL_MAX_WORKERS
     )
 
-    for i in range(17):
-        min_day = 2000 - i * 100
+    for i in range(10):
+        min_day = 1300 - i * 100
         combo_size = 3
         print(f"\n{'#' * 70}\n[{get_current_time()}] 【启动引擎】正在评估 {combo_size} 维 FOF 组合\n{'#' * 70}")
 
