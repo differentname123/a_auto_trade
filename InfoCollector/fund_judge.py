@@ -9,7 +9,8 @@ import numpy as np
 import scipy.stats as stats
 from tqdm import tqdm
 from numba import njit
-
+import pyarrow as pa
+import pyarrow.parquet as pq
 # ================= [架构重构] 子进程全局变量容器 =================
 WORKER_MASTER_DF = None
 
@@ -556,10 +557,11 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
         print(f"[{get_current_time()}] 过滤后基金不足以生成组合。")
         return
 
-    output_csv = f'fund_data/fof_evaluation_results_{combo_size}d_pool{final_fund_count}_min_day_{min_day}.csv'
+    # [修改点] 将后缀修改为 .parquet，适配新的存储格式
+    output_parquet = f'fund_data/fof_evaluation_results_{combo_size}d_pool{final_fund_count}_min_day_{min_day}.parquet'
 
-    if os.path.exists(output_csv):
-        print(f"[{get_current_time()}] ⏭️ 目标文件 [{output_csv}] 已存在，直接跳过计算。")
+    if os.path.exists(output_parquet):
+        print(f"[{get_current_time()}] ⏭️ 目标文件 [{output_parquet}] 已存在，直接跳过计算。")
         return
 
     print(f"[{get_current_time()}] 🚀 正在构建全局 Master Matrix...")
@@ -585,13 +587,16 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     total_combos = math.comb(final_fund_count, combo_size)
     combos = itertools.combinations(target_files, combo_size)
 
-    output_dir = os.path.dirname(output_csv)
+    output_dir = os.path.dirname(output_parquet)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    batch_size = 50000
-    chunk_size = 500  # [开启批处理] 每个进程一次拿走 500 个组合
+    batch_size = 200000  # 让主进程一次性从生成器提取 20 万个组合到内存
+    chunk_size = 2000  # 让每个工作进程一次性拿走 2000 个组合去计算
     is_first_write = True
+
+    # [新增点] 预先声明 parquet 写入器
+    writer = None
 
     with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(master_df,)) as executor:
         with tqdm(total=total_combos, desc=f"评估 {combo_size} 维组合", unit="组") as pbar:
@@ -600,7 +605,6 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 if not batch_combos:
                     break
 
-                # [修改为 Chunk 提交流程]
                 chunks = [batch_combos[i:i + chunk_size] for i in range(0, len(batch_combos), chunk_size)]
                 futures = [executor.submit(_worker_process_chunk, chunk) for chunk in chunks]
 
@@ -613,8 +617,6 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 if batch_results:
                     results_df = pd.DataFrame(batch_results)
 
-                    # [优化点1] 删掉基本意义不大的 VETO 指标列和常量列，大幅度降低输出文件空间占用
-                    # --- 新增调整说明：在此列表的相应位置中添加了新要求的4个核心分析指标字段 ---
                     all_possible_columns = [
                         '组合文件名', 'Start_Date', 'End_Date', 'Total_Days',
                         'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
@@ -624,24 +626,42 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                         'error', 'Total_Score'
                     ]
 
-                    # DataFrame 的 reindex 机制会自动丢弃未在 columns 列表中声明的所有冗余列
                     results_df = results_df.reindex(columns=all_possible_columns)
 
-                    # [新增优化]：截断浮点数精度为4位，大幅减少CSV字符占用
-                    float_cols = results_df.select_dtypes(include=['float']).columns
-                    results_df[float_cols] = results_df[float_cols].round(4)
+                    # [修复2] 保证字符串列绝对的 Schema 一致性，防止 ParquetWriter 报错
+                    results_df['组合文件名'] = results_df['组合文件名'].astype(str)
+                    results_df['error'] = results_df['error'].fillna("").astype(str)
 
-                    mode = 'w' if is_first_write else 'a'
-                    header = is_first_write
-                    results_df.to_csv(output_csv, mode=mode, header=header, index=False, encoding='utf-8-sig')
-                    is_first_write = False
+                    # [修复1+原优化] 数据类型极致降级，兼容 NaN 处理
+                    float_cols = results_df.select_dtypes(include=['float']).columns
+                    results_df[float_cols] = results_df[float_cols].astype(np.float32)
+
+                    if 'Total_Days' in results_df.columns:
+                        results_df['Total_Days'] = results_df['Total_Days'].fillna(0).astype(np.int16)
+                    if 'Max_Recovery_Days' in results_df.columns:
+                        results_df['Max_Recovery_Days'] = results_df['Max_Recovery_Days'].fillna(0).astype(np.int16)
+
+                    # [引入优化点1]：转化为 PyArrow Table 并写入
+                    table = pa.Table.from_pandas(results_df)
+
+                    if is_first_write:
+                        # 第一次写入时初始化 writer，强制使用 zstd 强力压缩算法
+                        writer = pq.ParquetWriter(output_parquet, table.schema, compression='zstd')
+                        writer.write_table(table)
+                        is_first_write = False
+                    else:
+                        writer.write_table(table)
 
                 del futures
                 del batch_results
                 del batch_combos
                 del chunks
 
-    print(f"[{get_current_time()}] 🎉 全部计算完成！结果已成功保存至: {output_csv}")
+    # [新增点] 在跳出所有循环，批处理彻底结束后，必须安全关闭 writer 防止文件损坏
+    if writer is not None:
+        writer.close()
+
+    print(f"[{get_current_time()}] 🎉 全部计算完成！结果已成功保存至: {output_parquet}")
 
 
 if __name__ == '__main__':
