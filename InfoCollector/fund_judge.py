@@ -246,8 +246,17 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
 def _worker_process_combo(combo_files):
     """独立的工作进程函数：通过全局变量从 Master DataFrame 中安全切片"""
     global WORKER_MASTER_DF
-    file_names = [os.path.basename(f) for f in combo_files]
-    combo_name_str = " + ".join(file_names)
+
+    # [优化点2] 提取6位代码进行精简组合拼接
+    codes = []
+    for f in combo_files:
+        match = re.search(r'(\d{6})', os.path.basename(f))
+        if match:
+            codes.append(match.group(1))
+        else:
+            # 容错：如果没有找到6位数字，则去掉.csv后缀作为名字
+            codes.append(os.path.basename(f).replace('.csv', ''))
+    combo_name_str = "_".join(codes)
 
     try:
         # [极致飞跃]: 仅进行列切片，微秒级操作！完美消灭 pd.concat
@@ -552,20 +561,16 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 if batch_results:
                     results_df = pd.DataFrame(batch_results)
 
+                    # [优化点1] 删掉基本意义不大的 VETO 指标列和常量列，大幅度降低输出文件空间占用
                     all_possible_columns = [
-                        '组合文件名', 'Start_Date', 'End_Date', 'Total_Days', 'n_funds',
+                        '组合文件名', 'Start_Date', 'End_Date', 'Total_Days',
                         'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
                         'AR1_Coefficient', 'Annualized_Volatility', 'Sharpe_Ratio',
                         'Calmar_Ratio', 'Daily_Win_Rate', 'Downside_Correlation',
-                        'VETO_Hurdle_Rate', 'VETO_Drawdown_Crash', 'VETO_Fake_Smooth',
-                        'VETO_Endless_Bleeding', 'VETO_Data_Distortion',
-                        'VETO_Perturbation_Death',
-                        'VETO_Hurdle_Rate_in_Perturb', 'VETO_Drawdown_Crash_in_Perturb',
-                        'VETO_Fake_Smooth_in_Perturb', 'VETO_Endless_Bleeding_in_Perturb',
-                        'VETO_Data_Distortion_in_Perturb',
                         'error', 'Total_Score'
                     ]
 
+                    # DataFrame 的 reindex 机制会自动丢弃未在 columns 列表中声明的所有冗余列
                     results_df = results_df.reindex(columns=all_possible_columns)
 
                     mode = 'w' if is_first_write else 'a'
