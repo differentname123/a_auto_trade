@@ -573,6 +573,10 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     # DataFrame 的 reindex 机制会自动丢弃未在 columns 列表中声明的所有冗余列
                     results_df = results_df.reindex(columns=all_possible_columns)
 
+                    # [新增优化]：截断浮点数精度为4位，大幅减少CSV字符占用
+                    float_cols = results_df.select_dtypes(include=['float']).columns
+                    results_df[float_cols] = results_df[float_cols].round(4)
+
                     mode = 'w' if is_first_write else 'a'
                     header = is_first_write
                     results_df.to_csv(output_csv, mode=mode, header=header, index=False, encoding='utf-8-sig')
