@@ -587,29 +587,105 @@ def _print_final_report(final_fund_count, combo_size, total_combos, skipped, com
     print("★" * 60 + "\n")
 
 
-# ====================================================================
-# 新增: 升维组合引擎辅助函数
-# ====================================================================
-def get_previous_good_combos(prev_dim, base_pool_codes_set):
-    """提取上一维度中表现优秀的组合(确保资金在 Base Pool 内)"""
-    # 匹配条件: 不限制pool数量，匹配当前维度的所有parquet历史数据
+def calculate_dynamic_k(M, N, target_max_combos=50000000, safety_factor=0.7):
+    """
+    根据数学公式(超图密度)反推应该保留的上一层种子数量 K
+    M: Base Pool 大小 (如 280)
+    N: 当前准备生成的目标维度 (如 4)
+    target_max_combos: 目标维度的最高容忍组合数
+    safety_factor: 金融聚集效应折扣 (默认0.7)
+    """
+    # 目标维度的理论全排列上限
+    max_theoretical_N = math.comb(M, N)
+    prev_total = math.comb(M, N - 1)
+
+    # 如果理论上限本身就没超过目标值，直接返回上一层的全部理论组合数，不作限制
+    if max_theoretical_N <= target_max_combos:
+        return prev_total
+
+    # 倒推公式实现: (K / C(M, N-1))^N = target / C(M, N)
+    ratio_N = target_max_combos / max_theoretical_N
+    p_required = math.pow(ratio_N, 1.0 / N)  # 开 N 次方根
+
+    # 乘以安全折扣，推算最终应保留的种子数
+    k_theoretical = prev_total * p_required
+    k_actual = int(k_theoretical * safety_factor)
+
+    # 兜底：最少保留 5000 个，最多不超过上一层的理论总数
+    return max(min(k_actual, prev_total), 5000)
+
+
+def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=50000000):
+    # 🌟 核心杀手锏：自带短路拦截的极速转换函数 (一次 Split，终身受用)
+    def fast_filter_and_normalize(combo_str):
+        items = str(combo_str).split('_')
+        if not base_pool_codes_set.issuperset(items):
+            return None
+        return tuple(sorted(items))
+
     parquet_files = glob.glob(f'fund_data/fof_evaluation_results_{prev_dim}d_*.parquet')
-    good_combos = set()
+    all_clean_records = []
+
+    total_read_rows = 0
+    passed_calmar_count = 0
+
     for pf in parquet_files:
         try:
             df = pq.read_table(pf, columns=['组合文件名', 'Calmar_Ratio', 'Calmar_Baseline']).to_pandas()
-            # 过滤条件仅为: Calmar > Calmar_Baseline
-            mask = df['Calmar_Ratio'] > df['Calmar_Baseline']
-            df_good = df[mask]
+            total_read_rows += len(df)
 
-            for combo_str in df_good['组合文件名']:
-                combo_tuple = normalize_combo_tuple(combo_str)
-                if all(f in base_pool_codes_set for f in combo_tuple):
-                    good_combos.add(combo_tuple)
+            # 门槛 1：卡玛基准过滤
+            df = df[df['Calmar_Ratio'] > df['Calmar_Baseline']]
+            passed_calmar_count += len(df)
+
+            if df.empty:
+                continue
+
+            # 🚀 门槛 2 & 3：短路过滤 + 乱序归一化
+            df['Combo_Tuple'] = df['组合文件名'].apply(fast_filter_and_normalize)
+
+            # 瞬间剔除所有被返回 None 的历史孤儿
+            df = df[df['Combo_Tuple'].notna()]
+
+            if df.empty:
+                continue
+
+            # 门槛 4：单文件局部去重
+            df = df.sort_values('Calmar_Ratio', ascending=False).drop_duplicates(subset=['Combo_Tuple'])
+
+            # 极致压缩内存，仅保留核心字段
+            all_clean_records.append(df[['Combo_Tuple', 'Calmar_Ratio']])
+
         except Exception as e:
             log(f"读取上一维文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
 
+    if not all_clean_records:
+        log("⚠️ 未读取到任何符合基础条件的上一维历史数据。")
+        return set()
+
+    # 5. 合并并输出漏斗日志
+    combined_df = pd.concat(all_clean_records, ignore_index=True)
+    log(f"🔍 [漏斗 1] 物理扫描 {total_read_rows:,} 行，其中 {passed_calmar_count:,} 行符合卡玛门槛。")
+
+    # 6. 全局终极去重
+    pool_only_df = combined_df.sort_values('Calmar_Ratio', ascending=False).drop_duplicates(subset=['Combo_Tuple'])
+    in_pool_unique_count = len(pool_only_df)
+    log(f"🔍 [漏斗 2] 短路剔除杂质并全局去重后，剩余 {in_pool_unique_count:,} 个纯净组合。")
+
+    # 7. 动态限速配额
+    pool_size = len(base_pool_codes_set)
+    dynamic_k = calculate_dynamic_k(pool_size, target_dim, target_max_combos=target_max_combos)
+
+    log(f"🧠 算力评估: Base Pool={pool_size}只, 目标爬坡={target_dim}维.")
+    log(f"🧠 限额保护: 确保生成量 < {target_max_combos:,}, 强制截留 Top {dynamic_k:,} 精英。")
+
+    # 8. 降维打击：nlargest 提取精英
+    elite_df = pool_only_df.nlargest(dynamic_k, columns='Calmar_Ratio')
+    good_combos = set(elite_df['Combo_Tuple'])
+
+    log(f"✅ [漏斗 3] 最终向高维输出纯血种子: {len(good_combos):,} 个。")
     return good_combos
+
 
 def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, strict_mode=False):
     """
@@ -684,9 +760,6 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
     return uncomputed_combos, total_combos, global_skipped
 
 
-# ====================================================================
-# 程序入口: 升维裂变爬坡引擎
-# ====================================================================
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 25
     RESULT_CSV = 'fund_data/all_funds_result.csv'
@@ -748,11 +821,19 @@ if __name__ == '__main__':
         print(f"\n{'#' * 70}")
         log(f"【维度爬坡引擎】 🚀 正在生成和评估 {N} 维 FOF 组合")
         print(f"{'#' * 70}")
-
+        # 2.4 设置输出目标文件(名称带上 pool 和 min_day 严格符合原规则)
+        output_parquet = f'fund_data/fof_evaluation_results_{N}d_pool{final_fund_count}_min_day_{FIXED_MIN_DAY}.parquet'
+        if os.path.exists(output_parquet):
+            log(f"已发现现有文件 {output_parquet},将直接跳过计算并进入下一维度。")
+            N += 1
+            continue
         # 2.1 获取上一维度(N-1)优秀的组合种子
         good_prev_combos = set()
         if N > 2:
-            good_prev_combos = get_previous_good_combos(N - 1, base_pool_codes_set)
+            # 🎯 【唯一修改处】: 传入 target_dim=N, target_max_combos=50000000 触发动态 K 算法
+            good_prev_combos = get_previous_good_combos(N - 1, base_pool_codes_set, target_dim=N,
+                                                        target_max_combos=10000000)
+
             log(f"自 {N - 1} 维成功提取了 {len(good_prev_combos)} 个优秀组合种子。")
             if not good_prev_combos:
                 log(f"⚠️ 没有符合条件的 {N - 1} 维优秀组合, 失去升维裂变能力, 算法自然终止。")
@@ -795,12 +876,7 @@ if __name__ == '__main__':
             N += 1
             continue
 
-        # 2.4 设置输出目标文件(名称带上 pool 和 min_day 严格符合原规则)
-        output_parquet = f'fund_data/fof_evaluation_results_{N}d_pool{final_fund_count}_min_day_{FIXED_MIN_DAY}.parquet'
-        if os.path.exists(output_parquet):
-            log(f"已发现现有文件 {output_parquet},将直接跳过计算并进入下一维度。")
-            N += 1
-            continue
+
         ensure_dir(output_parquet)
 
         writer = None
