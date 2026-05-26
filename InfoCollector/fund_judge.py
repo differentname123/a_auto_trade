@@ -1,7 +1,10 @@
+
 import os
 import itertools
 import math
 import re
+import glob
+import pickle
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import pandas as pd
@@ -11,6 +14,7 @@ from tqdm import tqdm
 from numba import njit
 import pyarrow as pa
 import pyarrow.parquet as pq
+
 # ================= [架构重构] 子进程全局变量容器 =================
 WORKER_MASTER_DF = None
 
@@ -27,6 +31,75 @@ def _init_worker(master_df):
 def get_current_time():
     """辅助函数：获取当前格式化时间用于日志打印"""
     return datetime.now().strftime("%H:%M:%S")
+
+
+def load_or_init_computed_set(combo_size):
+    """
+    [全局共享版] 加载或初始化已计算的组合集合
+    - 跨 min_day 全局共享，当基金池扩大时，完美跳过已计算过的历史组合。
+    - 历史数据强行转换为 Tuple[str, ...] 并排序，防 OOM 并根除缓存穿透。
+    """
+    # 统一全局缓存文件，不再受 min_day 隔离
+    cache_file = f'fund_data/computed_combos_{combo_size}d_global_cache.pkl'
+
+    # 扫描目录下所有的同维度 parquet 文件（无视 min_day 和 pool 大小）
+    parquet_files = glob.glob(f'fund_data/fof_evaluation_results_{combo_size}d_*.parquet')
+
+    computed_set = set()
+    cache_time = 0
+
+    if os.path.exists(cache_file):
+        cache_time = os.path.getmtime(cache_file)
+        try:
+            with open(cache_file, 'rb') as f:
+                computed_set = pickle.load(f)
+            print(
+                f"[{get_current_time()}] 📦 命中全局缓存 | 规则: {combo_size} 维 | 已加载 {len(computed_set):,} 个历史元组。")
+        except Exception as e:
+            print(f"[{get_current_time()}] ⚠️ 缓存读取失败将重建: {e}")
+            cache_time = 0
+
+    updated = False
+    print(
+        f"[{get_current_time()}] 🔍 扫描 Parquet 文件进行增量更新 | 规则: {combo_size} 维 | 共发现 {len(parquet_files)} 个相关文件。")
+    for pf in parquet_files:
+        # 如果有比当前缓存更新的 Parquet 文件，则进行增量读取
+        if os.path.getmtime(pf) > cache_time:
+            try:
+                table = pq.read_table(pf, columns=['组合文件名'])
+                raw_combos = table.column('组合文件名').to_pylist()
+
+                # 核心修复：提取、强制排序并转为字符串 Tuple (极度压缩内存，防止乱序穿透及解析崩溃)
+                normalized_tuples = set()
+                for c in raw_combos:
+                    if not c: continue
+                    parts = [str(x).strip() for x in str(c).split('_')]
+                    normalized_tuples.add(tuple(sorted(parts)))
+
+                before_len = len(computed_set)
+                computed_set.update(normalized_tuples)
+                added_len = len(computed_set) - before_len
+
+                if added_len > 0:
+                    updated = True
+                    print(
+                        f"[{get_current_time()}] 🔄 增量读取文件 | {os.path.basename(pf)} | 新增 {added_len:,} 个有效组合。")
+            except Exception as e:
+                print(f"[{get_current_time()}] ❌ 读取文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
+
+    # 如果发生了更新，或者完全没有缓存文件但生成了新集合，执行落盘操作
+    if updated or (not os.path.exists(cache_file) and computed_set):
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(computed_set, f)
+            print(
+                f"[{get_current_time()}] ✅ 缓存已持久化 | 规则: {combo_size} 维 | 当前全局总库容量: {len(computed_set):,} 个。")
+        except Exception as e:
+            print(f"[{get_current_time()}] ❌ 缓存持久化失败: {e}")
+    elif not parquet_files and not computed_set:
+        print(f"[{get_current_time()}] ℹ️ 空白初始化 | 规则: {combo_size} 维 | 暂无历史计算数据。")
+
+    return computed_set, cache_file
 
 
 # ================= [A级优化] Numba 高速核心循环引擎 =================
@@ -156,7 +229,7 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
         recovery_groups = (~is_drawdown).cumsum()
         metrics['Max_Recovery_Days'] = int(is_drawdown.groupby(recovery_groups).sum().max())
 
-        # --- [极速修正 & 防Crash] 最差滚动 1 年收益率纯 NumPy 实现 ---
+        # --- [极极速修正 & 防Crash] 最差滚动 1 年收益率纯 NumPy 实现 ---
         if n_days >= 252:
             # 【重要修复】：在最前面补一个 1.0 的初始净值。
             # 否则当 n_days 刚好等于 252 时，[252:] 切片会变成空数组，导致 np.min 崩溃！
@@ -489,7 +562,8 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
 
 def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4, max_workers=10,
                          corr_threshold=0.9, corr_matrix=None,
-                         downside_corr_matrix=None, downside_corr_threshold=0.0, min_day=1000):
+                         downside_corr_matrix=None, downside_corr_threshold=0.0, min_day=1000,
+                         computed_set=None):
     # ================= [防崩溃修复 2] 预热 Numba 编译器 =================
     print(f"[{get_current_time()}] 正在预热 Numba 核心引擎，防止多进程缓存踩踏...")
     _fast_simulate_path(np.zeros((100, 2), dtype=np.float64),
@@ -511,7 +585,7 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
 
     if initial_filtered_count == 0:
         print(f"[{get_current_time()}] 符合要求的基金数量为0，退出流程。")
-        return
+        return None
 
     if corr_matrix is None:
         corr_csv = 'fund_data/fund_correlations.csv'
@@ -555,14 +629,14 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
 
     if final_fund_count < combo_size:
         print(f"[{get_current_time()}] 过滤后基金不足以生成组合。")
-        return
+        return None
 
     # [修改点] 将后缀修改为 .parquet，适配新的存储格式
     output_parquet = f'fund_data/fof_evaluation_results_{combo_size}d_pool{final_fund_count}_min_day_{min_day}.parquet'
 
     if os.path.exists(output_parquet):
         print(f"[{get_current_time()}] ⏭️ 目标文件 [{output_parquet}] 已存在，直接跳过计算。")
-        return
+        return output_parquet
 
     print(f"[{get_current_time()}] 🚀 正在构建全局 Master Matrix...")
     all_nav_series = []
@@ -577,9 +651,20 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     master_df = pd.concat(all_nav_series, axis=1, join='outer')
     del all_nav_series
 
-    # ================= [防崩溃修复 3] 剔除幽灵标的，强制对齐 =================
+    # ================= [防崩溃修复 3 & 排序去重强化] 强制对齐与顺序锁定 =================
     target_files = master_df.columns.tolist()
+
+    # 获取唯一的 6 位 target_code 用于极致排序和过滤
+    def get_code(f):
+        match = re.search(r'(\d{6})', os.path.basename(f))
+        return match.group(1) if match else os.path.basename(f).replace('.csv', '')
+
+    target_files = sorted(target_files, key=get_code)
+    master_df = master_df[target_files]
     final_fund_count = len(target_files)
+
+    # 建立映射以供组合名称极速拼接去重，消除迭代开销
+    file_to_code_map = {f: get_code(f) for f in target_files}
     # =======================================================================
 
     print(f"[{get_current_time()}] ✅ 全局 Master Matrix 构建完毕，行数: {len(master_df)}，列数: {final_fund_count}")
@@ -591,7 +676,7 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    batch_size = 200000  # 让主进程一次性从生成器提取 20 万个组合到内存
+    batch_size = 200000  # 让主进程一次性从生成器提取 20 万个真正未计算的组合到内存
     chunk_size = 2000  # 让每个工作进程一次性拿走 2000 个组合去计算
     is_first_write = True
 
@@ -601,7 +686,26 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
     with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(master_df,)) as executor:
         with tqdm(total=total_combos, desc=f"评估 {combo_size} 维组合", unit="组") as pbar:
             while True:
-                batch_combos = list(itertools.islice(combos, batch_size))
+                batch_combos = []
+                skipped_count = 0
+
+                # [核心极速去重逻辑] 直接接管迭代器，瞬秒数百万级冗余计算
+                try:
+                    while len(batch_combos) < batch_size:
+                        combo = next(combos)
+                        combo_tuple = tuple(file_to_code_map[f] for f in combo)
+
+                        if computed_set is not None and combo_tuple in computed_set:
+                            skipped_count += 1
+                        else:
+                            batch_combos.append(combo)
+                except StopIteration:
+                    pass
+
+                # 精准回补进度条
+                if skipped_count > 0:
+                    pbar.update(skipped_count)
+
                 if not batch_combos:
                     break
 
@@ -657,15 +761,20 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 del batch_combos
                 del chunks
 
-    # [新增点] 在跳出所有循环，批处理彻底结束后，必须安全关闭 writer 防止文件损坏
+    # [终极安全控制与返回判定机制]
     if writer is not None:
         writer.close()
-
-    print(f"[{get_current_time()}] 🎉 全部计算完成！结果已成功保存至: {output_parquet}")
+        print(f"[{get_current_time()}] 🎉 全部计算完成！结果已成功保存至: {output_parquet}")
+        return output_parquet
+    else:
+        print(f"[{get_current_time()}] ⏭️ 完美跳过：所有的有效组合均已在持久化缓存中，本次无新数据写入。")
+        return None
 
 
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 25
+    combo_size = 3
+    computed_set, cache_file = load_or_init_computed_set(combo_size)
 
     result_csv_path = 'fund_data/all_funds_result.csv'
     corr_csv_path = 'fund_data/fund_correlations.csv'
@@ -681,14 +790,47 @@ if __name__ == '__main__':
 
     for i in range(10):
         min_day = 1300 - i * 100
-        combo_size = 3
         print(f"\n{'#' * 70}\n[{get_current_time()}] 【启动引擎】正在评估 {combo_size} 维 FOF 组合\n{'#' * 70}")
 
-        run_batch_evaluation(
+        # [新增控制] 初始化扫描已有组合 set 并加载持久化系统
+
+        output_file = run_batch_evaluation(
             result_csv=result_csv_path,
             combo_size=combo_size,
             max_workers=GLOBAL_MAX_WORKERS,
             corr_matrix=global_corr_matrix,
             downside_corr_matrix=global_downside_corr_matrix,
-            min_day=min_day
+            min_day=min_day,
+            computed_set=computed_set
         )
+
+        # [外部守护与智能自更新] 严格依据时间戳推导，当生成最新文件时，自动注入并更新 Set 缓存
+        if output_file is not None and os.path.exists(output_file):
+            cache_time = os.path.getmtime(cache_file) if os.path.exists(cache_file) else 0
+            file_time = os.path.getmtime(output_file)
+            if file_time > cache_time:
+                print(f"[{get_current_time()}] 🌟 嗅探到新生成的结果文件更新于缓存，正在动态追加至持久化系统...")
+                try:
+                    # 增加一层保险：判断文件大小，防止空文件读取报错
+                    if os.path.getsize(output_file) > 100:
+                        table = pq.read_table(output_file, columns=['组合文件名'])
+                        raw_combos = table.column('组合文件名').to_pylist()
+
+                        added_count = 0
+                        for c in raw_combos:
+                            if c:
+                                parts = [str(x).strip() for x in str(c).split('_')]
+                                combo_tup = tuple(sorted(parts))
+                                if combo_tup not in computed_set:
+                                    computed_set.add(combo_tup)
+                                    added_count += 1
+
+                        if added_count > 0:
+                            with open(cache_file, 'wb') as f:
+                                pickle.dump(computed_set, f)
+                            print(
+                                f"[{get_current_time()}] 🔒 增量缓存注入完成，本次新增 {added_count} 个，库中最新包含 {len(computed_set):,} 个组合。")
+                        else:
+                            print(f"[{get_current_time()}] ⚡ 本次文件中所有组合均已在库中，无需更新。")
+                except Exception as e:
+                    print(f"[{get_current_time()}] ❌ 动态更新缓存失败: {e}")
