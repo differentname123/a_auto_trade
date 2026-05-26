@@ -352,7 +352,7 @@ if __name__ == "__main__":
     # df1 = df.sort_values(by='Total_Score', ascending=False)
 
     # 1. 后缀名修改为 .parquet
-    df_file = r'fund_data/fof_evaluation_results_3d_pool699_min_day_1100.parquet'
+    df_file = r'fund_data/fof_evaluation_results_3d_pool795_min_day_900.parquet'
 
     # 2. 利用 PyArrow 的底层过滤机制（谓词下推）
     # 引擎会在硬盘读取阶段直接丢弃不符合条件的数据，绝不让垃圾数据弄脏内存

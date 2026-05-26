@@ -1,4 +1,3 @@
-
 import os
 import itertools
 import math
@@ -9,106 +8,158 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 import pandas as pd
 import numpy as np
-import scipy.stats as stats
 from tqdm import tqdm
 from numba import njit
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-# ================= [架构重构] 子进程全局变量容器 =================
+# ====================================================================
+# 全局常量配置
+# ====================================================================
+TRADING_DAYS_PER_YEAR = 252
+DEFAULT_REBALANCE_DAYS = 30
+DEFAULT_MAX_HISTORY = 5 * TRADING_DAYS_PER_YEAR
+ROLLING_WINDOW = TRADING_DAYS_PER_YEAR
+ROLLING_STEP = 21
+
+# VETO 否决阈值
+VETO_MAX_MDD = 0.3
+VETO_HURDLE_RATE = 0.2
+VETO_AR1 = 0.35
+VETO_VOL = 0.03
+VETO_RECOVERY_DAYS = 180
+VETO_MISSING_RATIO = 0.05
+VETO_CONTINUOUS_ZEROS = 10
+VETO_CALMAR_MULTIPLIER = 1.10
+VETO_WORST_1Y = -0.15
+VETO_ZOMBIE_DAYS = 35
+
+# 打分参数
+TAIL_RISK_SENSITIVITY = 2.5
+TIME_SATURATION_DAYS = 756
+SCORE_DC_HIGH = 0.8
+SCORE_DC_MID = 0.5
+
+# 多进程配置
+BATCH_SIZE = 200000
+CHUNK_SIZE = 2000
+PERTURBATION_SEEDS = [1024, 2048, 4096]
+
+# 输出列定义
+OUTPUT_COLUMNS = [
+    '组合文件名', 'Start_Date', 'End_Date', 'Total_Days',
+    'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
+    'AR1_Coefficient', 'Annualized_Volatility', 'Sharpe_Ratio',
+    'Calmar_Ratio', 'Daily_Win_Rate', 'Downside_Correlation',
+    'Avg_CAGR', 'Avg_Max_Drawdown', 'Calmar_Baseline', 'Worst_Rolling_1Y_Return',
+    'error', 'Total_Score'
+]
+
+# 子进程全局容器
 WORKER_MASTER_DF = None
 
 
 def _init_worker(master_df):
-    """
-    此函数会在每个新的工作进程启动时执行一次！
-    它将主进程传递过来的巨大 DataFrame 锚定在子进程的本地内存中。
-    """
+    """子进程初始化:将主进程的大 DataFrame 锚定到子进程本地内存"""
     global WORKER_MASTER_DF
     WORKER_MASTER_DF = master_df
 
 
-def get_current_time():
-    """辅助函数：获取当前格式化时间用于日志打印"""
-    return datetime.now().strftime("%H:%M:%S")
+# ====================================================================
+# 通用工具
+# ====================================================================
+def now_str():
+    """当前时间格式化字符串"""
+    return datetime.now().strftime('%H:%M:%S')
 
 
+def log(msg):
+    """统一日志格式打印"""
+    print(f"[{now_str()}] {msg}")
+
+
+def ensure_dir(filepath):
+    """确保给定文件所在目录存在"""
+    directory = os.path.dirname(filepath)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+
+def extract_fund_code(filepath):
+    """从文件路径提取 6 位基金代码,若无则去掉 .csv 后缀"""
+    match = re.search(r'(\d{6})', os.path.basename(filepath))
+    return match.group(1) if match else os.path.basename(filepath).replace('.csv', '')
+
+
+def normalize_combo_tuple(combo_str, sep='_'):
+    """将组合字符串规范化为已排序字符串元组(防乱序穿透 & 防 OOM)"""
+    parts = [str(x).strip() for x in str(combo_str).split(sep)]
+    return tuple(sorted(parts))
+
+
+# ====================================================================
+# 全局缓存系统
+# ====================================================================
 def load_or_init_computed_set(combo_size):
     """
-    [全局共享版] 加载或初始化已计算的组合集合
-    - 跨 min_day 全局共享，当基金池扩大时，完美跳过已计算过的历史组合。
-    - 历史数据强行转换为 Tuple[str, ...] 并排序，防 OOM 并根除缓存穿透。
+    加载或初始化已计算组合的全局缓存集合。
+    跨 min_day 全局共享,扩大基金池时可完美跳过历史组合。
     """
-    # 统一全局缓存文件，不再受 min_day 隔离
     cache_file = f'fund_data/computed_combos_{combo_size}d_global_cache.pkl'
-
-    # 扫描目录下所有的同维度 parquet 文件（无视 min_day 和 pool 大小）
     parquet_files = glob.glob(f'fund_data/fof_evaluation_results_{combo_size}d_*.parquet')
 
     computed_set = set()
     cache_time = 0
 
+    # 1) 加载现有缓存
     if os.path.exists(cache_file):
         cache_time = os.path.getmtime(cache_file)
         try:
             with open(cache_file, 'rb') as f:
                 computed_set = pickle.load(f)
-            print(
-                f"[{get_current_time()}] 📦 命中全局缓存 | 规则: {combo_size} 维 | 已加载 {len(computed_set):,} 个历史元组。")
+            log(f"📦 命中全局缓存 | 规则: {combo_size} 维 | 已加载 {len(computed_set):,} 个历史元组。")
         except Exception as e:
-            print(f"[{get_current_time()}] ⚠️ 缓存读取失败将重建: {e}")
+            log(f"⚠️ 缓存读取失败将重建: {e}")
             cache_time = 0
 
+    # 2) 增量扫描 Parquet 文件
+    log(f"🔍 扫描 Parquet 文件进行增量更新 | 规则: {combo_size} 维 | 共发现 {len(parquet_files)} 个相关文件。")
     updated = False
-    print(
-        f"[{get_current_time()}] 🔍 扫描 Parquet 文件进行增量更新 | 规则: {combo_size} 维 | 共发现 {len(parquet_files)} 个相关文件。")
     for pf in parquet_files:
-        # 如果有比当前缓存更新的 Parquet 文件，则进行增量读取
-        if os.path.getmtime(pf) > cache_time:
-            try:
-                table = pq.read_table(pf, columns=['组合文件名'])
-                raw_combos = table.column('组合文件名').to_pylist()
+        if os.path.getmtime(pf) <= cache_time:
+            continue
+        try:
+            table = pq.read_table(pf, columns=['组合文件名'])
+            raw_combos = table.column('组合文件名').to_pylist()
+            new_tuples = {normalize_combo_tuple(c) for c in raw_combos if c}
+            added = len(new_tuples - computed_set)
+            computed_set.update(new_tuples)
+            if added > 0:
+                updated = True
+                log(f"🔄 增量读取文件 | {os.path.basename(pf)} | 新增 {added:,} 个有效组合。")
+        except Exception as e:
+            log(f"❌ 读取文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
 
-                # 核心修复：提取、强制排序并转为字符串 Tuple (极度压缩内存，防止乱序穿透及解析崩溃)
-                normalized_tuples = set()
-                for c in raw_combos:
-                    if not c: continue
-                    parts = [str(x).strip() for x in str(c).split('_')]
-                    normalized_tuples.add(tuple(sorted(parts)))
-
-                before_len = len(computed_set)
-                computed_set.update(normalized_tuples)
-                added_len = len(computed_set) - before_len
-
-                if added_len > 0:
-                    updated = True
-                    print(
-                        f"[{get_current_time()}] 🔄 增量读取文件 | {os.path.basename(pf)} | 新增 {added_len:,} 个有效组合。")
-            except Exception as e:
-                print(f"[{get_current_time()}] ❌ 读取文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
-
-    # 如果发生了更新，或者完全没有缓存文件但生成了新集合，执行落盘操作
+    # 3) 持久化更新的缓存
     if updated or (not os.path.exists(cache_file) and computed_set):
         try:
             with open(cache_file, 'wb') as f:
                 pickle.dump(computed_set, f)
-            print(
-                f"[{get_current_time()}] ✅ 缓存已持久化 | 规则: {combo_size} 维 | 当前全局总库容量: {len(computed_set):,} 个。")
+            log(f"✅ 缓存已持久化 | 规则: {combo_size} 维 | 当前全局总库容量: {len(computed_set):,} 个。")
         except Exception as e:
-            print(f"[{get_current_time()}] ❌ 缓存持久化失败: {e}")
+            log(f"❌ 缓存持久化失败: {e}")
     elif not parquet_files and not computed_set:
-        print(f"[{get_current_time()}] ℹ️ 空白初始化 | 规则: {combo_size} 维 | 暂无历史计算数据。")
+        log(f"ℹ️ 空白初始化 | 规则: {combo_size} 维 | 暂无历史计算数据。")
 
     return computed_set, cache_file
 
 
-# ================= [A级优化] Numba 高速核心循环引擎 =================
+# ====================================================================
+# Numba JIT 核心引擎
+# ====================================================================
 @njit(fastmath=True, cache=True)
 def _fast_simulate_path(fund_rets_arr, w_init, current_reb_days, offset, n_days, n_funds):
-    """
-    将核心路径演化逻辑抽离并交由 Numba 编译为机器码，
-    速度提升百倍，彻底剥离 Pandas 在循环中的消耗。
-    """
+    """JIT 编译的路径演化循环:组合净值 + 周期性仓位再平衡"""
     synth_ret_arr = np.zeros(n_days)
     w = np.copy(w_init)
 
@@ -125,88 +176,196 @@ def _fast_simulate_path(fund_rets_arr, w_init, current_reb_days, offset, n_days,
     return synth_ret_arr
 
 
-def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=5 * 252,
-                                max_mdd_limit=0.3, hurdle_rate=0.2):
-    """
-    第一性原理 FOF 绝对收益评估引擎 (极速切片版)
-    """
-    n_funds = merged_nav.shape[1]
-    merged_nav_raw_index = merged_nav.index
+# ====================================================================
+# 指标计算辅助函数
+# ====================================================================
+def _compute_max_continuous_zeros(fund_rets):
+    """计算各基金最大连续零收益天数(数据质量检测)"""
+    zero_df = (fund_rets.abs() < 1e-8).astype(int)
+    max_zeros = 0
+    for col in zero_df.columns:
+        consecutive = zero_df[col].groupby((zero_df[col] == 0).cumsum()).sum().max()
+        max_zeros = max(max_zeros, consecutive)
+    return max_zeros
 
-    # 严禁压缩时间轴，基准日历为骨架。找到有效起止区间
+
+def _compute_baseline_metrics(fund_rets_arr, n_days):
+    """向量化计算零协同基线 (Avg CAGR, Avg MDD, Calmar Baseline)"""
+    fund_eq = np.cumprod(1.0 + fund_rets_arr, axis=0)
+
+    fund_cagrs = np.power(fund_eq[-1, :], TRADING_DAYS_PER_YEAR / n_days) - 1.0
+    avg_cagr = float(np.mean(fund_cagrs))
+
+    cum_max = np.clip(np.maximum.accumulate(fund_eq, axis=0), a_min=1.0, a_max=None)
+    drawdowns = (fund_eq - cum_max) / cum_max
+    avg_mdd = float(np.mean(np.min(drawdowns, axis=0)))
+
+    calmar_baseline = float(avg_cagr / abs(avg_mdd)) if abs(avg_mdd) > 1e-6 else 0.0
+    return avg_cagr, avg_mdd, calmar_baseline
+
+
+def _compute_worst_rolling_1y(synth_eq_arr, n_days):
+    """计算最差滚动 1 年收益率(纯 NumPy)"""
+    if n_days < TRADING_DAYS_PER_YEAR:
+        return 0.0
+    # 在序列前补 1.0,防止 n_days == 252 时空切片崩溃
+    eq_padded = np.concatenate(([1.0], synth_eq_arr))
+    rolling_ret = (eq_padded[TRADING_DAYS_PER_YEAR:] / eq_padded[:-TRADING_DAYS_PER_YEAR]) - 1.0
+    return float(np.min(rolling_ret))
+
+
+def _compute_worst_rolling_1y_r2(synth_eq_arr, n_days):
+    """计算最差滚动 1 年净值曲线 R² (平滑度判定)"""
+    log_eq = np.log(np.clip(synth_eq_arr, 1e-9, None))
+    window = min(ROLLING_WINDOW, n_days)
+    x_arr = np.arange(window)
+    rolling_r2 = []
+
+    for st in range(0, n_days - window + 1, ROLLING_STEP):
+        y_sub = log_eq[st:st + window]
+        r_mat = np.corrcoef(x_arr, y_sub)
+        if r_mat.shape == (2, 2) and not np.isnan(r_mat[0, 1]):
+            rolling_r2.append(r_mat[0, 1] ** 2)
+        else:
+            rolling_r2.append(0.0)
+
+    return float(min(rolling_r2)) if rolling_r2 else 0.0
+
+
+def _compute_downside_correlation(synth_ret, fund_rets):
+    """计算最差 5% 交易日的下行最大相关性"""
+    n_worst = max(5, int(len(synth_ret) * 0.05))
+    worst_dates = synth_ret.nsmallest(n_worst).index
+    worst_fund_rets = fund_rets.loc[worst_dates]
+
+    if len(worst_fund_rets) <= 3:
+        return 0.5
+
+    corr_mat = worst_fund_rets.corr().values
+    triu_idx = np.triu_indices_from(corr_mat, k=1)
+    if len(triu_idx[0]) == 0:
+        return 0.5
+
+    with np.errstate(invalid='ignore'):
+        max_corr = np.nanmax(corr_mat[triu_idx])
+    return float(max_corr) if not np.isnan(max_corr) else 0.5
+
+
+def _check_vetoes(metrics, vol_annual, max_missing_ratio, max_continuous_zeros,
+                  max_mdd_limit, hurdle_rate):
+    """整合所有 VETO 否决条件 (Iron VETO)"""
+    return {
+        "VETO_Hurdle_Rate": metrics['CAGR'] < hurdle_rate,
+        "VETO_Drawdown_Crash": abs(metrics['Max_Drawdown']) > max_mdd_limit,
+        "VETO_Fake_Smooth": (metrics['AR1_Coefficient'] > VETO_AR1) and (vol_annual < VETO_VOL),
+        "VETO_Endless_Bleeding": metrics['Max_Recovery_Days'] > VETO_RECOVERY_DAYS,
+        "VETO_Data_Distortion": (max_missing_ratio > VETO_MISSING_RATIO) or (max_continuous_zeros > VETO_CONTINUOUS_ZEROS),
+        "VETO_Below_Calmar_Baseline": metrics['Calmar_Ratio'] <= (metrics['Calmar_Baseline'] * VETO_CALMAR_MULTIPLIER),
+        "VETO_Worst_1Y_Crash": metrics['Worst_Rolling_1Y_Return'] < VETO_WORST_1Y,
+    }
+
+
+def _compute_total_score(metrics, n_days):
+    """第一性原理综合打分 = 基础卡玛 × 平滑度 × 尾部风险 × 时间饱和度 × 下行相关性"""
+    # 1) 风险调整后收益(基础卡玛)
+    excess_cagr = max(0.0, metrics['CAGR'])
+    adj_mdd = max(abs(metrics['Max_Drawdown']), 0.01)
+    base_calmar = excess_cagr / adj_mdd
+
+    # 2) 净值平滑度
+    smoothness = metrics['Worst_Rolling_1Y_R2']
+
+    # 3) 尾部灾难指数级惩罚
+    worst_1y = min(0.0, metrics['Worst_Rolling_1Y_Return'])
+    tail_discount = float(np.exp(worst_1y * TAIL_RISK_SENSITIVITY))
+
+    # 4) 时间饱和度
+    time_mult = min(1.0, np.sqrt(n_days / TIME_SATURATION_DAYS))
+
+    # 5) 下行相关性惩罚因子
+    dc = metrics['Downside_Correlation']
+    if dc > SCORE_DC_HIGH:
+        p_corr = 0.1
+    elif dc > SCORE_DC_MID:
+        p_corr = float(np.clip(1.0 - (dc - SCORE_DC_MID) * 1.0, 0.5, 1.0))
+    else:
+        p_corr = 1.0
+
+    base_score = base_calmar * smoothness * tail_discount
+    return max(0.0, float(base_score * time_mult * p_corr))
+
+
+# ====================================================================
+# 核心评估引擎
+# ====================================================================
+def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAYS,
+                                max_history_days=DEFAULT_MAX_HISTORY,
+                                max_mdd_limit=VETO_MAX_MDD, hurdle_rate=VETO_HURDLE_RATE):
+    """第一性原理 FOF 绝对收益评估引擎 (极速切片版)"""
+    n_funds = merged_nav.shape[1]
+    raw_index = merged_nav.index
+
+    # 1) 找到全部基金重叠的有效区间
     valid_mask = merged_nav.notna().all(axis=1)
     if not valid_mask.any():
         return {"error": "No overlapping data", "Total_Score": 0.0}
 
-    valid_start = valid_mask.idxmax()
-    valid_end = valid_mask[::-1].idxmax()
-
-    merged_nav = merged_nav.loc[valid_start:valid_end]
+    merged_nav = merged_nav.loc[valid_mask.idxmax():valid_mask[::-1].idxmax()]
 
     if len(merged_nav) > max_history_days:
         merged_nav = merged_nav.iloc[-max_history_days:]
 
-    if len(merged_nav) < 252:
+    if len(merged_nav) < TRADING_DAYS_PER_YEAR:
         return {"error": "Common data length < 252 days", "Total_Score": 0.0}
 
-    missing_ratios = merged_nav.isna().sum() / len(merged_nav)
-    metrics_max_missing_ratio = float(missing_ratios.max())
+    # 2) 数据质量与僵尸基金检测
+    max_missing_ratio = float((merged_nav.isna().sum() / len(merged_nav)).max())
 
-    valid_start = merged_nav.index[0]
-    valid_end = merged_nav.index[-1]
+    if (raw_index[-1] - merged_nav.index[-1]).days > VETO_ZOMBIE_DAYS:
+        return {
+            "error": f"Zombie fund detected. Cutoff at {merged_nav.index[-1].strftime('%Y-%m-%d')}",
+            "Total_Score": 0.0
+        }
 
-    raw_max_date = merged_nav_raw_index[-1]
-    if (raw_max_date - valid_end).days > 35:
-        return {"error": f"Zombie fund detected. Cutoff at {valid_end.strftime('%Y-%m-%d')}", "Total_Score": 0.0}
-
-    merged_nav_ffilled = merged_nav.ffill()
-    fund_rets = merged_nav_ffilled.pct_change().fillna(0.0)
-
-    zero_rets_df = (fund_rets.abs() < 1e-8).astype(int)
-    max_continuous_zeros = 0
-    for col in zero_rets_df.columns:
-        consecutive = zero_rets_df[col].groupby((zero_rets_df[col] == 0).cumsum()).sum().max()
-        max_continuous_zeros = max(max_continuous_zeros, consecutive)
-
+    # 3) 计算各基金日收益率
+    fund_rets = merged_nav.ffill().pct_change().fillna(0.0)
+    max_continuous_zeros = _compute_max_continuous_zeros(fund_rets)
     n_days = len(fund_rets)
 
-    # ================= [防崩溃修复 1] 强制转换为 C-连续内存 =================
-    # 防止 Numba 因 Pandas 切片底层内存不连续而触发崩溃或严重掉速
+    # 强制 C-连续内存(防 Numba 崩溃 / 掉速)
     fund_rets_arr = np.ascontiguousarray(fund_rets.values, dtype=np.float64)
 
-    # ================= [性能优化修正] 纯 NumPy 矩阵级向量化基线计算 (消灭 for 循环) =================
-    # 1. 瞬间计算所有子基金的复权净值矩阵 (n_days, n_funds)
-    fund_eq_arr = np.cumprod(1.0 + fund_rets_arr, axis=0)
+    # 4) 零协同基线指标(向量化)
+    avg_cagr, avg_mdd, calmar_baseline = _compute_baseline_metrics(fund_rets_arr, n_days)
 
-    # 2. 向量化计算所有子基金的 CAGR
-    fund_cagrs_arr = np.power(fund_eq_arr[-1, :], 252.0 / n_days) - 1.0
-    avg_cagr = float(np.mean(fund_cagrs_arr))
+    # 5) 单路径评估闭包
+    def _evaluate_single_path(reb_days, offset=0, w_init=None):
+        w_init_arr = (np.ones(n_funds, dtype=np.float64) / n_funds
+                      if w_init is None
+                      else np.array(w_init, dtype=np.float64))
 
-    # 3. 向量化计算所有子基金的 MDD
-    cum_max_arr = np.maximum.accumulate(fund_eq_arr, axis=0)
-    cum_max_arr = np.clip(cum_max_arr, a_min=1.0, a_max=None)  # 防除0
-    drawdowns_arr = (fund_eq_arr - cum_max_arr) / cum_max_arr
-    fund_mdds_arr = np.min(drawdowns_arr, axis=0)
-    avg_mdd = float(np.mean(fund_mdds_arr))
-
-    # 4. 计算零协同底线卡玛
-    calmar_baseline = float(avg_cagr / abs(avg_mdd)) if abs(avg_mdd) > 1e-6 else 0.0
-
-    # =========================================================================================
-
-    # ================= 2 & 3. 核心评估闭包引擎 =================
-    def _evaluate_single_path(current_reb_days, offset=0, w_init=None):
-        if w_init is None:
-            w_init_arr = np.ones(n_funds, dtype=np.float64) / n_funds
-        else:
-            w_init_arr = np.array(w_init, dtype=np.float64)
-
-        # 调用 Numba JIT 编译的纯机器码函数运行回测
-        synth_ret_arr = _fast_simulate_path(fund_rets_arr, w_init_arr, current_reb_days, offset, n_days, n_funds)
-
+        synth_ret_arr = _fast_simulate_path(fund_rets_arr, w_init_arr,
+                                            reb_days, offset, n_days, n_funds)
         synth_ret = pd.Series(synth_ret_arr, index=fund_rets.index)
         synth_eq = (1 + synth_ret).cumprod()
 
+        # 基础指标计算
+        cagr = float(synth_eq.iloc[-1] ** (TRADING_DAYS_PER_YEAR / n_days) - 1)
+        cum_max = synth_eq.cummax().clip(lower=1.0)
+        drawdowns = (synth_eq - cum_max) / cum_max
+        max_dd = float(drawdowns.min())
+
+        is_dd = drawdowns < 0
+        max_recovery_days = int(is_dd.groupby((~is_dd).cumsum()).sum().max())
+
+        vol_annual = synth_ret.std() * np.sqrt(TRADING_DAYS_PER_YEAR)
+        sharpe = float(cagr / vol_annual) if vol_annual > 1e-6 else 0.0
+        calmar = float(cagr / abs(max_dd)) if abs(max_dd) > 1e-6 else 0.0
+
+        ar1 = synth_ret.autocorr(lag=1)
+        ar1 = float(ar1) if pd.notna(ar1) else 1.0
+
+        # 组装指标
         metrics = {
             'Start_Date': merged_nav.index[0].strftime('%Y-%m-%d'),
             'End_Date': merged_nav.index[-1].strftime('%Y-%m-%d'),
@@ -214,218 +373,151 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=30, max_history_days=
             'n_funds': n_funds,
             'Avg_CAGR': avg_cagr,
             'Avg_Max_Drawdown': avg_mdd,
-            'Calmar_Baseline': calmar_baseline
+            'Calmar_Baseline': calmar_baseline,
+            'CAGR': cagr,
+            'Max_Drawdown': max_dd,
+            'Max_Recovery_Days': max_recovery_days,
+            'Worst_Rolling_1Y_Return': _compute_worst_rolling_1y(synth_eq.values, n_days),
+            'Worst_Rolling_1Y_R2': _compute_worst_rolling_1y_r2(synth_eq.values, n_days),
+            'AR1_Coefficient': ar1,
+            'Annualized_Volatility': float(vol_annual),
+            'Sharpe_Ratio': sharpe,
+            'Calmar_Ratio': calmar,
+            'Daily_Win_Rate': float((synth_ret > 0).sum() / n_days) if n_days > 0 else 0.0,
+            'Downside_Correlation': _compute_downside_correlation(synth_ret, fund_rets),
         }
 
-        # --- 核心指标计算 ---
-        cagr = float(synth_eq.iloc[-1] ** (252 / n_days) - 1)
-        metrics['CAGR'] = cagr
-
-        cum_max = synth_eq.cummax().clip(lower=1.0)
-        drawdowns = (synth_eq - cum_max) / cum_max
-        metrics['Max_Drawdown'] = float(drawdowns.min())
-
-        is_drawdown = drawdowns < 0
-        recovery_groups = (~is_drawdown).cumsum()
-        metrics['Max_Recovery_Days'] = int(is_drawdown.groupby(recovery_groups).sum().max())
-
-        # --- [极极速修正 & 防Crash] 最差滚动 1 年收益率纯 NumPy 实现 ---
-        if n_days >= 252:
-            # 【重要修复】：在最前面补一个 1.0 的初始净值。
-            # 否则当 n_days 刚好等于 252 时，[252:] 切片会变成空数组，导致 np.min 崩溃！
-            eq_vals_with_init = np.concatenate((np.array([1.0], dtype=np.float64), synth_eq.values))
-            rolling_1y_ret_arr = (eq_vals_with_init[252:] / eq_vals_with_init[:-252]) - 1.0
-            metrics['Worst_Rolling_1Y_Return'] = float(np.min(rolling_1y_ret_arr))
-        else:
-            metrics['Worst_Rolling_1Y_Return'] = 0.0
-
-        log_eq = np.log(synth_eq.clip(lower=1e-9).values)
-
-        window = min(252, n_days)
-        rolling_r2 = []
-        x_arr = np.arange(window)
-
-        for st in range(0, n_days - window + 1, 21):
-            y_sub = log_eq[st:st + window]
-            r_mat = np.corrcoef(x_arr, y_sub)
-            if r_mat.shape == (2, 2) and not np.isnan(r_mat[0, 1]):
-                rolling_r2.append(r_mat[0, 1] ** 2)
-            else:
-                rolling_r2.append(0.0)
-        metrics['Worst_Rolling_1Y_R2'] = float(min(rolling_r2)) if rolling_r2 else 0.0
-
-        ar1 = synth_ret.autocorr(lag=1)
-        metrics['AR1_Coefficient'] = float(ar1) if pd.notna(ar1) else 1.0
-
-        vol_annual = synth_ret.std() * np.sqrt(252)
-        metrics['Annualized_Volatility'] = float(vol_annual)
-        metrics['Sharpe_Ratio'] = float(cagr / vol_annual) if vol_annual > 1e-6 else 0.0
-
-        current_calmar = float(cagr / abs(metrics['Max_Drawdown'])) if abs(metrics['Max_Drawdown']) > 1e-6 else 0.0
-        metrics['Calmar_Ratio'] = current_calmar
-        metrics['Daily_Win_Rate'] = float((synth_ret > 0).sum() / n_days) if n_days > 0 else 0.0
-
-        n_worst = max(5, int(len(synth_ret) * 0.05))
-        worst_dates = synth_ret.nsmallest(n_worst).index
-        worst_fund_rets = fund_rets.loc[worst_dates]
-
-        if len(worst_fund_rets) > 3:
-            corr_matrix_local = worst_fund_rets.corr().values
-            triu_idx = np.triu_indices_from(corr_matrix_local, k=1)
-            if len(triu_idx[0]) > 0:
-                with np.errstate(invalid='ignore'):
-                    max_corr = np.nanmax(corr_matrix_local[triu_idx])
-                metrics['Downside_Correlation'] = float(max_corr) if not np.isnan(max_corr) else 0.5
-            else:
-                metrics['Downside_Correlation'] = 0.5
-        else:
-            metrics['Downside_Correlation'] = 0.5
-
-        # --- [逻辑闭环修正] 底线判决 (Iron VETO) ---
-        vetoes = {
-            "VETO_Hurdle_Rate": metrics['CAGR'] < hurdle_rate,
-            "VETO_Drawdown_Crash": abs(metrics['Max_Drawdown']) > max_mdd_limit,
-            "VETO_Fake_Smooth": (metrics['AR1_Coefficient'] > 0.35) and (vol_annual < 0.03),
-            "VETO_Endless_Bleeding": metrics['Max_Recovery_Days'] > 180,
-            "VETO_Data_Distortion": (metrics_max_missing_ratio > 0.05) or (max_continuous_zeros > 10),
-            "VETO_Below_Calmar_Baseline": current_calmar <= (calmar_baseline * 1.10),
-            "VETO_Worst_1Y_Crash": metrics['Worst_Rolling_1Y_Return'] < -0.15
-        }
+        # VETO 否决判定
+        vetoes = _check_vetoes(metrics, vol_annual, max_missing_ratio, max_continuous_zeros,
+                               max_mdd_limit, hurdle_rate)
         metrics.update(vetoes)
-
         if any(vetoes.values()):
             return metrics, 0.0
 
-        # --- [终极打分公式修正] 第一性原理综合打分 ---
-        # 1. 动力引擎：超额卡玛比率 (风险调整后收益的基座)
-        excess_cagr = max(0.0, metrics['CAGR'])
-        adj_mdd = max(abs(metrics['Max_Drawdown']), 0.01)  # 防除 0
-        base_calmar = excess_cagr / adj_mdd
+        return metrics, _compute_total_score(metrics, n_days)
 
-        # 2. 减震系统：净值平滑度 (0 到 1 之间)
-        # 过滤掉那些靠单边暴涨拉高收益，但平时横盘或阴跌的伪劣组合
-        smoothness_factor = metrics['Worst_Rolling_1Y_R2']
-
-        # 3. 安全气囊：尾部灾难指数级惩罚因子 (0 到 1 之间)
-        # 巧妙吸收你加入 Worst_Rolling_1Y_Return 的诉求。
-        # 当滚动 1 年收益为正时，不惩罚 (乘数=1)；
-        # 当滚动 1 年亏损时，随着亏损加深，利用自然底数 e 进行加速惩罚。
-        worst_1y_ret = min(0.0, metrics['Worst_Rolling_1Y_Return'])
-        # 乘以 2.5 是敏锐度调节阀。亏 10% 扣分 22%，亏 20% 扣分 39%，亏 30% 扣分 53%
-        tail_risk_discount = float(np.exp(worst_1y_ret * 2.5))
-
-        # 组装基础得分：三个维度完美相乘，量纲完全统一
-        base_score = base_calmar * smoothness_factor * tail_risk_discount
-
-        time_multiplier = min(1.0, np.sqrt(n_days / 756))
-
-        if metrics['Downside_Correlation'] > 0.8:
-            p_corr = 0.1
-        elif metrics['Downside_Correlation'] > 0.5:
-            p_corr = np.clip(1.0 - (metrics['Downside_Correlation'] - 0.5) * 1.0, 0.5, 1.0)
-        else:
-            p_corr = 1.0
-
-        path_score = base_score * time_multiplier * p_corr
-        return metrics, max(0.0, float(path_score))
-
-    # ================= 5. 多维扰动验证闭环 =================
+    # 6) 基线路径评估
     final_metrics, score_base = _evaluate_single_path(rebalance_days, offset=0)
-
     if score_base == 0.0:
         final_metrics['Total_Score'] = 0.0
         final_metrics['VETO_Perturbation_Death'] = False
         return final_metrics
 
-    metrics_w = None
-    score_weight = float('inf')
-
+    # 7) 多维扰动验证(取最差路径作为最终分数)
     half_offset = rebalance_days // 2
+    score_weight = float('inf')
+    metrics_w = None
 
-    for seed_val in [1024, 2048, 4096]:
-        np.random.seed(seed_val)
-        shift_vector = np.random.uniform(-0.05, 0.05, n_funds)
-        w_perturbed = np.ones(n_funds) / n_funds + shift_vector
-        w_perturbed = np.clip(w_perturbed, 0.01, 1.0)
+    for seed in PERTURBATION_SEEDS:
+        np.random.seed(seed)
+        shift = np.random.uniform(-0.05, 0.05, n_funds)
+        w_perturbed = np.clip(np.ones(n_funds) / n_funds + shift, 0.01, 1.0)
         w_perturbed = w_perturbed / np.sum(w_perturbed)
 
         m_w, s_w = _evaluate_single_path(rebalance_days, offset=half_offset, w_init=w_perturbed)
         if s_w < score_weight:
-            score_weight = s_w
-            metrics_w = m_w
+            score_weight, metrics_w = s_w, m_w
 
     if score_weight == float('inf'):
         score_weight = 0.0
 
     final_metrics['Total_Score'] = min(score_base, score_weight)
+    final_metrics['VETO_Perturbation_Death'] = (final_metrics['Total_Score'] == 0.0)
 
-    final_metrics['VETO_Perturbation_Death'] = final_metrics['Total_Score'] == 0.0
-    if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None:
-        if score_weight == 0.0:
-            for k, v in metrics_w.items():
-                if k.startswith("VETO_") and v is True:
-                    final_metrics[k + "_in_Perturb"] = True
+    # 记录扰动路径下的 VETO 标志
+    if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None and score_weight == 0.0:
+        for k, v in metrics_w.items():
+            if k.startswith("VETO_") and v is True:
+                final_metrics[k + "_in_Perturb"] = True
 
     return final_metrics
 
 
+# ====================================================================
+# Worker 工作进程函数
+# ====================================================================
 def _worker_process_combo(combo_files):
-    """独立的工作进程函数：通过全局变量从 Master DataFrame 中安全切片"""
+    """单组合处理:从 Master DataFrame 切片并评估"""
     global WORKER_MASTER_DF
-
-    # [优化点2] 提取6位代码进行精简组合拼接
-    codes = []
-    for f in combo_files:
-        match = re.search(r'(\d{6})', os.path.basename(f))
-        if match:
-            codes.append(match.group(1))
-        else:
-            # 容错：如果没有找到6位数字，则去掉.csv后缀作为名字
-            codes.append(os.path.basename(f).replace('.csv', ''))
-    combo_name_str = "_".join(codes)
+    combo_name = "_".join(extract_fund_code(f) for f in combo_files)
 
     try:
-        # [极致飞跃]: 仅进行列切片，微秒级操作！完美消灭 pd.concat
         merged_nav = WORKER_MASTER_DF[list(combo_files)]
-
-        # 将切片直接传入极速版评估引擎
         result = evaluate_fof_portfolio_fast(merged_nav)
-
-        # 挂载结果
-        result['组合文件名'] = combo_name_str
+        result['组合文件名'] = combo_name
         return result
-
     except Exception as e:
         return {
-            '组合文件名': combo_name_str,
+            '组合文件名': combo_name,
             'error': f"处理异常: {str(e)}",
             'Total_Score': 0.0
         }
 
 
-# ================= [终极性能优化 2] 批处理函数，消灭 IPC 通信开销 =================
 def _worker_process_chunk(combo_chunk):
-    """批处理工作进程：接收一个包含数百个组合的 List，彻底抹平 IPC 进程间通信开销。"""
-    results = []
-    for combo_files in combo_chunk:
-        res = _worker_process_combo(combo_files)
-        results.append(res)
-    return results
+    """批量处理:消灭 IPC 进程间通信开销"""
+    return [_worker_process_combo(combo) for combo in combo_chunk]
 
 
-# ================= 多进程 I/O 加载模块 =================
-def _load_single_nav(f):
-    """独立的单进程函数：加载并清洗单只基金的净值数据"""
+# ====================================================================
+# 基金净值并行加载
+# ====================================================================
+def _load_single_nav(filepath):
+    """加载并清洗单只基金净值数据"""
     try:
-        if os.path.exists(f):
-            temp_df = pd.read_csv(f)
-            temp_df['净值日期'] = pd.to_datetime(temp_df['净值日期'])
-            temp_df = temp_df.set_index('净值日期').sort_index()
-            temp_df = temp_df[~temp_df.index.duplicated(keep='last')]
-            return temp_df['复权净值'].rename(f)
+        if not os.path.exists(filepath):
+            return None
+        df = pd.read_csv(filepath)
+        df['净值日期'] = pd.to_datetime(df['净值日期'])
+        df = df.set_index('净值日期').sort_index()
+        df = df[~df.index.duplicated(keep='last')]
+        return df['复权净值'].rename(filepath)
     except Exception:
-        pass
-    return None
+        return None
+
+
+def _parallel_load_navs(files, max_workers, desc):
+    """并行加载多只基金净值"""
+    series_list = []
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_load_single_nav, f) for f in files]
+        for future in tqdm(as_completed(futures), total=len(files), desc=desc):
+            res = future.result()
+            if res is not None:
+                series_list.append(res)
+    return series_list
+
+
+# ====================================================================
+# 相关性双矩阵预计算
+# ====================================================================
+def _build_downside_corr_matrix(downside_csv):
+    """从 2 维 FOF 历史结果中提取下行相关性矩阵"""
+    try:
+        df_2d = pd.read_csv(downside_csv)
+    except Exception as e:
+        log(f"提取 Downside_Correlation 矩阵失败: {e}")
+        return pd.DataFrame()
+
+    if '组合文件名' not in df_2d.columns or 'Downside_Correlation' not in df_2d.columns:
+        return pd.DataFrame()
+
+    records = []
+    for _, row in df_2d.iterrows():
+        combo = row['组合文件名']
+        if pd.isna(combo):
+            continue
+        parts = [p.strip() for p in str(combo).split('+')]
+        if len(parts) != 2:
+            continue
+        f1, f2 = f'fund_data/nav/{parts[0]}', f'fund_data/nav/{parts[1]}'
+        dc = row['Downside_Correlation']
+        records.append({'f1': f1, 'f2': f2, 'dc': dc})
+        records.append({'f1': f2, 'f2': f1, 'dc': dc})
+
+    if not records:
+        return pd.DataFrame()
+    return pd.DataFrame(records).groupby(['f1', 'f2'])['dc'].mean().unstack()
 
 
 def precompute_correlations(result_csv='fund_data/all_funds_result.csv',
@@ -433,121 +525,97 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv',
                             downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv',
                             max_workers=10,
                             downside_corr_csv='fund_data/fund_downside_correlations.csv'):
-    """预计算双相关矩阵"""
-    print(f"\n[{get_current_time()}] ---------------- 开始准备全市场相关性双矩阵 ----------------")
+    """预计算全市场相关性双矩阵 (全天候 + 下行)"""
+    print(f"\n[{now_str()}] ---------------- 开始准备全市场相关性双矩阵 ----------------")
 
-    downside_corr_matrix = pd.DataFrame()
-
+    # 1) 下行相关性矩阵
     if os.path.exists(downside_corr_csv):
-        print(f"[{get_current_time()}] 已发现现有现行相关性文件 {downside_corr_csv}，直接加载缓存...")
+        log(f"已发现现有现行相关性文件 {downside_corr_csv},直接加载缓存...")
         downside_corr_matrix = pd.read_csv(downside_corr_csv, index_col=0)
     elif os.path.exists(downside_csv):
-        print(f"[{get_current_time()}] 正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
-        try:
-            df_2d = pd.read_csv(downside_csv)
-            if '组合文件名' in df_2d.columns and 'Downside_Correlation' in df_2d.columns:
-                records = []
-                for _, row in df_2d.iterrows():
-                    combo = row['组合文件名']
-                    if pd.isna(combo): continue
-                    parts = [p.strip() for p in str(combo).split('+')]
-                    if len(parts) == 2:
-                        records.append({'f1': f'fund_data/nav/{parts[0]}', 'f2': f'fund_data/nav/{parts[1]}',
-                                        'dc': row['Downside_Correlation']})
-                        records.append({'f1': f'fund_data/nav/{parts[1]}', 'f2': f'fund_data/nav/{parts[0]}',
-                                        'dc': row['Downside_Correlation']})
-                if records:
-                    df_records = pd.DataFrame(records)
-                    downside_corr_matrix = df_records.groupby(['f1', 'f2'])['dc'].mean().unstack()
-                    print(f"[{get_current_time()}] 成功构建下行相关性矩阵，涵盖 {len(downside_corr_matrix)} 只标的。")
-                    output_dir = os.path.dirname(downside_corr_csv)
-                    if output_dir:
-                        os.makedirs(output_dir, exist_ok=True)
-                    downside_corr_matrix.to_csv(downside_corr_csv)
-        except Exception as e:
-            print(f"[{get_current_time()}] 提取 Downside_Correlation 矩阵失败: {e}")
+        log(f"正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
+        downside_corr_matrix = _build_downside_corr_matrix(downside_csv)
+        if not downside_corr_matrix.empty:
+            log(f"成功构建下行相关性矩阵,涵盖 {len(downside_corr_matrix)} 只标的。")
+            ensure_dir(downside_corr_csv)
+            downside_corr_matrix.to_csv(downside_corr_csv)
     else:
-        print(f"[{get_current_time()}] 未发现 2 维组合文件 {downside_csv}，跳过下行相关性提取。")
+        log(f"未发现 2 维组合文件 {downside_csv},跳过下行相关性提取。")
+        downside_corr_matrix = pd.DataFrame()
 
+    # 2) 全天候相关性矩阵
     if os.path.exists(corr_csv):
-        print(f"[{get_current_time()}] 已发现现有全天候相关性文件 {corr_csv}，直接加载缓存...")
-        corr_matrix = pd.read_csv(corr_csv, index_col=0)
-        return corr_matrix, downside_corr_matrix
+        log(f"已发现现有全天候相关性文件 {corr_csv},直接加载缓存...")
+        return pd.read_csv(corr_csv, index_col=0), downside_corr_matrix
 
     if not os.path.exists(result_csv):
-        print(f"[{get_current_time()}] 错误: 未找到汇总文件 {result_csv}")
+        log(f"错误: 未找到汇总文件 {result_csv}")
         return pd.DataFrame(), downside_corr_matrix
 
     df_results = pd.read_csv(result_csv)
     files = df_results['adj_nav_file'].dropna().tolist()
 
-    print(f"[{get_current_time()}] 正在并行读取 {len(files)} 只基金...")
-    nav_series_list = []
-
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_load_single_nav, f) for f in files]
-        for future in tqdm(as_completed(futures), total=len(files), desc="并行加载数据"):
-            res = future.result()
-            if res is not None:
-                nav_series_list.append(res)
-
+    log(f"正在并行读取 {len(files)} 只基金...")
+    nav_series_list = _parallel_load_navs(files, max_workers, "并行加载数据")
     if not nav_series_list:
         return pd.DataFrame(), downside_corr_matrix
 
     merged_nav = pd.concat(nav_series_list, axis=1, join='outer').ffill()
-    returns = merged_nav.pct_change()
-    corr_matrix = returns.corr()
+    corr_matrix = merged_nav.pct_change().corr()
 
-    output_dir = os.path.dirname(corr_csv)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
+    ensure_dir(corr_csv)
     corr_matrix.to_csv(corr_csv)
     return corr_matrix, downside_corr_matrix
 
 
-def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_annual_return=0.15, min_day=1000):
-    """独立的基金池漏斗过滤函数"""
+# ====================================================================
+# 基金池漏斗过滤
+# ====================================================================
+def _extract_target_codes(df_filtered):
+    """从过滤后 DataFrame 中按优先级提取目标基金 6 位代码"""
+    if '基金代码' in df_filtered.columns:
+        return df_filtered['基金代码'].astype(str).str.strip().str.zfill(6)
+    if 'fund_code' in df_filtered.columns:
+        return df_filtered['fund_code'].astype(str).str.strip().str.zfill(6)
+    return df_filtered['adj_nav_file'].apply(
+        lambda x: re.search(r'(\d{6})', str(x)).group(1)
+        if pd.notna(x) and re.search(r'(\d{6})', str(x)) else "000000"
+    )
+
+
+def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv',
+                     min_annual_return=0.15, min_day=1000):
+    """基金池漏斗过滤"""
     if df_results is None or df_results.empty:
         return pd.DataFrame()
 
     original_count = len(df_results)
     df_filtered = df_results.copy()
+    active_filtered_count = original_count
 
+    # 1) 可申购状态过滤
     if os.path.exists(active_cache):
         try:
             df_active = pd.read_csv(active_cache, dtype=str)
             if '基金代码' in df_active.columns:
-                active_codes_set = set(df_active['基金代码'].str.strip().str.zfill(6).tolist())
-                if '基金代码' in df_filtered.columns:
-                    target_codes = df_filtered['基金代码'].astype(str).str.strip().str.zfill(6)
-                elif 'fund_code' in df_filtered.columns:
-                    target_codes = df_filtered['fund_code'].astype(str).str.strip().str.zfill(6)
-                else:
-                    target_codes = df_filtered['adj_nav_file'].apply(
-                        lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})',
-                                                                                                      str(x)) else "000000"
-                    )
-                df_filtered = df_filtered[target_codes.isin(active_codes_set)].copy()
+                active_codes = set(df_active['基金代码'].str.strip().str.zfill(6).tolist())
+                target_codes = _extract_target_codes(df_filtered)
+                df_filtered = df_filtered[target_codes.isin(active_codes)].copy()
                 active_filtered_count = len(df_filtered)
-            else:
-                active_filtered_count = original_count
         except Exception:
-            active_filtered_count = original_count
-    else:
-        active_filtered_count = original_count
+            pass
 
     if df_filtered.empty:
         return df_filtered
 
+    # 2) 财务与质量过滤
     condition = (
-            (df_filtered['total_active_days'] > min_day) &
-            (df_filtered['annualized_return'] > min_annual_return) &
-            (df_filtered['missing_ratio'] <= 0.05) &
-            (df_filtered['max_zeros'] < 10) &
-            (df_filtered['max_drawdown'] > -0.7)
+        (df_filtered['total_active_days'] > min_day) &
+        (df_filtered['annualized_return'] > min_annual_return) &
+        (df_filtered['missing_ratio'] <= 0.05) &
+        (df_filtered['max_zeros'] < 10) &
+        (df_filtered['max_drawdown'] > -0.7)
     )
-
     df_final = df_filtered[condition].sort_values(by='annualized_return', ascending=False)
 
     print("\n" + "=" * 55)
@@ -556,165 +624,210 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
     print(f"  2. 可申购状态通过  : {active_filtered_count} 只")
     print(f"  3. 财务与质量达标  : {len(df_final)} 只 (作为高优候选池)")
     print("=" * 55 + "\n")
-
     return df_final
 
 
-def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4, max_workers=10,
-                         corr_threshold=0.9, corr_matrix=None,
-                         downside_corr_matrix=None, downside_corr_threshold=0.0, min_day=1000,
-                         computed_set=None):
-    # ================= [防崩溃修复 2] 预热 Numba 编译器 =================
-    print(f"[{get_current_time()}] 正在预热 Numba 核心引擎，防止多进程缓存踩踏...")
+# ====================================================================
+# 优胜劣汰相关性过滤
+# ====================================================================
+def _is_too_correlated(fund_f, selected_files, corr_matrix,
+                       downside_corr_matrix, corr_threshold, downside_corr_threshold):
+    """检查 fund_f 与已选基金是否过于相关(全天候 + 下行)"""
+    has_downside = downside_corr_matrix is not None and not downside_corr_matrix.empty
+
+    for sel_f in selected_files:
+        # 全天候相关性
+        if sel_f in corr_matrix.columns:
+            corr_val = corr_matrix.loc[fund_f, sel_f]
+            if pd.notna(corr_val) and corr_val > corr_threshold:
+                return True
+
+        # 下行相关性
+        if has_downside and fund_f in downside_corr_matrix.index and sel_f in downside_corr_matrix.columns:
+            dc_val = downside_corr_matrix.loc[fund_f, sel_f]
+            if pd.notna(dc_val) and dc_val > downside_corr_threshold:
+                return True
+
+    return False
+
+
+def _greedy_correlation_filter(df_filtered, corr_matrix, downside_corr_matrix,
+                               corr_threshold, downside_corr_threshold):
+    """贪心过滤:按收益率排序优先保留,剔除高相关性基金"""
+    selected = []
+    for f in df_filtered['adj_nav_file'].dropna():
+        if f not in corr_matrix.columns:
+            continue
+        if not _is_too_correlated(f, selected, corr_matrix, downside_corr_matrix,
+                                  corr_threshold, downside_corr_threshold):
+            selected.append(f)
+    return selected
+
+
+# ====================================================================
+# Parquet 结果序列化
+# ====================================================================
+def _prepare_results_table(batch_results):
+    """将结果列表转换为压缩后的 PyArrow Table"""
+    df = pd.DataFrame(batch_results).reindex(columns=OUTPUT_COLUMNS)
+    df['组合文件名'] = df['组合文件名'].astype(str)
+    df['error'] = df['error'].fillna("").astype(str)
+
+    # 浮点压缩
+    float_cols = df.select_dtypes(include=['float']).columns
+    df[float_cols] = df[float_cols].astype(np.float32)
+
+    # 整数压缩
+    for int_col in ['Total_Days', 'Max_Recovery_Days']:
+        if int_col in df.columns:
+            df[int_col] = df[int_col].fillna(0).astype(np.int16)
+
+    return pa.Table.from_pandas(df)
+
+
+# ====================================================================
+# 主流程辅助函数
+# ====================================================================
+def _warmup_numba():
+    """预热 Numba 编译器,防止多进程缓存踩踏"""
+    log("正在预热 Numba 核心引擎,防止多进程缓存踩踏...")
     _fast_simulate_path(np.zeros((100, 2), dtype=np.float64),
                         np.array([0.5, 0.5], dtype=np.float64),
                         30, 0, 100, 2)
-    # ===============================================================
 
-    original_count = 0
-    initial_filtered_count = 0
-    final_fund_count = 0
 
-    print(f"[{get_current_time()}] 步骤 1: 扫描汇总文件进行基础绩效条件筛选...")
+def _build_master_matrix(target_files, max_workers):
+    """构建全局 Master Matrix 并按基金代码对齐排序"""
+    log("🚀 正在构建全局 Master Matrix...")
+    nav_series_list = _parallel_load_navs(target_files, max_workers, "构建 Master 列数据")
+    master_df = pd.concat(nav_series_list, axis=1, join='outer')
+    del nav_series_list
 
-    if os.path.exists(result_csv):
-        df_results = pd.read_csv(result_csv)
-        original_count = len(df_results)
-        df_filtered = filter_fund_pool(df_results, min_annual_return=0.05, min_day=min_day)
-        initial_filtered_count = len(df_filtered)
+    sorted_files = sorted(master_df.columns.tolist(), key=extract_fund_code)
+    master_df = master_df[sorted_files]
+    log(f"✅ 全局 Master Matrix 构建完毕,行数: {len(master_df)},列数: {len(sorted_files)}")
+    return master_df, sorted_files
 
-    if initial_filtered_count == 0:
-        print(f"[{get_current_time()}] 符合要求的基金数量为0，退出流程。")
+
+def _iter_uncomputed_batch(combos_iter, computed_set, file_to_code_map, batch_size):
+    """从组合生成器中提取一个 batch 的未计算组合,同时统计跳过数量"""
+    batch_combos = []
+    batch_skipped = 0
+    try:
+        while len(batch_combos) < batch_size:
+            combo = next(combos_iter)
+            combo_tuple = tuple(file_to_code_map[f] for f in combo)
+            if computed_set is not None and combo_tuple in computed_set:
+                batch_skipped += 1
+            else:
+                batch_combos.append(combo)
+    except StopIteration:
+        pass
+    return batch_combos, batch_skipped
+
+
+def _print_final_report(final_fund_count, combo_size, total_combos,
+                        skipped, computed, output_parquet, has_output):
+    """打印最终复盘报告"""
+    skip_ratio = (skipped / total_combos * 100) if total_combos > 0 else 0.0
+    comp_ratio = (computed / total_combos * 100) if total_combos > 0 else 0.0
+
+    print("\n" + "★" * 60)
+    log(f"📊 【批处理计算任务复盘报告】 (池: {final_fund_count}只 | {combo_size}维)")
+    print(f"  ➤ 理论总组合数量 : {total_combos:,} 组")
+    print(f"  ➤ 命中了缓存跳过 : {skipped:,} 组 ({skip_ratio:.2f}%) 🚀")
+    print(f"  ➤ 实际提交计算量 : {computed:,} 组 ({comp_ratio:.2f}%)")
+
+    if has_output:
+        print(f"  ➤ 最终文件保存至 : {output_parquet}")
+    else:
+        print("  ➤ 执行动作结语   : 完美跳过,本次未产生任何新计算数据。")
+    print("★" * 60 + "\n")
+
+
+# ====================================================================
+# 主流程
+# ====================================================================
+def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size=4,
+                         max_workers=10, corr_threshold=0.9, corr_matrix=None,
+                         downside_corr_matrix=None, downside_corr_threshold=0.0,
+                         min_day=1000, computed_set=None):
+    """批量评估 FOF 组合主流程"""
+    _warmup_numba()
+
+    # 步骤 1: 基础绩效筛选
+    log("步骤 1: 扫描汇总文件进行基础绩效条件筛选...")
+    if not os.path.exists(result_csv):
+        return None
+    df_results = pd.read_csv(result_csv)
+    df_filtered = filter_fund_pool(df_results, min_annual_return=0.05, min_day=min_day)
+    if df_filtered.empty:
+        log("符合要求的基金数量为 0,退出流程。")
         return None
 
+    # 步骤 2: 准备相关性矩阵
     if corr_matrix is None:
-        corr_csv = 'fund_data/fund_correlations.csv'
-        downside_csv = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
-        corr_matrix, ds_matrix = precompute_correlations(result_csv, corr_csv, downside_csv, max_workers=max_workers)
+        corr_matrix, ds_matrix = precompute_correlations(result_csv, max_workers=max_workers)
         if downside_corr_matrix is None:
             downside_corr_matrix = ds_matrix
 
+    # 步骤 3: 优胜劣汰过滤
     if corr_matrix.empty:
         target_files = df_filtered['adj_nav_file'].dropna().tolist()
     else:
-        print(f"[{get_current_time()}] 步骤 3: 启动优胜劣汰过滤...")
-        selected_files = []
-        for f in df_filtered['adj_nav_file'].dropna():
-            if f not in corr_matrix.columns: continue
-
-            is_highly_correlated = False
-            for sel_f in selected_files:
-                if sel_f in corr_matrix.columns:
-                    corr_val = corr_matrix.loc[f, sel_f]
-                    if pd.notna(corr_val) and corr_val > corr_threshold:
-                        is_highly_correlated = True
-                        break
-
-                if downside_corr_matrix is not None and not downside_corr_matrix.empty:
-                    if f in downside_corr_matrix.index and sel_f in downside_corr_matrix.columns:
-                        dc_val = downside_corr_matrix.loc[f, sel_f]
-                        if pd.notna(dc_val) and dc_val > downside_corr_threshold:
-                            is_highly_correlated = True
-                            break
-
-            if not is_highly_correlated:
-                selected_files.append(f)
-
-        target_files = selected_files
+        log("步骤 3: 启动优胜劣汰过滤...")
+        target_files = _greedy_correlation_filter(
+            df_filtered, corr_matrix, downside_corr_matrix,
+            corr_threshold, downside_corr_threshold)
 
     final_fund_count = len(target_files)
     print("\n" + "=" * 50)
-    print(f"[{get_current_time()}] 🎯 基金池双矩阵排雷过滤后保留: {final_fund_count} 只")
+    log(f"🎯 基金池双矩阵排雷过滤后保留: {final_fund_count} 只")
     print("=" * 50 + "\n")
 
     if final_fund_count < combo_size:
-        print(f"[{get_current_time()}] 过滤后基金不足以生成组合。")
+        log("过滤后基金不足以生成组合。")
         return None
 
-    # [修改点] 将后缀修改为 .parquet，适配新的存储格式
+    # 步骤 4: 检查输出文件
     output_parquet = f'fund_data/fof_evaluation_results_{combo_size}d_pool{final_fund_count}_min_day_{min_day}.parquet'
-
     if os.path.exists(output_parquet):
-        print(f"[{get_current_time()}] ⏭️ 目标文件 [{output_parquet}] 已存在，直接跳过计算。")
+        log(f"⏭️ 目标文件 [{output_parquet}] 已存在,直接跳过计算。")
         return output_parquet
 
-    print(f"[{get_current_time()}] 🚀 正在构建全局 Master Matrix...")
-    all_nav_series = []
-
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_load_single_nav, f) for f in target_files]
-        for future in tqdm(as_completed(futures), total=len(target_files), desc="构建Master列数据"):
-            res = future.result()
-            if res is not None:
-                all_nav_series.append(res)
-
-    master_df = pd.concat(all_nav_series, axis=1, join='outer')
-    del all_nav_series
-
-    # ================= [防崩溃修复 3 & 排序去重强化] 强制对齐与顺序锁定 =================
-    target_files = master_df.columns.tolist()
-
-    # 获取唯一的 6 位 target_code 用于极致排序和过滤
-    def get_code(f):
-        match = re.search(r'(\d{6})', os.path.basename(f))
-        return match.group(1) if match else os.path.basename(f).replace('.csv', '')
-
-    target_files = sorted(target_files, key=get_code)
-    master_df = master_df[target_files]
+    # 步骤 5: 构建 Master Matrix
+    master_df, target_files = _build_master_matrix(target_files, max_workers)
     final_fund_count = len(target_files)
+    file_to_code_map = {f: extract_fund_code(f) for f in target_files}
 
-    # 建立映射以供组合名称极速拼接去重，消除迭代开销
-    file_to_code_map = {f: get_code(f) for f in target_files}
-    # =======================================================================
-
-    print(f"[{get_current_time()}] ✅ 全局 Master Matrix 构建完毕，行数: {len(master_df)}，列数: {final_fund_count}")
-
+    # 步骤 6: 分批并行评估
     total_combos = math.comb(final_fund_count, combo_size)
     combos = itertools.combinations(target_files, combo_size)
+    ensure_dir(output_parquet)
 
-    output_dir = os.path.dirname(output_parquet)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    batch_size = 200000  # 让主进程一次性从生成器提取 20 万个真正未计算的组合到内存
-    chunk_size = 2000  # 让每个工作进程一次性拿走 2000 个组合去计算
-    is_first_write = True
-
-    # [新增点] 预先声明 parquet 写入器
     writer = None
-    # === 在进入 while 循环前，初始化全局统计器 ===
-    global_skipped_count = 0
-    global_computed_count = 0
+    global_skipped = 0
+    global_computed = 0
 
-    with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(master_df,)) as executor:
+    with ProcessPoolExecutor(max_workers=max_workers,
+                             initializer=_init_worker,
+                             initargs=(master_df,)) as executor:
         with tqdm(total=total_combos, desc=f"评估 {combo_size} 维组合", unit="组") as pbar:
             while True:
-                batch_combos = []
-                current_batch_skipped = 0
+                batch_combos, batch_skipped = _iter_uncomputed_batch(
+                    combos, computed_set, file_to_code_map, BATCH_SIZE)
 
-                # [核心极速去重逻辑] 直接接管迭代器
-                try:
-                    while len(batch_combos) < batch_size:
-                        combo = next(combos)
-                        combo_tuple = tuple(file_to_code_map[f] for f in combo)
-
-                        if computed_set is not None and combo_tuple in computed_set:
-                            current_batch_skipped += 1
-                        else:
-                            batch_combos.append(combo)
-                except StopIteration:
-                    pass
-
-                # 精准回补进度条与全局计数
-                if current_batch_skipped > 0:
-                    pbar.update(current_batch_skipped)
-                    global_skipped_count += current_batch_skipped
+                if batch_skipped > 0:
+                    pbar.update(batch_skipped)
+                    global_skipped += batch_skipped
 
                 if not batch_combos:
                     break
 
-                chunks = [batch_combos[i:i + chunk_size] for i in range(0, len(batch_combos), chunk_size)]
-                futures = [executor.submit(_worker_process_chunk, chunk) for chunk in chunks]
+                # 分块提交,降低 IPC 开销
+                chunks = [batch_combos[i:i + CHUNK_SIZE]
+                          for i in range(0, len(batch_combos), CHUNK_SIZE)]
+                futures = [executor.submit(_worker_process_chunk, c) for c in chunks]
 
                 batch_results = []
                 for future in as_completed(futures):
@@ -723,93 +836,93 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     pbar.update(len(chunk_res))
 
                 if batch_results:
-                    # 记录本次真实计算的数量
-                    global_computed_count += len(batch_results)
-
-                    results_df = pd.DataFrame(batch_results)
-
-                    all_possible_columns = [
-                        '组合文件名', 'Start_Date', 'End_Date', 'Total_Days',
-                        'CAGR', 'Max_Drawdown', 'Max_Recovery_Days', 'Worst_Rolling_1Y_R2',
-                        'AR1_Coefficient', 'Annualized_Volatility', 'Sharpe_Ratio',
-                        'Calmar_Ratio', 'Daily_Win_Rate', 'Downside_Correlation',
-                        'Avg_CAGR', 'Avg_Max_Drawdown', 'Calmar_Baseline', 'Worst_Rolling_1Y_Return',
-                        'error', 'Total_Score'
-                    ]
-
-                    results_df = results_df.reindex(columns=all_possible_columns)
-                    results_df['组合文件名'] = results_df['组合文件名'].astype(str)
-                    results_df['error'] = results_df['error'].fillna("").astype(str)
-
-                    float_cols = results_df.select_dtypes(include=['float']).columns
-                    results_df[float_cols] = results_df[float_cols].astype(np.float32)
-
-                    if 'Total_Days' in results_df.columns:
-                        results_df['Total_Days'] = results_df['Total_Days'].fillna(0).astype(np.int16)
-                    if 'Max_Recovery_Days' in results_df.columns:
-                        results_df['Max_Recovery_Days'] = results_df['Max_Recovery_Days'].fillna(0).astype(np.int16)
-
-                    table = pa.Table.from_pandas(results_df)
-
-                    if is_first_write:
+                    global_computed += len(batch_results)
+                    table = _prepare_results_table(batch_results)
+                    if writer is None:
                         writer = pq.ParquetWriter(output_parquet, table.schema, compression='zstd')
-                        writer.write_table(table)
-                        is_first_write = False
-                    else:
-                        writer.write_table(table)
+                    writer.write_table(table)
 
-                del futures
-                del batch_results
-                del batch_combos
-                del chunks
+                del futures, batch_results, batch_combos, chunks
 
-    # ================= 终极报告生成 =================
-    skip_ratio = (global_skipped_count / total_combos) * 100 if total_combos > 0 else 0.0
-    comp_ratio = (global_computed_count / total_combos) * 100 if total_combos > 0 else 0.0
-
-    print("\n" + "★" * 60)
-    print(f"[{get_current_time()}] 📊 【批处理计算任务复盘报告】 (池: {final_fund_count}只 | {combo_size}维)")
-    print(f"  ➤ 理论总组合数量 : {total_combos:,} 组")
-    print(f"  ➤ 命中了缓存跳过 : {global_skipped_count:,} 组 ({skip_ratio:.2f}%) 🚀")
-    print(f"  ➤ 实际提交计算量 : {global_computed_count:,} 组 ({comp_ratio:.2f}%)")
-
-    if writer is not None:
+    # 关闭写入并报告
+    has_output = writer is not None
+    if has_output:
         writer.close()
-        print(f"  ➤ 最终文件保存至 : {output_parquet}")
-        print("★" * 60 + "\n")
-        return output_parquet
-    else:
-        print("  ➤ 执行动作结语   : 完美跳过，本次未产生任何新计算数据。")
-        print("★" * 60 + "\n")
-        return None
+
+    _print_final_report(final_fund_count, combo_size, total_combos,
+                        global_skipped, global_computed, output_parquet, has_output)
+
+    return output_parquet if has_output else None
 
 
+# ====================================================================
+# 缓存自更新
+# ====================================================================
+def _update_cache_from_new_file(output_file, cache_file, computed_set):
+    """根据新生成的结果文件,动态追加更新组合缓存"""
+    if not output_file or not os.path.exists(output_file):
+        return
+
+    cache_time = os.path.getmtime(cache_file) if os.path.exists(cache_file) else 0
+    if os.path.getmtime(output_file) <= cache_time:
+        return
+
+    log("🌟 嗅探到新生成的结果文件更新于缓存,正在动态追加至持久化系统...")
+    try:
+        if os.path.getsize(output_file) <= 100:
+            return
+        table = pq.read_table(output_file, columns=['组合文件名'])
+        raw_combos = table.column('组合文件名').to_pylist()
+
+        added = 0
+        for c in raw_combos:
+            if c:
+                combo_tup = normalize_combo_tuple(c)
+                if combo_tup not in computed_set:
+                    computed_set.add(combo_tup)
+                    added += 1
+
+        if added > 0:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(computed_set, f)
+            log(f"🔒 增量缓存注入完成,本次新增 {added} 个,库中最新包含 {len(computed_set):,} 个组合。")
+        else:
+            log("⚡ 本次文件中所有组合均已在库中,无需更新。")
+    except Exception as e:
+        log(f"❌ 动态更新缓存失败: {e}")
+
+
+# ====================================================================
+# 程序入口
+# ====================================================================
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 25
-    combo_size = 3
-    computed_set, cache_file = load_or_init_computed_set(combo_size)
+    COMBO_SIZE = 3
 
-    result_csv_path = 'fund_data/all_funds_result.csv'
-    corr_csv_path = 'fund_data/fund_correlations.csv'
-    downside_csv_path = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
+    RESULT_CSV = 'fund_data/all_funds_result.csv'
+    CORR_CSV = 'fund_data/fund_correlations.csv'
+    DOWNSIDE_CSV = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
 
-    print(f"[{get_current_time()}] 【全局初始化】正在准备全市场相关性双重矩阵...")
+    # 加载历史缓存
+    computed_set, cache_file = load_or_init_computed_set(COMBO_SIZE)
+
+    # 预计算全局相关性矩阵
+    log("【全局初始化】正在准备全市场相关性双重矩阵...")
     global_corr_matrix, global_downside_corr_matrix = precompute_correlations(
-        result_csv=result_csv_path,
-        corr_csv=corr_csv_path,
-        downside_csv=downside_csv_path,
+        result_csv=RESULT_CSV, corr_csv=CORR_CSV, downside_csv=DOWNSIDE_CSV,
         max_workers=GLOBAL_MAX_WORKERS
     )
 
+    # 主循环:递减 min_day 逐步扩大基金池
     for i in range(10):
         min_day = 1300 - i * 100
-        print(f"\n{'#' * 70}\n[{get_current_time()}] 【启动引擎】正在评估 {combo_size} 维 FOF 组合\n{'#' * 70}")
-
-        # [新增控制] 初始化扫描已有组合 set 并加载持久化系统
+        print(f"\n{'#' * 70}")
+        log(f"【启动引擎】正在评估 {COMBO_SIZE} 维 FOF 组合")
+        print(f"{'#' * 70}")
 
         output_file = run_batch_evaluation(
-            result_csv=result_csv_path,
-            combo_size=combo_size,
+            result_csv=RESULT_CSV,
+            combo_size=COMBO_SIZE,
             max_workers=GLOBAL_MAX_WORKERS,
             corr_matrix=global_corr_matrix,
             downside_corr_matrix=global_downside_corr_matrix,
@@ -817,33 +930,4 @@ if __name__ == '__main__':
             computed_set=computed_set
         )
 
-        # [外部守护与智能自更新] 严格依据时间戳推导，当生成最新文件时，自动注入并更新 Set 缓存
-        if output_file is not None and os.path.exists(output_file):
-            cache_time = os.path.getmtime(cache_file) if os.path.exists(cache_file) else 0
-            file_time = os.path.getmtime(output_file)
-            if file_time > cache_time:
-                print(f"[{get_current_time()}] 🌟 嗅探到新生成的结果文件更新于缓存，正在动态追加至持久化系统...")
-                try:
-                    # 增加一层保险：判断文件大小，防止空文件读取报错
-                    if os.path.getsize(output_file) > 100:
-                        table = pq.read_table(output_file, columns=['组合文件名'])
-                        raw_combos = table.column('组合文件名').to_pylist()
-
-                        added_count = 0
-                        for c in raw_combos:
-                            if c:
-                                parts = [str(x).strip() for x in str(c).split('_')]
-                                combo_tup = tuple(sorted(parts))
-                                if combo_tup not in computed_set:
-                                    computed_set.add(combo_tup)
-                                    added_count += 1
-
-                        if added_count > 0:
-                            with open(cache_file, 'wb') as f:
-                                pickle.dump(computed_set, f)
-                            print(
-                                f"[{get_current_time()}] 🔒 增量缓存注入完成，本次新增 {added_count} 个，库中最新包含 {len(computed_set):,} 个组合。")
-                        else:
-                            print(f"[{get_current_time()}] ⚡ 本次文件中所有组合均已在库中，无需更新。")
-                except Exception as e:
-                    print(f"[{get_current_time()}] ❌ 动态更新缓存失败: {e}")
+        _update_cache_from_new_file(output_file, cache_file, computed_set)
