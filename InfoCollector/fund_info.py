@@ -340,25 +340,25 @@ if __name__ == "__main__":
     #
     # df1 = pd.read_csv(result_csv_path, engine='python')
 
-    df_file = r'fund_data/fof_evaluation_results_3d_pool655_min_day_1300.csv'
-    origin_df = pd.read_csv(df_file, engine='python')
-    df = origin_df.copy()
-    # 只保留Total_Score大于0的行
-    df = df[df['Total_Score'] > 0.01]
-    df = df[df['Total_Days'] > 600]
-
-
-    # 按照Total_Score列降序排序
-    df1 = df.sort_values(by='Total_Score', ascending=False)
+    # df_file = r'fund_data/fof_evaluation_results_3d_pool655_min_day_1300.csv'
+    # origin_df = pd.read_csv(df_file, engine='python')
+    # df = origin_df.copy()
+    # # 只保留Total_Score大于0的行
+    # df = df[df['Total_Score'] > 0.01]
+    # df = df[df['Total_Days'] > 600]
+    #
+    #
+    # # 按照Total_Score列降序排序
+    # df1 = df.sort_values(by='Total_Score', ascending=False)
 
     # 1. 后缀名修改为 .parquet
-    df_file = r'fund_data/fof_evaluation_results_3d_pool655_min_day_1300.parquet'
+    df_file = r'fund_data/fof_evaluation_results_3d_pool699_min_day_1100.parquet'
 
     # 2. 利用 PyArrow 的底层过滤机制（谓词下推）
     # 引擎会在硬盘读取阶段直接丢弃不符合条件的数据，绝不让垃圾数据弄脏内存
     read_filters = [
         ('Total_Score', '>', 0.01),
-        ('Total_Days', '>', 600)
+        # ('Total_Days', '>', 600)
     ]
 
     # 3. 读取并直接完成过滤

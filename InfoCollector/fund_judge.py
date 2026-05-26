@@ -682,29 +682,33 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
 
     # [新增点] 预先声明 parquet 写入器
     writer = None
+    # === 在进入 while 循环前，初始化全局统计器 ===
+    global_skipped_count = 0
+    global_computed_count = 0
 
     with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(master_df,)) as executor:
         with tqdm(total=total_combos, desc=f"评估 {combo_size} 维组合", unit="组") as pbar:
             while True:
                 batch_combos = []
-                skipped_count = 0
+                current_batch_skipped = 0
 
-                # [核心极速去重逻辑] 直接接管迭代器，瞬秒数百万级冗余计算
+                # [核心极速去重逻辑] 直接接管迭代器
                 try:
                     while len(batch_combos) < batch_size:
                         combo = next(combos)
                         combo_tuple = tuple(file_to_code_map[f] for f in combo)
 
                         if computed_set is not None and combo_tuple in computed_set:
-                            skipped_count += 1
+                            current_batch_skipped += 1
                         else:
                             batch_combos.append(combo)
                 except StopIteration:
                     pass
 
-                # 精准回补进度条
-                if skipped_count > 0:
-                    pbar.update(skipped_count)
+                # 精准回补进度条与全局计数
+                if current_batch_skipped > 0:
+                    pbar.update(current_batch_skipped)
+                    global_skipped_count += current_batch_skipped
 
                 if not batch_combos:
                     break
@@ -719,6 +723,9 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     pbar.update(len(chunk_res))
 
                 if batch_results:
+                    # 记录本次真实计算的数量
+                    global_computed_count += len(batch_results)
+
                     results_df = pd.DataFrame(batch_results)
 
                     all_possible_columns = [
@@ -731,12 +738,9 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     ]
 
                     results_df = results_df.reindex(columns=all_possible_columns)
-
-                    # [修复2] 保证字符串列绝对的 Schema 一致性，防止 ParquetWriter 报错
                     results_df['组合文件名'] = results_df['组合文件名'].astype(str)
                     results_df['error'] = results_df['error'].fillna("").astype(str)
 
-                    # [修复1+原优化] 数据类型极致降级，兼容 NaN 处理
                     float_cols = results_df.select_dtypes(include=['float']).columns
                     results_df[float_cols] = results_df[float_cols].astype(np.float32)
 
@@ -745,11 +749,9 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                     if 'Max_Recovery_Days' in results_df.columns:
                         results_df['Max_Recovery_Days'] = results_df['Max_Recovery_Days'].fillna(0).astype(np.int16)
 
-                    # [引入优化点1]：转化为 PyArrow Table 并写入
                     table = pa.Table.from_pandas(results_df)
 
                     if is_first_write:
-                        # 第一次写入时初始化 writer，强制使用 zstd 强力压缩算法
                         writer = pq.ParquetWriter(output_parquet, table.schema, compression='zstd')
                         writer.write_table(table)
                         is_first_write = False
@@ -761,13 +763,24 @@ def run_batch_evaluation(result_csv='fund_data/all_funds_result.csv', combo_size
                 del batch_combos
                 del chunks
 
-    # [终极安全控制与返回判定机制]
+    # ================= 终极报告生成 =================
+    skip_ratio = (global_skipped_count / total_combos) * 100 if total_combos > 0 else 0.0
+    comp_ratio = (global_computed_count / total_combos) * 100 if total_combos > 0 else 0.0
+
+    print("\n" + "★" * 60)
+    print(f"[{get_current_time()}] 📊 【批处理计算任务复盘报告】 (池: {final_fund_count}只 | {combo_size}维)")
+    print(f"  ➤ 理论总组合数量 : {total_combos:,} 组")
+    print(f"  ➤ 命中了缓存跳过 : {global_skipped_count:,} 组 ({skip_ratio:.2f}%) 🚀")
+    print(f"  ➤ 实际提交计算量 : {global_computed_count:,} 组 ({comp_ratio:.2f}%)")
+
     if writer is not None:
         writer.close()
-        print(f"[{get_current_time()}] 🎉 全部计算完成！结果已成功保存至: {output_parquet}")
+        print(f"  ➤ 最终文件保存至 : {output_parquet}")
+        print("★" * 60 + "\n")
         return output_parquet
     else:
-        print(f"[{get_current_time()}] ⏭️ 完美跳过：所有的有效组合均已在持久化缓存中，本次无新数据写入。")
+        print("  ➤ 执行动作结语   : 完美跳过，本次未产生任何新计算数据。")
+        print("★" * 60 + "\n")
         return None
 
 
