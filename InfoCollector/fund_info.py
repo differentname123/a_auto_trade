@@ -334,31 +334,81 @@ def judge_fund_df():
     print("-" * 50)
 
 
-if __name__ == "__main__":
-    # result_csv_path = 'fund_data/all_funds_result.csv'
-    # result_csv_path = 'fund_data/fof_evaluation_results_2d_pool3917_filtered.csv'
-    #
-    # df1 = pd.read_csv(result_csv_path, engine='python')
+def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600, min_score=None):
+    """
+    根据给定的维度，自动搜索目录下所有匹配的 Parquet 文件，
+    利用 PyArrow 谓词下推（直接从硬盘过滤）极速加载并合并。
 
-    # df_file = r'fund_data/fof_evaluation_results_3d_pool655_min_day_1300.csv'
-    # origin_df = pd.read_csv(df_file, engine='python')
-    # df = origin_df.copy()
-    # # 只保留Total_Score大于0的行
-    # df = df[df['Total_Score'] > 0.01]
-    # df = df[df['Total_Days'] > 600]
-    #
-    #
-    # # 按照Total_Score列降序排序
-    # df1 = df.sort_values(by='Total_Score', ascending=False)
+    :param dimension: 组合维度 (例如 2, 3, 4)
+    :param data_dir: 数据所在的文件夹路径
+    :param min_days: 过滤条件：Total_Days > min_days
+    :param min_score: 过滤条件：Total_Score > min_score (可选)
+    :return: 过滤并合并后按分数排序的 DataFrame
+    """
+    # 1. 动态生成正则匹配模式，搜索指定维度的所有文件
+    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_*.parquet')
+    file_list = glob.glob(search_pattern)
+
+    if not file_list:
+        print(f"⚠️ 未找到 {dimension} 维的任何 Parquet 文件 (搜索路径: {search_pattern})")
+        return pd.DataFrame()
+
+    print(f"🔍 找到 {len(file_list)} 个 {dimension} 维历史文件，正在启动底层 C++ 并发下推加载...")
+
+    # 2. 组装 PyArrow 底层过滤机制（谓词下推）
+    read_filters = [('Total_Days', '>', min_days)]
+    if min_score is not None:
+        read_filters.append(('Total_Score', '>', min_score))
+
+    # 3. 极速读取与合并
+    try:
+        # 👑 高级技巧: 直接传 List 给 pd.read_parquet，
+        # 引擎会直接用 PyArrow Dataset API 并行读取过滤，避免 Python 层的 for 循环和内存复制开销
+        df = pd.read_parquet(file_list, engine='pyarrow', filters=read_filters)
+
+    except Exception as e:
+        print(f"❌ 批量并发加载遇到异常 (可能是个别文件损坏或字段不一致): {e}")
+        print("🔄 触发自动降级机制，转为逐个文件安全加载模式...")
+        dfs = []
+        for file in file_list:
+            try:
+                df_part = pd.read_parquet(file, engine='pyarrow', filters=read_filters)
+                if not df_part.empty:
+                    dfs.append(df_part)
+            except Exception as ex:
+                print(f"  -> ⚠️ 跳过异常文件 [{os.path.basename(file)}]: {ex}")
+
+        if not dfs:
+            print(f"⚠️ {dimension} 维文件全部读取失败或无符合条件的数据。")
+            return pd.DataFrame()
+
+        # 安全模式合并
+        df = pd.concat(dfs, ignore_index=True)
+
+    # 如果过滤后一条数据都没有了
+    if df.empty:
+        print(f"ℹ️ {dimension} 维数据加载完成，但经过硬盘级过滤后，没有保留下任何组合。")
+        return df
+
+    # 4. 排序逻辑保持不变
+    df = df.sort_values(by='Total_Score', ascending=False).reset_index(drop=True)
+
+    print(f"✅ 成功合并 {dimension} 维数据! 经过硬盘级过滤，最终留存: {len(df):,} 个优质组合。")
+    return df
+
+
+if __name__ == "__main__":
+    df_2d = load_and_merge_parquet_by_dim(dimension=3, min_days=600, min_score=0)
+
 
     # 1. 后缀名修改为 .parquet
-    df_file = r'fund_data/fof_evaluation_results_3d_pool795_min_day_900.parquet'
+    df_file = r'fund_data/fof_evaluation_results_2d_pool1084_min_day_1260.parquet'
 
     # 2. 利用 PyArrow 的底层过滤机制（谓词下推）
     # 引擎会在硬盘读取阶段直接丢弃不符合条件的数据，绝不让垃圾数据弄脏内存
     read_filters = [
-        ('Total_Score', '>', 0.01),
-        # ('Total_Days', '>', 600)
+        # ('Total_Score', '>', 0.01),
+        ('Total_Days', '>', 600)
     ]
 
     # 3. 读取并直接完成过滤
