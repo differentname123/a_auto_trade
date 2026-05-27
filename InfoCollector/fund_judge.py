@@ -633,21 +633,19 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, t
 
     low = 2
     high = len(candidate_list)
-    target_high = min(target_min, high)
-
     best_k = high
     best_diff = float('inf')
     best_count = 0
     target_mid = (target_min + target_max) // 2
 
-    log(f"🧠 [二分测算] 启动内存高速测算器，全量候补池总数: {high:,}，目标生成区间 [{target_min:,}, {target_max:,}]，最高target_high: {target_high:,}。")
-    high = min(high, target_high)
-    # # 第一次先测全量
-    # total_est = fast_estimate_combos(N, candidate_list, strict_mode)
-    # log(f"🧠 [二分测算] 全量 {high:,} 个种子预期生成 {total_est:,} 个组合。")
-    # if total_est <= target_max:
-    #     log("🎯 [二分命中] 全量生成量处于安全范围内，直接全量放行！")
-    #     return high, total_est
+    log(f"🧠 [二分测算] 启动内存高速测算器，全量候补池总数: {high:,}，目标生成区间 [{target_min:,}, {target_max:,}]")
+
+    # 第一次先测全量
+    total_est = fast_estimate_combos(N, candidate_list, strict_mode)
+    log(f"🧠 [二分测算] 全量 {high:,} 个种子预期生成 {total_est:,} 个组合。")
+    if total_est <= target_max:
+        log("🎯 [二分命中] 全量生成量处于安全范围内，直接全量放行！")
+        return high, total_est
 
     # 二分查找
     while low <= high:
