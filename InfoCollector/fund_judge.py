@@ -626,92 +626,132 @@ def fast_estimate_combos(N, seeds_list, strict_mode=True):
     return total_count
 
 
-def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, target_max=1100000, strict_mode=True):
-    """基于动态插值与精度控制的高速硬控生成数量测算"""
+
+def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000, target_max=55000000, strict_mode=True):
+    """基于对数空间插值与安全阻尼步进的高速测算"""
     if len(candidate_list) < 2:
         return len(candidate_list), 0
 
-    high = len(candidate_list)
-    low = 2
-    best_k = high
-    best_diff = float('inf')
-    best_count = 0
+    high_total = len(candidate_list)
     target_mid = (target_min + target_max) // 2
-
-    log(f"🧠 [二分测算] 启动内存高速测算器，全量候补池总数: {high:,}，目标生成区间 [{target_min:,}, {target_max:,}]")
+    log(f"🧠 [测算引擎] 启动非线性测算器，全量候补: {high_total:,}，目标区间 [{target_min:,}, {target_max:,}]")
 
     # ==========================================
-    # 优化1: 最开始直接以一半或者是 target_min 中小的那个进行探测
+    # 第一步：初始探测 (建立基准锚点)
     # ==========================================
-    init_k = min(high // 2, target_min)
-    init_k = max(2, init_k)  # 防御性控制，确保不低于下限 2
+    init_k = min(high_total // 2, 1000000)
+    init_k = max(2, init_k)  # <--- 加上这一行，保证种子数量至少为2
 
+    # 强烈建议: 如果 fast_estimate_combos 支持传入 limit 参数，不要用切片!
+    # count_init = fast_estimate_combos(N, candidate_list, strict_mode, limit=init_k)
     count_init = fast_estimate_combos(N, candidate_list[:init_k], strict_mode)
-    log(f"🧠 [二分测算] 初始探测: 提取前 {init_k:,} 个种子 -> 预期生成量: {count_init:,}")
 
-    # 记录初始探测的最优值
+    log(f"🧠 [测算引擎] 初始锚点: K={init_k:,} -> 生成量: {count_init:,}")
+
     best_diff = abs(count_init - target_mid)
     best_k = init_k
     best_count = count_init
 
     if target_min <= count_init <= target_max:
-        log(f"🎯 [二分命中] 初始探测精准处于安全范围内，直接放行！锁定 K={init_k:,}，生成量: {count_init:,}")
         return init_k, count_init
 
-    # 用于动态插值查找的上下限水位反馈
-    count_low = None
-    count_high = None
-
-    # 根据初始探测结果，大幅度收缩二分区间，并记录水位
-    if count_init > target_max:
-        high = init_k - 1
-        count_high = count_init
+    # ==========================================
+    # 第二步：寻找安全上下界 (防止掉入复杂度黑洞)
+    # ==========================================
+    if count_init < target_mid:
+        low, count_low = init_k, count_init
+        high, count_high = high_total, None
     else:
-        low = init_k + 1
-        count_low = count_init
+        # 初始估值过大，补测绝对物理下界以获取真实锚点
+        low = 2
+        count_low = fast_estimate_combos(N, candidate_list[:low], strict_mode)
+        high, count_high = init_k, count_init
 
-    # ==========================================
-    # 二分与插值查找主体逻辑
-    # ==========================================
-    while low <= high:
-        # # 优化2: 设置一个精度，当上下限小于10，就可以提前结束了
-        # if high - low < 10:
-        #     log(f"⚠️ [二分结束] 上下限差值小于 10 达到精度阈值，提前终止探索。")
-        #     break
+        # 🌟 终态修复：物理下界拦截。如果连 k=2 都已经超标，说明目标区间设定得不切实际，直接返回物理最小值。
+        if count_low > target_max:
+            log(f"⚠️ [绝对下限] 物理极限 K=2 的生成量({count_low:,})仍大于上限，强制收敛。")
+            return low, count_low
+        elif target_min <= count_low <= target_max:
+            return low, count_low
 
-        # 优化3: 动态插值查找 (仅当拿到上下限水位反馈时激活)
-        if count_low is not None and count_high is not None and count_high > count_low and count_low <= target_mid <= count_high:
-            ratio = (target_mid - count_low) / (count_high - count_low)
-            mid_guess = low + int(ratio * (high - low))
-            # 边界锁：防止插值偏差过大导致游标越界或死循环
-            mid = max(low + 1, min(high - 1, mid_guess))
+    # 如果我们只有下界没有上界，绝不使用全量求中值！使用“基于多项式预估”的安全步进
+    while count_high is None and low < high_total:
+        shortfall_ratio = target_mid / max(1, count_low)
+        safe_multiplier = min(1.5, math.pow(shortfall_ratio, 1 / max(1, N)))
+
+        next_k = min(high_total, max(low + 1, int(low * safe_multiplier)))
+
+        log(f"🛡️ [安全步进] 尚未找到上限！数学预估倍率: {safe_multiplier:.2f}x，向 K={next_k:,} 探索...")
+        count = fast_estimate_combos(N, candidate_list[:next_k], strict_mode)
+        log(f"✅ [测算完成] K={next_k:,} -> 生成量: {count:,}")
+
+        # 更新最佳记录
+        if abs(count - target_mid) < best_diff:
+            best_diff, best_k, best_count = abs(count - target_mid), next_k, count
+
+        if target_min <= count <= target_max:
+            return next_k, count
+
+        if count > target_max:
+            high, count_high = next_k, count
+            break  # 成功夹逼出安全区间！
         else:
-            # 缺乏足够反馈数据时，回退为标准二分查找
+            low, count_low = next_k, count
+
+    # 🌟 修复点 1：拦截算力枯竭黑天鹅
+    if count_high is None:
+        log(f"⚠️ [算力枯竭] 全量候补池 {high_total:,} 的生成量仍低于目标中值，停止测算。")
+        return best_k, best_count
+
+    # ==========================================
+    # 第三步：在安全的 [low, high] 区间内进行【对数插值查找】
+    # ==========================================
+    log(f"🎯 [锁定区间] 已夹逼出安全测算区间 K ∈ [{low:,}, {high:,}]，开始精细对数插值...")
+
+    while low <= high:
+        # 精度控制：区间足够小，提前结束
+        if high - low < 1000:
+            log(f"⚠️ [精度达标] 上下限差值极小，停止探索。")
+            break
+
+        # 【核心优化】：对数空间插值，完美契合组合数非线性增长的特性
+        try:
+            log_low_k, log_high_k = math.log(low), math.log(high)
+            log_low_c = math.log(max(1, count_low))
+            log_high_c = math.log(max(1, count_high))
+            log_target = math.log(target_mid)
+
+            # 在对数空间计算斜率和预测值
+            ratio = (log_target - log_low_c) / (log_high_c - log_low_c)
+            log_mid_k = log_low_k + ratio * (log_high_k - log_low_k)
+            mid_guess = int(math.exp(log_mid_k))
+
+            # 防止浮点误差导致的越界
+            mid = max(low + 1, min(high - 1, mid_guess))
+        except (ValueError, ZeroDivisionError):  # 🌟 修复点 2：补全除零异常防御
+            # 异常回退为标准二分
             mid = (low + high) // 2
 
-        test_seeds = candidate_list[:mid]
-        count = fast_estimate_combos(N, test_seeds, strict_mode)
-        log(f"🧠 [二分测算] 尝试提取前 {mid:,} 个种子 -> 预期生成量: {count:,} (当前区间: [{low:,}, {high:,}])")
+        log(f"🔬 [对数插值] 预测最佳 K={mid:,} (当前区间: [{low:,}, {high:,}])...")
+        count = fast_estimate_combos(N, candidate_list[:mid], strict_mode)
 
         diff = abs(count - target_mid)
         if diff < best_diff:
-            best_diff = diff
-            best_k = mid
-            best_count = count
+            best_diff, best_k, best_count = diff, mid, count
 
         if target_min <= count <= target_max:
-            log(f"🎯 [二分命中] 精准咬住目标，锁定最佳 K={mid:,}！预期最终生成量: {count:,}")
+            log(f"🎉 [测算命中] 精准落入目标区间！最终锁定 K={mid:,}，生成量: {count:,}")
             return mid, count
 
         if count > target_max:
-            high = mid - 1
-            count_high = count  # 动态记录最高位生成量，用于下一次插值计算
+            high, count_high = mid, count  # 🌟 修复点 3：保持真实坐标绑定，防止插值畸变
         else:
-            low = mid + 1
-            count_low = count  # 动态记录最低位生成量，用于下一次插值计算
+            low, count_low = mid, count  # 🌟 修复点 3：保持真实坐标绑定，防止插值畸变
 
-    log(f"⚠️ [二分结束] 无法绝对落入目标区间，采用最佳逼近 K={best_k:,}，预期生成量: {best_count:,}")
+    log(f"🏁 [测算结束] 采用最佳逼近 K={best_k:,}，生成量: {best_count:,}")
     return best_k, best_count
+
+
 
 def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
     # 🌟 核心杀手锏：自带短路拦截的极速转换函数 (一次 Split，终身受用)

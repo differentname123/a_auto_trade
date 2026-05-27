@@ -398,9 +398,24 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
 
 
 if __name__ == "__main__":
-    df_2d = load_and_merge_parquet_by_dim(dimension=4, min_days=600, min_score=0)
+    df_2d = load_and_merge_parquet_by_dim(dimension=2, min_days=600, min_score=0)
     # 打印出df_2d中组合文件名 包含006373 并且也包含006372
     filtered_df = df_2d[df_2d['组合文件名'].str.contains('006373') & df_2d['组合文件名'].str.contains('014661')& df_2d['组合文件名'].str.contains('016185')]
+    report_df = pd.read_csv('fund_data/filtering_reasons_report.csv')
+    # 获取df_2d中组合文件名不重复的列表
+    unique_combinations = df_2d['组合文件名'].unique()
+    # 将每个元素按照 '_' 分割，并且加入列表,并且去重
+    unique_funds = set()
+    for combo in unique_combinations:
+        parts = combo.split('_')
+        unique_funds.update(parts)
+
+    # 过滤得到report_df中 adj_nav_file 列包含 unique_funds中任意一个元素的行
+    report_df['keep'] = report_df['adj_nav_file'].apply(
+        lambda x: any(fund in x for fund in unique_funds)
+        if isinstance(x, str) else False
+    )
+
 
     # 1. 后缀名修改为 .parquet
     df_file = r'fund_data/fof_evaluation_results_2d_pool1084_min_day_1260.parquet'
