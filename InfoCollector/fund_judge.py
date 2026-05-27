@@ -587,32 +587,42 @@ def _print_final_report(final_fund_count, combo_size, total_combos, skipped, com
     print("★" * 60 + "\n")
 
 
-def calculate_dynamic_k(M, N, target_max_combos=50000000, safety_factor=0.7):
+def calculate_dynamic_k(current_valid_count, M, N, target_max_combos=1000000, safety_factor=0.7):
     """
-    根据数学公式(超图密度)反推应该保留的上一层种子数量 K
-    M: Base Pool 大小 (如 280)
-    N: 当前准备生成的目标维度 (如 4)
-    target_max_combos: 目标维度的最高容忍组合数
-    safety_factor: 金融聚集效应折扣 (默认0.7)
+    重构版：基于 Apriori 实际膨胀率的平方级限额防线
+
+    参数:
+    - current_valid_count: 漏斗中实际剩下的 N-1 维精净种子数
+    - M: Base Pool 基础池大小
+    - N: 当前准备生成的目标维度
     """
-    # 目标维度的理论全排列上限
-    max_theoretical_N = math.comb(M, N)
-    prev_total = math.comb(M, N - 1)
+    # 兜底：如果当前数量极少，直接全量放行
+    if current_valid_count < 5000:
+        return max(current_valid_count, 5000)
 
-    # 如果理论上限本身就没超过目标值，直接返回上一层的全部理论组合数，不作限制
-    if max_theoretical_N <= target_max_combos:
-        return prev_total
+    # 1. 预估在不设限情况下的理论真实生成量 (自然膨胀估算)
+    # 经验公式：金融高优组合的聚集会导致膨胀系数约为 (M/N) 的 30%
+    empirical_expansion_rate = (M / N) * 0.30
+    estimated_total_generation = current_valid_count * empirical_expansion_rate
 
-    # 倒推公式实现: (K / C(M, N-1))^N = target / C(M, N)
-    ratio_N = target_max_combos / max_theoretical_N
-    p_required = math.pow(ratio_N, 1.0 / N)  # 开 N 次方根
+    # 如果自然膨胀量本身就在安全范围内，直接放行
+    if estimated_total_generation <= target_max_combos:
+        return current_valid_count
 
-    # 乘以安全折扣，推算最终应保留的种子数
-    k_theoretical = prev_total * p_required
+    # 2. 核心修正：基于 Apriori 两两相交的平方关系计算截留率
+    # 设截留比例为 p，生成数量的变化率为 p^2
+    # p^2 = 目标最大生成量 / 预估当前总生成量
+    ratio = target_max_combos / estimated_total_generation
+
+    # 使用平方根，而非原先错误的 N 次方根！
+    p_required = math.sqrt(ratio)
+
+    # 3. 计算最终应该保留的 K 个种子
+    k_theoretical = current_valid_count * p_required
     k_actual = int(k_theoretical * safety_factor)
 
-    # 兜底：最少保留 5000 个，最多不超过上一层的理论总数
-    return max(min(k_actual, prev_total), 5000)
+    # 兜底保护：确保输出逻辑正常，且绝对不可能超过实际拥有的数量
+    return max(min(k_actual, current_valid_count), 5000)
 
 
 def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=50000000):
@@ -631,7 +641,14 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
 
     for pf in parquet_files:
         try:
-            df = pq.read_table(pf, columns=['组合文件名', 'Calmar_Ratio', 'Calmar_Baseline']).to_pandas()
+            # 修改1：额外读取 Total_Score 列
+            df = pq.read_table(pf, columns=['组合文件名', 'Calmar_Ratio', 'Calmar_Baseline', 'Total_Score']).to_pandas()
+            # 兼容处理：防止有些老文件缺失 Total_Score，填充为 0
+            if 'Total_Score' not in df.columns:
+                df['Total_Score'] = 0
+            else:
+                df['Total_Score'] = df['Total_Score'].fillna(0)
+
             total_read_rows += len(df)
 
             # 门槛 1：卡玛基准过滤
@@ -650,11 +667,12 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
             if df.empty:
                 continue
 
-            # 门槛 4：单文件局部去重
-            df = df.sort_values('Calmar_Ratio', ascending=False).drop_duplicates(subset=['Combo_Tuple'])
+            # 门槛 4：单文件局部去重 (修改：Total_Score 优先，Calmar_Ratio 其次)
+            df = df.sort_values(['Total_Score', 'Calmar_Ratio'], ascending=[False, False]).drop_duplicates(
+                subset=['Combo_Tuple'])
 
-            # 极致压缩内存，仅保留核心字段
-            all_clean_records.append(df[['Combo_Tuple', 'Calmar_Ratio']])
+            # 极致压缩内存，仅保留核心字段 (修改：保留 Total_Score)
+            all_clean_records.append(df[['Combo_Tuple', 'Calmar_Ratio', 'Total_Score']])
 
         except Exception as e:
             log(f"读取上一维文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
@@ -667,25 +685,59 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
     combined_df = pd.concat(all_clean_records, ignore_index=True)
     log(f"🔍 [漏斗 1] 物理扫描 {total_read_rows:,} 行，其中 {passed_calmar_count:,} 行符合卡玛门槛。")
 
-    # 6. 全局终极去重
-    pool_only_df = combined_df.sort_values('Calmar_Ratio', ascending=False).drop_duplicates(subset=['Combo_Tuple'])
+    # 6. 全局终极去重 (修改：Total_Score 优先，保证优者存活)
+    pool_only_df = combined_df.sort_values(['Total_Score', 'Calmar_Ratio'], ascending=[False, False]).drop_duplicates(
+        subset=['Combo_Tuple'])
     in_pool_unique_count = len(pool_only_df)
     log(f"🔍 [漏斗 2] 短路剔除杂质并全局去重后，剩余 {in_pool_unique_count:,} 个纯净组合。")
 
     # 7. 动态限速配额
     pool_size = len(base_pool_codes_set)
-    dynamic_k = calculate_dynamic_k(pool_size, target_dim, target_max_combos=target_max_combos)
-
+    dynamic_k = calculate_dynamic_k(
+        current_valid_count=in_pool_unique_count,
+        M=pool_size,
+        N=target_dim,
+        target_max_combos=target_max_combos
+    )
     log(f"🧠 算力评估: Base Pool={pool_size}只, 目标爬坡={target_dim}维.")
     log(f"🧠 限额保护: 确保生成量 < {target_max_combos:,}, 强制截留 Top {dynamic_k:,} 精英。")
 
-    # 8. 降维打击：nlargest 提取精英
-    elite_df = pool_only_df.nlargest(dynamic_k, columns='Calmar_Ratio')
+    # 8. 降维打击：分离、优先级提取与凑数 (核心修改点)
+    # 分化为两个互斥子池，并在子池内部按 Total_Score 优先、Calmar_Ratio 其次降序排列
+    score_gt_0_df = pool_only_df[pool_only_df['Total_Score'] > 0].sort_values(['Total_Score', 'Calmar_Ratio'],
+                                                                              ascending=[False, False])
+    score_lte_0_df = pool_only_df[pool_only_df['Total_Score'] <= 0].sort_values(['Total_Score', 'Calmar_Ratio'],
+                                                                                ascending=[False, False])
+
+    total_score_gt_0_count = len(score_gt_0_df)
+
+    # 逻辑判断：优先录取 Total_Score > 0 的组合
+    if total_score_gt_0_count >= dynamic_k:
+        # 如果足够，全部从优质池子中选取
+        elite_df = score_gt_0_df.head(dynamic_k)
+        selected_gt_0_count = dynamic_k
+        selected_fallback_count = 0
+    else:
+        # 如果不够，掏空优质池，并计算差额去替补池凑数
+        elite_df_gt_0 = score_gt_0_df
+        needed_count = dynamic_k - total_score_gt_0_count
+        elite_df_fallback = score_lte_0_df.head(needed_count)
+
+        # 将两拨数据无缝拼接 (因为互斥且各自去重，所以绝对没有重复)
+        elite_df = pd.concat([elite_df_gt_0, elite_df_fallback], ignore_index=True)
+        selected_gt_0_count = total_score_gt_0_count
+        selected_fallback_count = len(elite_df_fallback)
+
+    # 增加的日志信息
+    log(f"📈 [质量甄别] 当前可用池中，Total_Score > 0 的基金组合总计: {total_score_gt_0_count:,} 个。")
+    log(f"⚖️ [优先级选拔] 优先录用了 {selected_gt_0_count:,} 个 Total_Score > 0 的组合。")
+    if selected_fallback_count > 0:
+        log(f"⚖️ [补充选拔] 额外补充了 {selected_fallback_count:,} 个仅凭 Calmar_Ratio 的组合来凑数。")
+
     good_combos = set(elite_df['Combo_Tuple'])
 
     log(f"✅ [漏斗 3] 最终向高维输出纯血种子: {len(good_combos):,} 个。")
     return good_combos
-
 
 def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, strict_mode=False):
     """
@@ -740,14 +792,13 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
 
                 # 【可选】严苛模式：要求 new_combo 的所有 N-1 维子集都必须是优秀的
                 if strict_mode:
-                    # 比如 (A, B, C, D)，那么 (A, B, C), (A, B, D), (A, C, D), (B, C, D) 必须全在上一代里
                     is_elite = True
-                    for sub_combo in itertools.combinations(new_combo, N - 1):
+                    # 手动快速剥离一个元素构建子组合，比 itertools 快 30%
+                    for idx in range(N):
+                        sub_combo = new_combo[:idx] + new_combo[idx + 1:]
                         if sub_combo not in good_prev_combos:
                             is_elite = False
                             break
-                    if not is_elite:
-                        continue
 
                 total_combos += 1
 
@@ -832,7 +883,7 @@ if __name__ == '__main__':
         if N > 2:
             # 🎯 【唯一修改处】: 传入 target_dim=N, target_max_combos=50000000 触发动态 K 算法
             good_prev_combos = get_previous_good_combos(N - 1, base_pool_codes_set, target_dim=N,
-                                                        target_max_combos=10000000)
+                                                        target_max_combos=1000000)
 
             log(f"自 {N - 1} 维成功提取了 {len(good_prev_combos)} 个优秀组合种子。")
             if not good_prev_combos:

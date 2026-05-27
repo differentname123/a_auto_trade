@@ -398,7 +398,7 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
 
 
 if __name__ == "__main__":
-    df_2d = load_and_merge_parquet_by_dim(dimension=3, min_days=600, min_score=0)
+    df_2d = load_and_merge_parquet_by_dim(dimension=10, min_days=600, min_score=0)
 
 
     # 1. 后缀名修改为 .parquet
