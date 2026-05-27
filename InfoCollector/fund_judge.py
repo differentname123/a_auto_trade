@@ -627,12 +627,12 @@ def fast_estimate_combos(N, seeds_list, strict_mode=True):
 
 
 def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, target_max=1100000, strict_mode=True):
-    """基于二分查找的绝对硬控生成数量测算"""
+    """基于动态插值与精度控制的高速硬控生成数量测算"""
     if len(candidate_list) < 2:
         return len(candidate_list), 0
 
-    low = 2
     high = len(candidate_list)
+    low = 2
     best_k = high
     best_diff = float('inf')
     best_count = 0
@@ -640,20 +640,58 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, t
 
     log(f"🧠 [二分测算] 启动内存高速测算器，全量候补池总数: {high:,}，目标生成区间 [{target_min:,}, {target_max:,}]")
 
-    # 第一次先测全量
-    total_est = fast_estimate_combos(N, candidate_list, strict_mode)
-    log(f"🧠 [二分测算] 全量 {high:,} 个种子预期生成 {total_est:,} 个组合。")
-    if total_est <= target_max:
-        log("🎯 [二分命中] 全量生成量处于安全范围内，直接全量放行！")
-        return high, total_est
+    # ==========================================
+    # 优化1: 最开始直接以一半或者是 target_min 中小的那个进行探测
+    # ==========================================
+    init_k = min(high // 2, target_min)
+    init_k = max(2, init_k)  # 防御性控制，确保不低于下限 2
 
-    # 二分查找
+    count_init = fast_estimate_combos(N, candidate_list[:init_k], strict_mode)
+    log(f"🧠 [二分测算] 初始探测: 提取前 {init_k:,} 个种子 -> 预期生成量: {count_init:,}")
+
+    # 记录初始探测的最优值
+    best_diff = abs(count_init - target_mid)
+    best_k = init_k
+    best_count = count_init
+
+    if target_min <= count_init <= target_max:
+        log(f"🎯 [二分命中] 初始探测精准处于安全范围内，直接放行！锁定 K={init_k:,}，生成量: {count_init:,}")
+        return init_k, count_init
+
+    # 用于动态插值查找的上下限水位反馈
+    count_low = None
+    count_high = None
+
+    # 根据初始探测结果，大幅度收缩二分区间，并记录水位
+    if count_init > target_max:
+        high = init_k - 1
+        count_high = count_init
+    else:
+        low = init_k + 1
+        count_low = count_init
+
+    # ==========================================
+    # 二分与插值查找主体逻辑
+    # ==========================================
     while low <= high:
-        mid = (low + high) // 2
-        test_seeds = candidate_list[:mid]
+        # # 优化2: 设置一个精度，当上下限小于10，就可以提前结束了
+        # if high - low < 10:
+        #     log(f"⚠️ [二分结束] 上下限差值小于 10 达到精度阈值，提前终止探索。")
+        #     break
 
+        # 优化3: 动态插值查找 (仅当拿到上下限水位反馈时激活)
+        if count_low is not None and count_high is not None and count_high > count_low and count_low <= target_mid <= count_high:
+            ratio = (target_mid - count_low) / (count_high - count_low)
+            mid_guess = low + int(ratio * (high - low))
+            # 边界锁：防止插值偏差过大导致游标越界或死循环
+            mid = max(low + 1, min(high - 1, mid_guess))
+        else:
+            # 缺乏足够反馈数据时，回退为标准二分查找
+            mid = (low + high) // 2
+
+        test_seeds = candidate_list[:mid]
         count = fast_estimate_combos(N, test_seeds, strict_mode)
-        log(f"🧠 [二分测算] 尝试提取前 {mid:,} 个种子 -> 预期生成量: {count:,}")
+        log(f"🧠 [二分测算] 尝试提取前 {mid:,} 个种子 -> 预期生成量: {count:,} (当前区间: [{low:,}, {high:,}])")
 
         diff = abs(count - target_mid)
         if diff < best_diff:
@@ -667,12 +705,13 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, t
 
         if count > target_max:
             high = mid - 1
+            count_high = count  # 动态记录最高位生成量，用于下一次插值计算
         else:
             low = mid + 1
+            count_low = count  # 动态记录最低位生成量，用于下一次插值计算
 
     log(f"⚠️ [二分结束] 无法绝对落入目标区间，采用最佳逼近 K={best_k:,}，预期生成量: {best_count:,}")
     return best_k, best_count
-
 
 def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
     # 🌟 核心杀手锏：自带短路拦截的极速转换函数 (一次 Split，终身受用)
@@ -868,7 +907,7 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
 
 
 if __name__ == '__main__':
-    GLOBAL_MAX_WORKERS = 25
+    GLOBAL_MAX_WORKERS = 30
     RESULT_CSV = 'fund_data/all_funds_result.csv'
     CORR_CSV = 'fund_data/fund_correlations.csv'
     DOWNSIDE_CSV = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
@@ -907,7 +946,7 @@ if __name__ == '__main__':
         log("启动双重相关性优胜劣汰过滤...")
         base_pool_files = _greedy_correlation_filter(
             df_filtered, global_corr_matrix, global_downside_corr_matrix,
-            0.8, 0.2)
+            0.95, 0.5)
 
     final_fund_count = len(base_pool_files)
     print("\n" + "=" * 50)
@@ -939,7 +978,7 @@ if __name__ == '__main__':
         if N > 2:
             # 🎯 【唯一修改处】: 传入 target_dim=N, target_max_combos=1000000 触发动态 K 算法
             good_prev_combos = get_previous_good_combos(N - 1, base_pool_codes_set, target_dim=N,
-                                                        target_max_combos=10000000)
+                                                        target_max_combos=50000000)
 
             log(f"自 {N - 1} 维成功提取了 {len(good_prev_combos)} 个优秀组合种子。")
             if not good_prev_combos:

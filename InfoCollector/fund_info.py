@@ -398,8 +398,9 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
 
 
 if __name__ == "__main__":
-    df_2d = load_and_merge_parquet_by_dim(dimension=6, min_days=600, min_score=0)
-
+    df_2d = load_and_merge_parquet_by_dim(dimension=4, min_days=600, min_score=0)
+    # 打印出df_2d中组合文件名 包含006373 并且也包含006372
+    filtered_df = df_2d[df_2d['组合文件名'].str.contains('006373') & df_2d['组合文件名'].str.contains('014661')& df_2d['组合文件名'].str.contains('016185')]
 
     # 1. 后缀名修改为 .parquet
     df_file = r'fund_data/fof_evaluation_results_2d_pool1084_min_day_1260.parquet'
