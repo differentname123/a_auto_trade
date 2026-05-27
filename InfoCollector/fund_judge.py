@@ -13,6 +13,7 @@ from numba import njit
 import pyarrow as pa
 import pyarrow.parquet as pq
 from collections import defaultdict
+
 # ====================================================================
 # 全局常量配置
 # ====================================================================
@@ -587,45 +588,95 @@ def _print_final_report(final_fund_count, combo_size, total_combos, skipped, com
     print("★" * 60 + "\n")
 
 
-def calculate_dynamic_k(current_valid_count, M, N, target_max_combos=1000000, safety_factor=0.7):
-    """
-    重构版：基于 Apriori 实际膨胀率的平方级限额防线
+def fast_estimate_combos(N, seeds_list, strict_mode=True):
+    """纯内存极速测算给定种子在 N 维情况下的理论生成量 (无文件I/O)"""
+    seeds_set = set(seeds_list)
+    prefix_map = defaultdict(list)
+    prefix_len = N - 2
 
-    参数:
-    - current_valid_count: 漏斗中实际剩下的 N-1 维精净种子数
-    - M: Base Pool 基础池大小
-    - N: 当前准备生成的目标维度
-    """
-    # 兜底：如果当前数量极少，直接全量放行
-    if current_valid_count < 5000:
-        return max(current_valid_count, 5000)
+    for combo in seeds_list:
+        prefix = combo[:prefix_len]
+        prefix_map[prefix].append(combo)
 
-    # 1. 预估在不设限情况下的理论真实生成量 (自然膨胀估算)
-    # 经验公式：金融高优组合的聚集会导致膨胀系数约为 (M/N) 的 30%
-    empirical_expansion_rate = (M / N) * 0.30
-    estimated_total_generation = current_valid_count * empirical_expansion_rate
+    total_count = 0
+    for prefix, combos in prefix_map.items():
+        n_combos = len(combos)
+        if n_combos < 2:
+            continue
+        for i in range(n_combos):
+            for j in range(i + 1, n_combos):
+                tail1 = combos[i][-1]
+                tail2 = combos[j][-1]
 
-    # 如果自然膨胀量本身就在安全范围内，直接放行
-    if estimated_total_generation <= target_max_combos:
-        return current_valid_count
+                if tail1 < tail2:
+                    new_combo = prefix + (tail1, tail2)
+                else:
+                    new_combo = prefix + (tail2, tail1)
 
-    # 2. 核心修正：基于 Apriori 两两相交的平方关系计算截留率
-    # 设截留比例为 p，生成数量的变化率为 p^2
-    # p^2 = 目标最大生成量 / 预估当前总生成量
-    ratio = target_max_combos / estimated_total_generation
-
-    # 使用平方根，而非原先错误的 N 次方根！
-    p_required = math.sqrt(ratio)
-
-    # 3. 计算最终应该保留的 K 个种子
-    k_theoretical = current_valid_count * p_required
-    k_actual = int(k_theoretical * safety_factor)
-
-    # 兜底保护：确保输出逻辑正常，且绝对不可能超过实际拥有的数量
-    return max(min(k_actual, current_valid_count), 5000)
+                if strict_mode:
+                    is_elite = True
+                    for idx in range(N):
+                        sub_combo = new_combo[:idx] + new_combo[idx + 1:]
+                        if sub_combo not in seeds_set:
+                            is_elite = False
+                            break
+                    if not is_elite:
+                        continue
+                total_count += 1
+    return total_count
 
 
-def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=50000000):
+def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=900000, target_max=1100000, strict_mode=True):
+    """基于二分查找的绝对硬控生成数量测算"""
+    if len(candidate_list) < 2:
+        return len(candidate_list), 0
+
+    low = 2
+    high = len(candidate_list)
+    target_high = min(target_min, high)
+
+    best_k = high
+    best_diff = float('inf')
+    best_count = 0
+    target_mid = (target_min + target_max) // 2
+
+    log(f"🧠 [二分测算] 启动内存高速测算器，全量候补池总数: {high:,}，目标生成区间 [{target_min:,}, {target_max:,}]，最高target_high: {target_high:,}。")
+    high = min(high, target_high)
+    # # 第一次先测全量
+    # total_est = fast_estimate_combos(N, candidate_list, strict_mode)
+    # log(f"🧠 [二分测算] 全量 {high:,} 个种子预期生成 {total_est:,} 个组合。")
+    # if total_est <= target_max:
+    #     log("🎯 [二分命中] 全量生成量处于安全范围内，直接全量放行！")
+    #     return high, total_est
+
+    # 二分查找
+    while low <= high:
+        mid = (low + high) // 2
+        test_seeds = candidate_list[:mid]
+
+        count = fast_estimate_combos(N, test_seeds, strict_mode)
+        log(f"🧠 [二分测算] 尝试提取前 {mid:,} 个种子 -> 预期生成量: {count:,}")
+
+        diff = abs(count - target_mid)
+        if diff < best_diff:
+            best_diff = diff
+            best_k = mid
+            best_count = count
+
+        if target_min <= count <= target_max:
+            log(f"🎯 [二分命中] 精准咬住目标，锁定最佳 K={mid:,}！预期最终生成量: {count:,}")
+            return mid, count
+
+        if count > target_max:
+            high = mid - 1
+        else:
+            low = mid + 1
+
+    log(f"⚠️ [二分结束] 无法绝对落入目标区间，采用最佳逼近 K={best_k:,}，预期生成量: {best_count:,}")
+    return best_k, best_count
+
+
+def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
     # 🌟 核心杀手锏：自带短路拦截的极速转换函数 (一次 Split，终身受用)
     def fast_filter_and_normalize(combo_str):
         items = str(combo_str).split('_')
@@ -691,18 +742,7 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
     in_pool_unique_count = len(pool_only_df)
     log(f"🔍 [漏斗 2] 短路剔除杂质并全局去重后，剩余 {in_pool_unique_count:,} 个纯净组合。")
 
-    # 7. 动态限速配额
-    pool_size = len(base_pool_codes_set)
-    dynamic_k = calculate_dynamic_k(
-        current_valid_count=in_pool_unique_count,
-        M=pool_size,
-        N=target_dim,
-        target_max_combos=target_max_combos
-    )
-    log(f"🧠 算力评估: Base Pool={pool_size}只, 目标爬坡={target_dim}维.")
-    log(f"🧠 限额保护: 确保生成量 < {target_max_combos:,}, 强制截留 Top {dynamic_k:,} 精英。")
-
-    # 8. 降维打击：分离、优先级提取与凑数 (核心修改点)
+    # 7. 降维打击与优先级提取
     # 分化为两个互斥子池，并在子池内部按 Total_Score 优先、Calmar_Ratio 其次降序排列
     score_gt_0_df = pool_only_df[pool_only_df['Total_Score'] > 0].sort_values(['Total_Score', 'Calmar_Ratio'],
                                                                               ascending=[False, False])
@@ -711,24 +751,37 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
 
     total_score_gt_0_count = len(score_gt_0_df)
 
-    # 逻辑判断：优先录取 Total_Score > 0 的组合
+    # 将两个子池首尾拼接，形成完全严格按优先级排序的候补长队
+    full_candidate_df = pd.concat([score_gt_0_df, score_lte_0_df], ignore_index=True)
+    full_candidate_list = full_candidate_df['Combo_Tuple'].tolist()
+
+    # 设置允许 10% 误差的动态目标区间
+    target_mid = target_max_combos
+    target_min = int(target_mid * 0.9)
+    target_max = int(target_mid * 1.1)
+
+    # 8. 绝对硬控二分查找限速配额
+    dynamic_k, expected_count = calculate_dynamic_k_by_binary_search(
+        N=target_dim,
+        candidate_list=full_candidate_list,
+        target_min=target_min,
+        target_max=target_max,
+        strict_mode=True
+    )
+
+    log(f"🧠 算力评估: 目标爬坡={target_dim}维.")
+    log(f"🧠 限额保护: 二分法硬控成功截留 Top {dynamic_k:,} 精英，预期生成 {expected_count:,} 个新组合。")
+
+    # 逻辑判断：由于队列已经排好序，直接提取头部前 dynamic_k 个
+    elite_df = full_candidate_df.head(dynamic_k)
+
     if total_score_gt_0_count >= dynamic_k:
-        # 如果足够，全部从优质池子中选取
-        elite_df = score_gt_0_df.head(dynamic_k)
         selected_gt_0_count = dynamic_k
         selected_fallback_count = 0
     else:
-        # 如果不够，掏空优质池，并计算差额去替补池凑数
-        elite_df_gt_0 = score_gt_0_df
-        needed_count = dynamic_k - total_score_gt_0_count
-        elite_df_fallback = score_lte_0_df.head(needed_count)
-
-        # 将两拨数据无缝拼接 (因为互斥且各自去重，所以绝对没有重复)
-        elite_df = pd.concat([elite_df_gt_0, elite_df_fallback], ignore_index=True)
         selected_gt_0_count = total_score_gt_0_count
-        selected_fallback_count = len(elite_df_fallback)
+        selected_fallback_count = dynamic_k - total_score_gt_0_count
 
-    # 增加的日志信息
     log(f"📈 [质量甄别] 当前可用池中，Total_Score > 0 的基金组合总计: {total_score_gt_0_count:,} 个。")
     log(f"⚖️ [优先级选拔] 优先录用了 {selected_gt_0_count:,} 个 Total_Score > 0 的组合。")
     if selected_fallback_count > 0:
@@ -815,6 +868,7 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
 
     return uncomputed_combos, total_combos, global_skipped
 
+
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 25
     RESULT_CSV = 'fund_data/all_funds_result.csv'
@@ -885,9 +939,9 @@ if __name__ == '__main__':
         # 2.1 获取上一维度(N-1)优秀的组合种子
         good_prev_combos = set()
         if N > 2:
-            # 🎯 【唯一修改处】: 传入 target_dim=N, target_max_combos=50000000 触发动态 K 算法
+            # 🎯 【唯一修改处】: 传入 target_dim=N, target_max_combos=1000000 触发动态 K 算法
             good_prev_combos = get_previous_good_combos(N - 1, base_pool_codes_set, target_dim=N,
-                                                        target_max_combos=1000000)
+                                                        target_max_combos=10000000)
 
             log(f"自 {N - 1} 维成功提取了 {len(good_prev_combos)} 个优秀组合种子。")
             if not good_prev_combos:
@@ -930,7 +984,6 @@ if __name__ == '__main__':
             log(f"✅ {N} 维理论组合共 {total_combos:,} 个，已全部在缓存中，直接进入下一维度。")
             N += 1
             continue
-
 
         ensure_dir(output_parquet)
 
