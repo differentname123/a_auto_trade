@@ -739,6 +739,7 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
     log(f"✅ [漏斗 3] 最终向高维输出纯血种子: {len(good_combos):,} 个。")
     return good_combos
 
+
 def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, strict_mode=False):
     """
     高维组合极速裂变引擎 (基于 Apriori 算法原理)
@@ -800,6 +801,10 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
                             is_elite = False
                             break
 
+                    # 【核心修复】：如果发现任何一个 N-1 维子集不优秀，直接拦截并丢弃该组合
+                    if not is_elite:
+                        continue
+
                 total_combos += 1
 
                 # 4. 查漏补缺：比对全局缓存，实现断点跳过
@@ -809,7 +814,6 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
                     uncomputed_combos.append(new_combo)
 
     return uncomputed_combos, total_combos, global_skipped
-
 
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 25
