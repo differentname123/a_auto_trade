@@ -459,16 +459,37 @@ def _load_single_nav(filepath):
         df = df[~df.index.duplicated(keep='last')]
 
         nav_series = df['复权净值'].rename(filepath)
-
-        # 截取我们评估引擎真正关心的历史窗口(最高5年)，防止因上古数据误杀
         recent_series = nav_series.iloc[-DEFAULT_MAX_HISTORY:] if len(nav_series) > DEFAULT_MAX_HISTORY else nav_series
 
-        # 🚀 极简且严谨的拦截：前向填充防止 NaN 吞噬暴涨信号
-        # ffill() 确保停牌后的恢复日能计算出累计跳跃涨幅
+        # 严格使用 ffill 防止 NaN 吞噬异常涨跌
         daily_returns = recent_series.ffill().pct_change().dropna()
 
-        if not daily_returns.empty and float(daily_returns.max()) > VETO_MAX_UPWARD_SPIKE:
-            return None  # 直接返回 None，它将永远无法进入基础池
+        if not daily_returns.empty:
+            max_jump = float(daily_returns.max())
+
+            # ---------------------------------------------------------
+            # 🛡️ 终极双轨制拦截 (Dual-Track Filter)
+            # ---------------------------------------------------------
+
+            # 轨道 1：绝对物理极限拦截 (31.5%)
+            # 涵盖A股主板、创业板、科创板、北交所(30%)及美股纳斯达克的物理极限。
+            # 超过此值，连爱因斯坦来了这也是脏数据或严重赎回，无脑击杀。
+            if max_jump > 0.315:
+                return None
+
+            # 轨道 2：固收类资产暗病拦截 (隐式分类)
+            # 如果涨幅没有超过 31.5%，但超过了 6% (0.06)
+            if max_jump > 0.06:
+                # 我们将最大的 3 天涨幅剔除，看看它"平时"是个什么脾气
+                # 这样可以防止单日暴涨本身把波动率污染了
+                normal_returns = daily_returns.sort_values().iloc[:-3]
+                normal_vol = float(normal_returns.std())
+
+                # 如果它平时的日波动率小于 0.006 (0.6%)，这绝对是一只固收类/偏债基金
+                # 一只偏债基金单日涨超 6%，100% 是遭遇了巨额赎回，精准斩首。
+                # (而股票基金平时的波动率通常在 1.0%~2.5% 之间，不会触发此条件)
+                if normal_vol < 0.006:
+                    return None
 
         return nav_series
     except Exception:
@@ -1091,7 +1112,7 @@ if __name__ == '__main__':
     # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
     master_df, base_pool_codes = _build_master_matrix(base_pool_files, GLOBAL_MAX_WORKERS)
     base_pool_codes_set = set(base_pool_codes)
-
+    print(base_pool_codes)
     final_fund_count = len(base_pool_codes)
     print("\n" + "=" * 50)
     log(f"🎯 唯一基础基金池 (Base Pool) 确定, 最终保留: {final_fund_count} 只")
