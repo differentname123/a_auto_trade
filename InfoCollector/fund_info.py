@@ -334,7 +334,7 @@ def judge_fund_df():
     print("-" * 50)
 
 
-def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600, min_score=None):
+def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600, min_score=None, filter_code=None):
     """
     根据给定的维度，自动搜索目录下所有匹配的 Parquet 文件，
     利用 PyArrow 谓词下推（直接从硬盘过滤）极速加载并合并。
@@ -362,10 +362,9 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
 
     # 3. 极速读取与合并
     try:
-        # 👑 高级技巧: 直接传 List 给 pd.read_parquet，
-        # 引擎会直接用 PyArrow Dataset API 并行读取过滤，避免 Python 层的 for 循环和内存复制开销
         df = pd.read_parquet(file_list, engine='pyarrow', filters=read_filters)
-
+        if filter_code is not None:
+            df = df[df['组合文件名'].str.contains(filter_code, na=False)]
     except Exception as e:
         print(f"❌ 批量并发加载遇到异常 (可能是个别文件损坏或字段不一致): {e}")
         print("🔄 触发自动降级机制，转为逐个文件安全加载模式...")
@@ -398,10 +397,21 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
 
 
 if __name__ == "__main__":
-    df_2d = load_and_merge_parquet_by_dim(dimension=2, min_days=600, min_score=0)
-    # 打印出df_2d中组合文件名 包含006373 并且也包含006372
-    filtered_df = df_2d[df_2d['组合文件名'].str.contains('006373') & df_2d['组合文件名'].str.contains('014661')& df_2d['组合文件名'].str.contains('016185')]
     report_df = pd.read_csv('fund_data/filtering_reasons_report.csv')
+    all_df_list = []
+    for i in range(6):
+        df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=600, min_score=0)
+        all_df_list.append(df_2d)
+    all_df = pd.concat(all_df_list, ignore_index=True)
+    # 将all_df 按照 Total_Score 从大到小排序
+    all_df = all_df.sort_values(by='Total_Score', ascending=False).reset_index(drop=True)
+
+    df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=600, min_score=0)
+    df_d['score'] = df_d['CAGR'] *  df_d['Total_Score'] * 10
+
+    filtered_df1 = df_d[df_d['组合文件名'].str.contains('000390') & df_d['组合文件名'].str.contains('009033')& df_d['组合文件名'].str.contains('160323')& df_d['组合文件名'].str.contains('539001')]
+
+    # 打印出df_2d中组合文件名 包含006373 并且也包含006372
     # 获取df_2d中组合文件名不重复的列表
     unique_combinations = df_2d['组合文件名'].unique()
     # 将每个元素按照 '_' 分割，并且加入列表,并且去重

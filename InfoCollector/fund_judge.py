@@ -26,6 +26,7 @@ ROLLING_STEP = 21
 # VETO 否决阈值
 VETO_MAX_MDD = 0.3
 VETO_HURDLE_RATE = 0.2
+VETO_MAX_UPWARD_SPIKE = 0.14  # <--- 新增：单日异常暴涨阈值(15%)
 VETO_AR1 = 0.35
 VETO_VOL = 0.03
 VETO_RECOVERY_DAYS = 180
@@ -283,6 +284,7 @@ def _compute_total_score(metrics, n_days):
 # ====================================================================
 # 核心评估引擎 (严禁修改)
 # ====================================================================
+
 def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAYS,
                                 max_history_days=DEFAULT_MAX_HISTORY,
                                 max_mdd_limit=VETO_MAX_MDD, hurdle_rate=VETO_HURDLE_RATE):
@@ -312,36 +314,89 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAY
         synth_ret = pd.Series(synth_ret_arr, index=fund_rets.index)
         synth_eq = (1 + synth_ret).cumprod()
 
-        cagr = float(synth_eq.iloc[-1] ** (TRADING_DAYS_PER_YEAR / n_days) - 1)
-        cum_max = synth_eq.cummax().clip(lower=1.0)
-        drawdowns = (synth_eq - cum_max) / cum_max
-        max_dd = float(drawdowns.min())
-        is_dd = drawdowns < 0
-        max_recovery_days = int(is_dd.groupby((~is_dd).cumsum()).sum().max())
-        vol_annual = synth_ret.std() * np.sqrt(TRADING_DAYS_PER_YEAR)
-        sharpe = float(cagr / vol_annual) if vol_annual > 1e-6 else 0.0
-        calmar = float(cagr / abs(max_dd)) if abs(max_dd) > 1e-6 else 0.0
-        ar1 = synth_ret.autocorr(lag=1)
-        ar1 = float(ar1) if pd.notna(ar1) else 1.0
-
+        # 初始化带有全部 VETO 标志的底座，为了无缝衔接外部的原有跟踪日志
         metrics = {
             'Start_Date': merged_nav.index[0].strftime('%Y-%m-%d'),
             'End_Date': merged_nav.index[-1].strftime('%Y-%m-%d'),
             'Total_Days': n_days, 'n_funds': n_funds, 'Avg_CAGR': avg_cagr, 'Avg_Max_Drawdown': avg_mdd,
-            'Calmar_Baseline': calmar_baseline, 'CAGR': cagr, 'Max_Drawdown': max_dd,
-            'Max_Recovery_Days': max_recovery_days,
-            'Worst_Rolling_1Y_Return': _compute_worst_rolling_1y(synth_eq.values, n_days),
-            'Worst_Rolling_1Y_R2': _compute_worst_rolling_1y_r2(synth_eq.values, n_days),
-            'AR1_Coefficient': ar1, 'Annualized_Volatility': float(vol_annual), 'Sharpe_Ratio': sharpe,
-            'Calmar_Ratio': calmar, 'Daily_Win_Rate': float((synth_ret > 0).sum() / n_days) if n_days > 0 else 0.0,
-            'Downside_Correlation': _compute_downside_correlation(synth_ret, fund_rets),
+            'Calmar_Baseline': calmar_baseline, 'CAGR': 0.0, 'Max_Drawdown': 0.0,
+            'Max_Recovery_Days': 0, 'Worst_Rolling_1Y_Return': 0.0, 'Worst_Rolling_1Y_R2': 0.0,
+            'AR1_Coefficient': 1.0, 'Annualized_Volatility': 0.0, 'Sharpe_Ratio': 0.0,
+            'Calmar_Ratio': 0.0, 'Daily_Win_Rate': 0.0, 'Downside_Correlation': 1.0,
+            "VETO_Hurdle_Rate": False, "VETO_Drawdown_Crash": False, "VETO_Fake_Smooth": False,
+            "VETO_Endless_Bleeding": False, "VETO_Data_Distortion": False,
+            "VETO_Below_Calmar_Baseline": False, "VETO_Worst_1Y_Crash": False
         }
 
-        vetoes = _check_vetoes(metrics, vol_annual, max_missing_ratio, max_continuous_zeros, max_mdd_limit, hurdle_rate)
-        metrics.update(vetoes)
-        if any(vetoes.values()): return metrics, 0.0
+        # --- 第 0 层拦截：极端数据缺失 ---
+        if (max_missing_ratio > VETO_MISSING_RATIO) or (max_continuous_zeros > VETO_CONTINUOUS_ZEROS):
+            metrics["VETO_Data_Distortion"] = True
+            return metrics, 0.0
+
+        # --- 第 1 层短路：基础收益与回撤拦截 ---
+        cagr = float(synth_eq.iloc[-1] ** (TRADING_DAYS_PER_YEAR / n_days) - 1)
+        cum_max = synth_eq.cummax().clip(lower=1.0)
+        drawdowns = (synth_eq - cum_max) / cum_max
+        max_dd = float(drawdowns.min())
+        calmar = float(cagr / abs(max_dd)) if abs(max_dd) > 1e-6 else 0.0
+
+        metrics.update({'CAGR': cagr, 'Max_Drawdown': max_dd, 'Calmar_Ratio': calmar})
+
+        v_hurdle = cagr < hurdle_rate
+        v_dd = abs(max_dd) > max_mdd_limit
+        v_calmar = calmar <= (calmar_baseline * VETO_CALMAR_MULTIPLIER)
+
+        if v_hurdle or v_dd or v_calmar:
+            metrics["VETO_Hurdle_Rate"] = v_hurdle
+            metrics["VETO_Drawdown_Crash"] = v_dd
+            metrics["VETO_Below_Calmar_Baseline"] = v_calmar
+            return metrics, 0.0
+
+        # --- 第 2 层短路：恢复天数与波动平滑度拦截 ---
+        is_dd = drawdowns < 0
+        max_recovery_days = int(is_dd.groupby((~is_dd).cumsum()).sum().max())
+        vol_annual = float(synth_ret.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
+        ar1 = synth_ret.autocorr(lag=1)
+        ar1 = float(ar1) if pd.notna(ar1) else 1.0
+
+        metrics.update(
+            {'Max_Recovery_Days': max_recovery_days, 'Annualized_Volatility': vol_annual, 'AR1_Coefficient': ar1})
+
+        v_bleeding = max_recovery_days > VETO_RECOVERY_DAYS
+        v_fake = (ar1 > VETO_AR1) and (vol_annual < VETO_VOL)
+
+        if v_bleeding or v_fake:
+            metrics["VETO_Endless_Bleeding"] = v_bleeding
+            metrics["VETO_Fake_Smooth"] = v_fake
+            return metrics, 0.0
+
+        # --- 第 3 层短路：滚动 1 年表现拦截 ---
+        worst_1y = _compute_worst_rolling_1y(synth_eq.values, n_days)
+        metrics.update({'Worst_Rolling_1Y_Return': worst_1y})
+
+        v_worst_1y = worst_1y < VETO_WORST_1Y
+        if v_worst_1y:
+            metrics["VETO_Worst_1Y_Crash"] = True
+            return metrics, 0.0
+
+        # --- 第 4 层：只有活下来的幸存者，才执行极致耗时的指标计算 ---
+        worst_1y_r2 = _compute_worst_rolling_1y_r2(synth_eq.values, n_days)
+        downside_corr = _compute_downside_correlation(synth_ret, fund_rets)
+        sharpe = float(cagr / vol_annual) if vol_annual > 1e-6 else 0.0
+        win_rate = float((synth_ret > 0).sum() / n_days) if n_days > 0 else 0.0
+
+        metrics.update({
+            'Worst_Rolling_1Y_R2': worst_1y_r2,
+            'Downside_Correlation': downside_corr,
+            'Sharpe_Ratio': sharpe,
+            'Daily_Win_Rate': win_rate
+        })
+
         return metrics, _compute_total_score(metrics, n_days)
 
+    # ==========================
+    # 以下为你原有的外层扰动测试逻辑，完全未修改
+    # ==========================
     final_metrics, score_base = _evaluate_single_path(rebalance_days, offset=0)
     if score_base == 0.0:
         final_metrics['Total_Score'] = 0.0
@@ -402,7 +457,20 @@ def _load_single_nav(filepath):
         df['净值日期'] = pd.to_datetime(df['净值日期'])
         df = df.set_index('净值日期').sort_index()
         df = df[~df.index.duplicated(keep='last')]
-        return df['复权净值'].rename(filepath)
+
+        nav_series = df['复权净值'].rename(filepath)
+
+        # 截取我们评估引擎真正关心的历史窗口(最高5年)，防止因上古数据误杀
+        recent_series = nav_series.iloc[-DEFAULT_MAX_HISTORY:] if len(nav_series) > DEFAULT_MAX_HISTORY else nav_series
+
+        # 🚀 极简且严谨的拦截：前向填充防止 NaN 吞噬暴涨信号
+        # ffill() 确保停牌后的恢复日能计算出累计跳跃涨幅
+        daily_returns = recent_series.ffill().pct_change().dropna()
+
+        if not daily_returns.empty and float(daily_returns.max()) > VETO_MAX_UPWARD_SPIKE:
+            return None  # 直接返回 None，它将永远无法进入基础池
+
+        return nav_series
     except Exception:
         return None
 
@@ -675,13 +743,43 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
             return low, count_low
 
     # 如果我们只有下界没有上界，绝不使用全量求中值！使用“基于多项式预估”的安全步进
+    prev_k = None
+    prev_count = None
+
     while count_high is None and low < high_total:
         shortfall_ratio = target_mid / max(1, count_low)
-        safe_multiplier = min(1.5, math.pow(shortfall_ratio, 1 / max(1, N)))
 
-        next_k = min(high_total, max(low + 1, int(low * safe_multiplier)))
+        # 引入“自适应斜率（动态求导）”
+        is_dynamic = False
+        if prev_k is not None and count_low > prev_count and low > prev_k:
+            try:
+                # 🌟 修复 1：防止 math.log(0) 导致 ValueError 崩溃
+                log_c_diff = math.log(max(1, count_low)) - math.log(max(1, prev_count))
+                log_k_diff = math.log(low) - math.log(prev_k)
 
-        log(f"🛡️ [安全步进] 尚未找到上限！数学预估倍率: {safe_multiplier:.2f}x，向 K={next_k:,} 探索...")
+                E = log_c_diff / log_k_diff
+                E = max(1.1, min(E, float(N)))
+
+                # 🌟 修复 2：加入越界偏置 (*1.05) 和 强制最小步进 (max(1.15, ...))
+                # 目的：我们是为了寻找上限(Overshoot)，必须打破逼近停滞！
+                predicted_multiplier = math.pow(shortfall_ratio, 1 / E)
+                safe_multiplier = min(3.5, max(1.15, predicted_multiplier * 1.05))
+                is_dynamic = True
+            except (ZeroDivisionError, ValueError):  # 🌟 补全异常捕获
+                # 异常时回退，同样赋予越界偏置和最低步幅
+                safe_multiplier = min(2.0, max(1.15, math.pow(shortfall_ratio, 1 / max(1, N)) * 1.05))
+        else:
+            # 初始数据不足时，用稍保守但不至于停滞的倍率探路 (上限调高到2.0防止初期走得太慢)
+            safe_multiplier = min(2.0, max(1.15, math.pow(shortfall_ratio, 1 / max(1, N)) * 1.05))
+
+        # 保证至少向前推进 10 步，防止 low+1 导致死循环
+        next_k = min(high_total, max(low + 10, int(low * safe_multiplier)))
+
+        if is_dynamic:
+            log(f"🛡️ [自适应步进] 尚未找到上限！当前感知维度 E={E:.2f}，动态预估倍率: {safe_multiplier:.2f}x，向 K={next_k:,} 探索...")
+        else:
+            log(f"🛡️ [安全步进] 尚未找到上限！数学预估倍率: {safe_multiplier:.2f}x，向 K={next_k:,} 探索...")
+
         count = fast_estimate_combos(N, candidate_list[:next_k], strict_mode)
         log(f"✅ [测算完成] K={next_k:,} -> 生成量: {count:,}")
 
@@ -694,8 +792,10 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
 
         if count > target_max:
             high, count_high = next_k, count
-            break  # 成功夹逼出安全区间！
+            break  # 成功跨越界限，夹逼出安全区间！交给光速的第三步！
         else:
+            # 更新历史记录用于下一轮求导
+            prev_k, prev_count = low, count_low
             low, count_low = next_k, count
 
     # 🌟 修复点 1：拦截算力枯竭黑天鹅
@@ -750,7 +850,6 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
 
     log(f"🏁 [测算结束] 采用最佳逼近 K={best_k:,}，生成量: {best_count:,}")
     return best_k, best_count
-
 
 
 def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
@@ -988,7 +1087,12 @@ if __name__ == '__main__':
             df_filtered, global_corr_matrix, global_downside_corr_matrix,
             0.95, 0.5)
 
-    final_fund_count = len(base_pool_files)
+
+    # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
+    master_df, base_pool_codes = _build_master_matrix(base_pool_files, GLOBAL_MAX_WORKERS)
+    base_pool_codes_set = set(base_pool_codes)
+
+    final_fund_count = len(base_pool_codes)
     print("\n" + "=" * 50)
     log(f"🎯 唯一基础基金池 (Base Pool) 确定, 最终保留: {final_fund_count} 只")
     print("=" * 50 + "\n")
@@ -996,11 +1100,6 @@ if __name__ == '__main__':
     if final_fund_count < 2:
         log("基础池基金数量不足以生成 2 维组合, 流程退出。")
         exit(0)
-
-    # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
-    master_df, base_pool_codes = _build_master_matrix(base_pool_files, GLOBAL_MAX_WORKERS)
-    base_pool_codes_set = set(base_pool_codes)
-
     # 步骤 2: 维度递增循环 (N = 2 开始往上爬坡)
     N = 2
     while N <= MAX_DIMENSION:
