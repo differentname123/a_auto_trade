@@ -1077,8 +1077,8 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
 
     for pf in parquet_files:
         try:
-            # 修改1：额外读取 Total_Score 列
-            df = pq.read_table(pf, columns=['组合文件名', 'Calmar_Ratio', 'Calmar_Baseline', 'Total_Score']).to_pandas()
+            # 修改1：额外读取 Total_Score 列 (读取时已包含 CAGR)
+            df = pq.read_table(pf, columns=['组合文件名', 'Calmar_Ratio', 'Calmar_Baseline', 'Total_Score', 'CAGR']).to_pandas()
             # 兼容处理：防止有些老文件缺失 Total_Score，填充为 0
             if 'Total_Score' not in df.columns:
                 df['Total_Score'] = 0
@@ -1103,12 +1103,12 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
             if df.empty:
                 continue
 
-            # 门槛 4：单文件局部去重 (修改：Total_Score 优先，Calmar_Ratio 其次)
-            df = df.sort_values(['Total_Score', 'Calmar_Ratio'], ascending=[False, False]).drop_duplicates(
+            # 门槛 4：单文件局部去重 (修改：Total_Score 优先，CAGR 其次)
+            df = df.sort_values(['Total_Score', 'CAGR'], ascending=[False, False]).drop_duplicates(
                 subset=['Combo_Tuple'])
 
-            # 极致压缩内存，仅保留核心字段 (修改：保留 Total_Score)
-            all_clean_records.append(df[['Combo_Tuple', 'Calmar_Ratio', 'Total_Score']])
+            # 极致压缩内存，仅保留核心字段 (修改：保留 Total_Score 和后续排序必须的 CAGR)
+            all_clean_records.append(df[['Combo_Tuple', 'Calmar_Ratio', 'Total_Score', 'CAGR']])
 
         except Exception as e:
             log(f"读取上一维文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
@@ -1121,17 +1121,17 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
     combined_df = pd.concat(all_clean_records, ignore_index=True)
     log(f"🔍 [漏斗 1] 物理扫描 {total_read_rows:,} 行，其中 {passed_calmar_count:,} 行符合卡玛门槛。")
 
-    # 6. 全局终极去重 (修改：Total_Score 优先，保证优者存活)
-    pool_only_df = combined_df.sort_values(['Total_Score', 'Calmar_Ratio'], ascending=[False, False]).drop_duplicates(
+    # 6. 全局终极去重 (修改：Total_Score 优先，CAGR 其次保证优者存活)
+    pool_only_df = combined_df.sort_values(['Total_Score', 'CAGR'], ascending=[False, False]).drop_duplicates(
         subset=['Combo_Tuple'])
     in_pool_unique_count = len(pool_only_df)
     log(f"🔍 [漏斗 2] 短路剔除杂质并全局去重后，剩余 {in_pool_unique_count:,} 个纯净组合。")
 
     # 7. 降维打击与优先级提取
-    # 分化为两个互斥子池，并在子池内部按 Total_Score 优先、Calmar_Ratio 其次降序排列
-    score_gt_0_df = pool_only_df[pool_only_df['Total_Score'] > 0].sort_values(['Total_Score', 'Calmar_Ratio'],
+    # 分化为两个互斥子池，并在子池内部按 Total_Score 优先、CAGR 其次降序排列
+    score_gt_0_df = pool_only_df[pool_only_df['Total_Score'] > 0].sort_values(['Total_Score', 'CAGR'],
                                                                               ascending=[False, False])
-    score_lte_0_df = pool_only_df[pool_only_df['Total_Score'] <= 0].sort_values(['Total_Score', 'Calmar_Ratio'],
+    score_lte_0_df = pool_only_df[pool_only_df['Total_Score'] <= 0].sort_values(['Total_Score', 'CAGR'],
                                                                                 ascending=[False, False])
 
     total_score_gt_0_count = len(score_gt_0_df)
@@ -1170,7 +1170,7 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
     log(f"📈 [质量甄别] 当前可用池中，Total_Score > 0 的基金组合总计: {total_score_gt_0_count:,} 个。")
     log(f"⚖️ [优先级选拔] 优先录用了 {selected_gt_0_count:,} 个 Total_Score > 0 的组合。")
     if selected_fallback_count > 0:
-        log(f"⚖️ [补充选拔] 额外补充了 {selected_fallback_count:,} 个仅凭 Calmar_Ratio 的组合来凑数。")
+        log(f"⚖️ [补充选拔] 额外补充了 {selected_fallback_count:,} 个仅凭 CAGR 的组合来凑数。")
 
     good_combos = set(elite_df['Combo_Tuple'])
 

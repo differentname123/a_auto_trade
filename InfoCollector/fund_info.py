@@ -541,6 +541,9 @@ if __name__ == "__main__":
     # 1. 读取报告文件
     report_df = pd.read_csv('fund_data/base_pool_rejection_reasons.csv')
     active_code_df = pd.read_csv('temp/active_fund_codes_new.csv')
+    # 获取 active_code_df 的 基金简称列表
+    name_list = active_code_df['基金简称'].dropna().unique().tolist()
+
     # 按照 基金代码 进行合并
     report_df = report_df.merge(active_code_df, left_on='基金代码', right_on='基金代码', how='right')
 
