@@ -18,15 +18,156 @@ def create_folders():
             os.makedirs(d)
 
 
+import pandas as pd
+import re
+
+
+def _get_active_bond_mask(name_series):
+    """
+    【内部提取函数】获取主动债的剔除掩码 (基于名称的语义识别)
+    核心逻辑：有嫌疑词 且 无护身符 = 纯粹的主动债券
+    """
+    # 1. 嫌疑词：这些词通常代表基金经理在主动挑债券或做波段
+    suspect_words = [
+        '纯债', '短债', '信用债', '收益债', '回报',
+        '双季', '季季', '月月', '添利', '增利', '稳利'
+    ]
+
+    # 2. 护身符：如果名字里带这些词，说明它是严格跟踪指数的被动债，不杀
+    shield_words = [
+        '指数', '中债', '彭博', '上清所', '国开', '政金', '农发'
+    ]
+
+    # 将列表转换为正则的或逻辑 (例如：'纯债|短债|信用债')
+    suspect_pattern = '|'.join(suspect_words)
+    shield_pattern = '|'.join(shield_words)
+
+    # 向量化正则匹配：识别嫌疑与护身符 (na=False 应对缺失值报错)
+    is_suspect = name_series.str.contains(suspect_pattern, regex=True, na=False)
+    has_shield = name_series.str.contains(shield_pattern, regex=True, na=False)
+
+    # 核心狙击逻辑：有嫌疑 且 没被护盾保护
+    kill_mask = is_suspect & (~has_shield)
+
+    return kill_mask
+
+
+def filter_fund_universe(df, type_col='基金类型', name_col='基金简称', remove_c_class=True):
+    """
+    清洗过滤基金池流水线：
+    1. 按大类剔除指定类型的基金（混合、假纯债、股票等）
+    2. 按名称语义精准狙击“主动型债券基金”
+    3. 剔除同一只基金的冗余份额（保留A份额，剔除C/E等份额）
+    """
+    if df is None or df.empty:
+        print("⚠️ 传入的数据为空，跳过清洗。")
+        return df
+
+    res_df = df.copy()
+    total_before = len(res_df)
+    clean_stats = {}
+
+    # ==========================================
+    # 模块一：基于【基金类型】的常规大类剔除
+    # ==========================================
+    type_filter_rules = {
+        "1. 混合型 (仓位飘忽污染相关性)": [
+            '混合型-灵活', '混合型-偏股', '混合型-偏债', '混合型-平衡', '混合型-绝对收益',
+            'QDII-混合偏股', 'QDII-混合债', 'QDII-混合灵活', 'QDII-混合平衡'
+        ],
+        "2. 假纯债 (含股票仓位易暴雷)": [
+            '债券型-混合二级', '债券型-混合一级'
+        ],
+        "3. 纯主动股票型 (回测噪音太大)": [
+            '股票型', 'QDII-普通股票'
+        ],
+        "4. 货币类 (拉低收益导致资金站岗)": [
+            '货币型-普通货币', '货币型-浮动净值'
+        ],
+        "5. FOF类 (避免资产配置套娃)": [
+            'FOF-稳健型', 'FOF-进取型', 'FOF-均衡型', 'QDII-FOF'
+        ],
+        "6. 边缘/复杂/缺失 (易产生Bug)": [
+            'Reits', 'QDII-REITs', '指数型-其他', ''
+        ]
+    }
+
+    if type_col in res_df.columns:
+        res_df[type_col] = res_df[type_col].fillna('').str.strip()
+        for reason, types in type_filter_rules.items():
+            mask = res_df[type_col].isin(types)
+            hit_count = mask.sum()
+            if hit_count > 0:
+                clean_stats[reason] = hit_count
+            res_df = res_df[~mask]
+
+    # ==========================================
+    # 模块二：基于【基金名称】精准狙击主动债券
+    # ==========================================
+    if name_col in res_df.columns:
+        active_bond_mask = _get_active_bond_mask(res_df[name_col])
+        hit_count = active_bond_mask.sum()
+
+        if hit_count > 0:
+            clean_stats["7. 主动型债券 (防范信用/久期暴露)"] = hit_count
+
+        # 剔除命中目标
+        res_df = res_df[~active_bond_mask]
+
+    # ==========================================
+    # 模块三：降维打击，剔除 A/C 冗余份额
+    # ==========================================
+    if remove_c_class and name_col in res_df.columns:
+        before_ac_clean = len(res_df)
+
+        # 提取基础名字并排序去重 (确保 A 排在 C/E 前面)
+        res_df['base_name'] = res_df[name_col].str.replace(r'[ABCDEHIY]$', '', regex=True)
+        res_df = res_df.sort_values(by=name_col)
+        res_df = res_df.drop_duplicates(subset=['base_name'], keep='first')
+        res_df = res_df.drop(columns=['base_name'])
+
+        ac_clean_count = before_ac_clean - len(res_df)
+        if ac_clean_count > 0:
+            clean_stats["8. 冗余份额去重 (剔除C/E等)"] = ac_clean_count
+
+    # ==========================================
+    # 模块四：生成高颜值归因报告
+    # ==========================================
+    total_after = len(res_df)
+    total_cleaned = total_before - total_after
+
+    print("\n" + "=" * 55)
+    print("📊 基金池底仓清洗过滤报告")
+    print("=" * 55)
+    print(f"🔹 清洗前总数 : {total_before:,} 只")
+    print(f"✅ 最终保留数 : {total_after:,} 只")
+    print(f"❌ 总计剔除数 : {total_cleaned:,} 只")
+
+    if total_cleaned > 0:
+        print("-" * 55)
+        print("[详细剔除归因及占比]")
+        # 按剔除数量从大到小排列输出
+        sorted_stats = sorted(clean_stats.items(), key=lambda x: x[1], reverse=True)
+        for reason, count in sorted_stats:
+            ratio = count / total_cleaned
+            print(f"  {reason:<26} : {count:>5,} 只 ({ratio:>6.2%})")
+    print("=" * 55 + "\n")
+
+    return res_df.reset_index(drop=True)
+
 def get_active_fund_codes():
     """
     获取当前存续的活跃基金，并过滤掉无需查询重仓股的基金类型（如货币、理财、债券），
     同时过滤掉当前处于【暂停申购】或【封闭期】的不可购买基金。
     """
     # 缓存检查：若有现成列表且包含名称，则直接读取
-    cache_file = 'temp/active_fund_codes.csv'
+    cache_file = 'temp/active_fund_codes_new.csv'
     if os.path.exists(cache_file):
         df_cache = pd.read_csv(cache_file, dtype=str)
+        filter_df = filter_fund_universe(df_cache)
+        filter_df.to_csv(cache_file, index=False, encoding='utf-8-sig')  # 更新缓存文件，剔除不合规基金
+        # 获取filter_df所有的 基金简称列表 并且去重
+        code_name_list = filter_df['基金简称'].dropna().unique().tolist()
         if '基金简称' in df_cache.columns:
             print(f"✅ 检测到本地缓存文件 {cache_file}，直接加载已有基金列表...")
             return dict(zip(df_cache['基金代码'], df_cache['基金简称']))
@@ -57,10 +198,10 @@ def get_active_fund_codes():
     df_filtered = df_all[df_all['基金代码'].isin(active_codes)].copy()
     print(f"   df_all长度：{len(df_all)} 剔除不可购买基金后，剩余 {len(df_filtered)} 只候选基金。")
 
-    # 第二步过滤：剔除货币、债券、理财等没有重仓股票的基金
-    print("3. 正在剔除货币型、债券型等无重仓股票的基金...")
-    exclude_keywords = '货币|理财|纯债|债券|保本'
-    df_filtered = df_filtered[~df_filtered['基金类型'].str.contains(exclude_keywords, na=False)]
+    # # 第二步过滤：剔除货币、债券、理财等没有重仓股票的基金
+    # print("3. 正在剔除货币型、债券型等无重仓股票的基金...")
+    # exclude_keywords = '货币|理财|纯债|债券|保本'
+    # df_filtered = df_filtered[~df_filtered['基金类型'].str.contains(exclude_keywords, na=False)]
 
     # 提取基金代码和名称的字典映射
     fund_dict = dict(zip(df_filtered['基金代码'], df_filtered['基金简称']))
@@ -69,7 +210,8 @@ def get_active_fund_codes():
     # 将包含名称的列表存入 temp，供断点续传使用
     df_save = pd.DataFrame({
         '基金代码': list(fund_dict.keys()),
-        '基金简称': list(fund_dict.values())
+        '基金简称': list(fund_dict.values()),
+        '基金类型': df_filtered['基金类型'].tolist()
     })
     df_save.to_csv(cache_file, index=False, encoding='utf-8-sig')
 
