@@ -1267,7 +1267,7 @@ if __name__ == '__main__':
         log("启动双重相关性优胜劣汰过滤...")
         base_pool_files = _greedy_correlation_filter(
             df_filtered, global_corr_matrix, global_downside_corr_matrix,
-            0.85, 0.75)
+            0.9, 0.75)
 
 
     # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
