@@ -450,33 +450,33 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAY
     # 以下为你原有的外层扰动测试逻辑，完全未修改
     # ==========================
     final_metrics, score_base = _evaluate_single_path(rebalance_days, offset=0)
-    # if score_base == 0.0:
-    #     final_metrics['Total_Score'] = 0.0
-    #     final_metrics['VETO_Perturbation_Death'] = False
-    #     return final_metrics
-    #
-    # half_offset = rebalance_days // 2
-    # score_weight = float('inf')
-    # metrics_w = None
-    #
-    # for seed in PERTURBATION_SEEDS:
-    #     np.random.seed(seed)
-    #     shift = np.random.uniform(-0.05, 0.05, n_funds)
-    #     w_perturbed = np.clip(np.ones(n_funds) / n_funds + shift, 0.01, 1.0)
-    #     w_perturbed = w_perturbed / np.sum(w_perturbed)
-    #     m_w, s_w = _evaluate_single_path(rebalance_days, offset=half_offset, w_init=w_perturbed)
-    #     if s_w < score_weight: score_weight, metrics_w = s_w, m_w
-    #
-    # if score_weight == float('inf'): score_weight = 0.0
-    # final_metrics['Total_Score'] = min(score_base, score_weight)
-    # final_metrics['VETO_Perturbation_Death'] = (final_metrics['Total_Score'] == 0.0)
-    #
-    # if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None and score_weight == 0.0:
-    #     for k, v in metrics_w.items():
-    #         if k.startswith("VETO_") and v is True:
-    #             final_metrics[k + "_in_Perturb"] = True
+    if score_base == 0.0:
+        final_metrics['Total_Score'] = 0.0
+        final_metrics['VETO_Perturbation_Death'] = False
+        return final_metrics
 
-    final_metrics['Total_Score'] = score_base
+    half_offset = rebalance_days // 2
+    score_weight = float('inf')
+    metrics_w = None
+
+    for seed in PERTURBATION_SEEDS:
+        np.random.seed(seed)
+        shift = np.random.uniform(-0.05, 0.05, n_funds)
+        w_perturbed = np.clip(np.ones(n_funds) / n_funds + shift, 0.01, 1.0)
+        w_perturbed = w_perturbed / np.sum(w_perturbed)
+        m_w, s_w = _evaluate_single_path(rebalance_days, offset=half_offset, w_init=w_perturbed)
+        if s_w < score_weight: score_weight, metrics_w = s_w, m_w
+
+    if score_weight == float('inf'): score_weight = 0.0
+    final_metrics['Total_Score'] = min(score_base, score_weight)
+    final_metrics['VETO_Perturbation_Death'] = (final_metrics['Total_Score'] == 0.0)
+
+    if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None and score_weight == 0.0:
+        for k, v in metrics_w.items():
+            if k.startswith("VETO_") and v is True:
+                final_metrics[k + "_in_Perturb"] = True
+
+    # final_metrics['Total_Score'] = score_base
 
 
     return final_metrics
@@ -626,7 +626,7 @@ def _extract_target_codes(df_filtered):
         lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})', str(x)) else "000000")
 
 
-def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_annual_return=0.15, min_day=1000):
+def filter_fund_pool(df_results, active_cache='temp/active_fund_codes_new.csv', min_annual_return=0.15, min_day=1000):
     if df_results is None or df_results.empty: return pd.DataFrame()
     original_count = len(df_results)
     df_filtered = df_results.copy()
@@ -684,6 +684,16 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
 
     df_filtered['剔除原因'] = df_filtered.apply(_get_reject_reason, axis=1)
 
+    # === 新增代码：统计5种财务硬性指标的驳回个数 ===
+    reject_counts = {
+        "运行天数不足": df_filtered['剔除原因'].str.startswith("运行天数不足").sum(),
+        "年化收益不达标": df_filtered['剔除原因'].str.startswith("年化收益不达标").sum(),
+        "数据缺失率过高": df_filtered['剔除原因'].str.startswith("数据缺失率过高").sum(),
+        "连续零收益异常": df_filtered['剔除原因'].str.startswith("连续零收益异常").sum(),
+        "最大回撤已击穿底线": df_filtered['剔除原因'].str.startswith("最大回撤已击穿底线").sum()
+    }
+    # ==========================================
+
     rejected_metrics = df_filtered[df_filtered['剔除原因'] != ""]
     target_codes_filtered = _extract_target_codes(df_filtered)
 
@@ -708,12 +718,21 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
     condition = df_filtered['剔除原因'] == ""
     df_final = df_filtered[condition].drop(columns=['剔除原因']).sort_values(by='annualized_return', ascending=False)
 
+    # === 修改代码：在漏斗日志中追加5种驳回分布的打印 ===
     print("\n" + "=" * 65)
     print("🎯 基金池初筛漏斗统计:")
     print(f"  1. 初始输入总数           : {original_count} 只")
-    print(f"  2. 可申购状态通过         : {active_filtered_count} 只")
+    print(f"  2. 可申购状态通过         : {active_filtered_count} 只 (剔除 {original_count - active_filtered_count}只)")
     print(f"  3. 财务与质量硬性达标     : {len(df_final)} 只 (保留作为高优候选池)")
+    print("     [财务硬性指标驳回分布]")
+    print(f"      - 运行天数不足        : {reject_counts['运行天数不足']} 只")
+    print(f"      - 年化收益不达标      : {reject_counts['年化收益不达标']} 只")
+    print(f"      - 数据缺失率过高      : {reject_counts['数据缺失率过高']} 只")
+    print(f"      - 连续零收益异常      : {reject_counts['连续零收益异常']} 只")
+    print(f"      - 最大回撤已击穿底线  : {reject_counts['最大回撤已击穿底线']} 只")
     print("=" * 65 + "\n")
+    # ==========================================
+
     return df_final
 
 
@@ -740,12 +759,21 @@ def _greedy_correlation_filter(df_filtered, corr_matrix, downside_corr_matrix, c
 
     for f in df_filtered['adj_nav_file'].dropna():
         if f not in corr_matrix.columns:
+            # action_records.append({
+            #     '基金代码': extract_fund_code(f),
+            #     '文件': f,
+            #     '筛选阶段': '次筛-相关性过滤',
+            #     '剔除原因': '未能在全局相关性矩阵中找到对应数据，无法执行安全评估，强制剔除。'
+            # })
+
+            selected.append(f)
             action_records.append({
                 '基金代码': extract_fund_code(f),
                 '文件': f,
                 '筛选阶段': '次筛-相关性过滤',
-                '剔除原因': '未能在全局相关性矩阵中找到对应数据，无法执行安全评估，强制剔除。'
+                '剔除原因': '【成功入选】未能在全局相关性矩阵中找到对应数据，无法执行安全评估，但考虑到不应过于苛刻，暂时保留进入下一轮。'
             })
+
             continue
 
         is_corr, reason = _is_too_correlated(f, selected, corr_matrix, downside_corr_matrix, corr_threshold,
@@ -1246,7 +1274,7 @@ if __name__ == '__main__':
         exit(0)
 
     df_results = pd.read_csv(RESULT_CSV)
-    df_filtered = filter_fund_pool(df_results, min_annual_return=0.05, min_day=FIXED_MIN_DAY)
+    df_filtered = filter_fund_pool(df_results, min_annual_return=0.02, min_day=FIXED_MIN_DAY)
     if df_filtered.empty:
         log("符合基础要求的基金数量为 0,退出流程。")
         exit(0)
