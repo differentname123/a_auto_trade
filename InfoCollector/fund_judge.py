@@ -634,24 +634,79 @@ def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_
 
     log(f"🔎 开始对初始池 ({original_count}只) 执行基础过滤，要求: 年化>{min_annual_return * 100}%，天数>{min_day}天")
 
+    rejection_records = []
+
     if os.path.exists(active_cache):
         try:
             df_active = pd.read_csv(active_cache, dtype=str)
             if '基金代码' in df_active.columns:
                 active_codes = set(df_active['基金代码'].str.strip().str.zfill(6).tolist())
                 target_codes = _extract_target_codes(df_filtered)
-                df_filtered = df_filtered[target_codes.isin(active_codes)].copy()
+                is_active = target_codes.isin(active_codes)
+
+                # 记录因申购状态被剔除的基金
+                rejected_active = df_filtered[~is_active]
+                for idx, row in rejected_active.iterrows():
+                    code = target_codes.loc[idx]
+                    rejection_records.append({
+                        '基金代码': code,
+                        '文件': row.get('adj_nav_file', ''),
+                        '筛选阶段': '初筛-申购状态',
+                        '剔除原因': '该基金暂不可申购或已下架，未在可申购白名单(active_cache)内。'
+                    })
+
+                df_filtered = df_filtered[is_active].copy()
                 active_filtered_count = len(df_filtered)
                 log(f"已校验基金申购状态，剔除了 {original_count - active_filtered_count} 只暂不可申购/下架基金。")
         except Exception as e:
             log(f"⚠️ 可申购状态文件读取失败: {e}")
 
-    if df_filtered.empty: return df_filtered
+    if df_filtered.empty:
+        ensure_dir('fund_data/base_pool_rejection_reasons.csv')
+        if rejection_records:
+            pd.DataFrame(rejection_records).to_csv('fund_data/base_pool_rejection_reasons.csv', index=False,
+                                                   encoding='utf-8-sig')
+        return df_filtered
 
-    condition = ((df_filtered['total_active_days'] > min_day) & (df_filtered['annualized_return'] > min_annual_return) &
-                 (df_filtered['missing_ratio'] <= 0.05) & (df_filtered['max_zeros'] < 10) & (
-                         df_filtered['max_drawdown'] > -0.7))
-    df_final = df_filtered[condition].sort_values(by='annualized_return', ascending=False)
+    # 短路逻辑生成具体剔除原因，利用 not 操作自动处理 NaN 情况，与原布尔逻辑严格等价
+    def _get_reject_reason(row):
+        if not (row['total_active_days'] > min_day):
+            return f"运行天数不足，当前天数{row['total_active_days']}天，目标阈值>{min_day}天。"
+        if not (row['annualized_return'] > min_annual_return):
+            return f"年化收益不达标，当前年化{row['annualized_return'] * 100:.2f}%，目标阈值>{min_annual_return * 100:.2f}%。"
+        if not (row['missing_ratio'] <= 0.05):
+            return f"数据缺失率过高，当前缺失率{row['missing_ratio'] * 100:.2f}%，目标阈值<=5.00%。"
+        if not (row['max_zeros'] < 10):
+            return f"连续零收益异常，当前最大连续{row['max_zeros']}天，目标阈值<10天。"
+        if not (row['max_drawdown'] > -0.7):
+            return f"最大回撤已击穿底线，当前回撤{row['max_drawdown'] * 100:.2f}%，目标阈值>-70.00%。"
+        return ""
+
+    df_filtered['剔除原因'] = df_filtered.apply(_get_reject_reason, axis=1)
+
+    rejected_metrics = df_filtered[df_filtered['剔除原因'] != ""]
+    target_codes_filtered = _extract_target_codes(df_filtered)
+
+    for idx, row in rejected_metrics.iterrows():
+        code = target_codes_filtered.loc[idx]
+        rejection_records.append({
+            '基金代码': code,
+            '文件': row.get('adj_nav_file', ''),
+            '筛选阶段': '初筛-财务硬性指标',
+            '剔除原因': row['剔除原因']
+        })
+
+    # 初筛是全新流程的起点，每次执行此函数时全新覆盖写入文件，确保记录文件干净且为最新版本
+    reason_file = 'fund_data/base_pool_rejection_reasons.csv'
+    ensure_dir(reason_file)
+    if rejection_records:
+        pd.DataFrame(rejection_records).to_csv(reason_file, index=False, encoding='utf-8-sig')
+    else:
+        pd.DataFrame(columns=['基金代码', '文件', '筛选阶段', '剔除原因']).to_csv(reason_file, index=False,
+                                                                                  encoding='utf-8-sig')
+
+    condition = df_filtered['剔除原因'] == ""
+    df_final = df_filtered[condition].drop(columns=['剔除原因']).sort_values(by='annualized_return', ascending=False)
 
     print("\n" + "=" * 65)
     print("🎯 基金池初筛漏斗统计:")
@@ -668,19 +723,68 @@ def _is_too_correlated(fund_f, selected_files, corr_matrix, downside_corr_matrix
     for sel_f in selected_files:
         if sel_f in corr_matrix.columns:
             corr_val = corr_matrix.loc[fund_f, sel_f]
-            if pd.notna(corr_val) and corr_val > corr_threshold: return True
+            if pd.notna(corr_val) and corr_val > corr_threshold:
+                f2_code = extract_fund_code(sel_f)
+                return True, f"全天候相关性超标，与已保留标的[{f2_code}]的相关性达{corr_val:.4f}，目标阈值<={corr_threshold}。"
         if has_downside and fund_f in downside_corr_matrix.index and sel_f in downside_corr_matrix.columns:
             dc_val = downside_corr_matrix.loc[fund_f, sel_f]
-            if pd.notna(dc_val) and dc_val > downside_corr_threshold: return True
-    return False
+            if pd.notna(dc_val) and dc_val > downside_corr_threshold:
+                f2_code = extract_fund_code(sel_f)
+                return True, f"下行相关性超标，与已保留标的[{f2_code}]的下行相关性达{dc_val:.4f}，目标阈值<={downside_corr_threshold}。"
+    return False, ""
 
 
 def _greedy_correlation_filter(df_filtered, corr_matrix, downside_corr_matrix, corr_threshold, downside_corr_threshold):
     selected = []
+    action_records = []  # 改名：不仅记录 rejection，也记录 selection
+
     for f in df_filtered['adj_nav_file'].dropna():
-        if f not in corr_matrix.columns: continue
-        if not _is_too_correlated(f, selected, corr_matrix, downside_corr_matrix, corr_threshold,
-                                  downside_corr_threshold): selected.append(f)
+        if f not in corr_matrix.columns:
+            action_records.append({
+                '基金代码': extract_fund_code(f),
+                '文件': f,
+                '筛选阶段': '次筛-相关性过滤',
+                '剔除原因': '未能在全局相关性矩阵中找到对应数据，无法执行安全评估，强制剔除。'
+            })
+            continue
+
+        is_corr, reason = _is_too_correlated(f, selected, corr_matrix, downside_corr_matrix, corr_threshold,
+                                             downside_corr_threshold)
+
+        if not is_corr:
+            selected.append(f)
+            # 【核心修复】：补齐全链路闭环，将最终存活进入 Base Pool 的基金也记录下来
+            action_records.append({
+                '基金代码': extract_fund_code(f),
+                '文件': f,
+                '筛选阶段': '最终结果',
+                '剔除原因': '【成功入选】顺利通过财务初筛与相关性测试，已进入 Base Pool。'
+            })
+        else:
+            action_records.append({
+                '基金代码': extract_fund_code(f),
+                '文件': f,
+                '筛选阶段': '次筛-相关性过滤',
+                '剔除原因': reason
+            })
+
+    # 追加记录到初筛创建的原因收集文件中，实现全链路闭环审计
+    if action_records:
+        reason_file = 'fund_data/base_pool_rejection_reasons.csv'  # 注: 文件虽叫rejection, 现已包含完整漏斗结果
+        df_action = pd.DataFrame(action_records)
+        ensure_dir(reason_file)
+
+        # 为了保证成功入选的基金排在文件的最前面，我们可以对本次追加的数据做个排序
+        # 让“最终结果”阶段的记录置顶
+        df_action['is_selected'] = df_action['筛选阶段'] == '最终结果'
+        df_action = df_action.sort_values(by=['is_selected', '基金代码'], ascending=[False, True]).drop(
+            columns=['is_selected'])
+
+        if os.path.exists(reason_file):
+            df_action.to_csv(reason_file, mode='a', header=False, index=False, encoding='utf-8-sig')
+        else:
+            df_action.to_csv(reason_file, index=False, encoding='utf-8-sig')
+
     return selected
 
 
