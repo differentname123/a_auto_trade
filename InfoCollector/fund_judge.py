@@ -25,14 +25,14 @@ ROLLING_STEP = 21
 
 # VETO 否决阈值
 VETO_MAX_MDD = 0.3
-VETO_HURDLE_RATE = 0.2
+VETO_HURDLE_RATE = 0.1
 VETO_MAX_UPWARD_SPIKE = 0.14  # <--- 新增：单日异常暴涨阈值(15%)
 VETO_AR1 = 0.35
 VETO_VOL = 0.03
-VETO_RECOVERY_DAYS = 180
+VETO_RECOVERY_DAYS = 250
 VETO_MISSING_RATIO = 0.05
 VETO_CONTINUOUS_ZEROS = 10
-VETO_CALMAR_MULTIPLIER = 1.10
+VETO_CALMAR_MULTIPLIER = 1.01
 VETO_WORST_1Y = -0.15
 VETO_ZOMBIE_DAYS = 35
 
@@ -90,33 +90,74 @@ def extract_fund_code(filepath):
 
 
 def normalize_combo_tuple(combo_str, sep='_'):
-    parts = [str(x).strip() for x in str(combo_str).split(sep)]
+    # 【核心修改】：字符串拆分后立刻降级为基础整型，极大节约内存
+    parts = [int(str(x).strip()) for x in str(combo_str).split(sep)]
     return tuple(sorted(parts))
 
 
 # ====================================================================
-# 缓存自更新系统 (按要求维度泛化并持久化)
+# 缓存自更新系统 (按要求维度泛化并持久化) - 已升级至极致压缩的 Parquet + Int 引擎
 # ====================================================================
+def _save_set_to_parquet(combo_set, dim, filepath):
+    try:
+        if not combo_set: return
+
+        # 【修复】：将 Set 转为 List 固化，然后通过推导式按列剥离，彻底避开 * 解包
+        combo_list = list(combo_set)
+        cols = [[combo[i] for combo in combo_list] for i in range(dim)]
+
+        arrays = [pa.array(col, type=pa.int32()) for col in cols]
+        names = [f'dim_{i}' for i in range(dim)]
+        table = pa.Table.from_arrays(arrays, names=names)
+        pq.write_table(table, filepath, compression='zstd')
+
+        # 显式释放巨大内存
+        del combo_list, cols, arrays, table
+    except Exception as e:
+        log(f"❌ 缓存 Parquet 持久化失败: {e}")
+
+
 def load_or_init_computed_set(curr_dim):
     """
-    加载或初始化已计算组合的全局缓存集合，文件名仅与维度相关。
-    先加载缓存，再扫描目录中比缓存新的 parquet 文件进行增量更新。
+    【重构】：加载或初始化全局缓存，支持读取新版 Parquet 并自动兼容升级旧版 pkl
     """
-    cache_file = f'fund_data/computed_combos_{curr_dim}d_global_cache.pkl'
+    cache_file = f'fund_data/computed_combos_{curr_dim}d_global_cache.parquet'
+    old_pkl_file = f'fund_data/computed_combos_{curr_dim}d_global_cache.pkl'
     parquet_files = glob.glob(f'fund_data/fof_evaluation_results_{curr_dim}d_*.parquet')
 
     computed_set = set()
     cache_time = 0
 
+    # 1. 优先尝试加载全新版 Parquet 缓存
     if os.path.exists(cache_file):
         cache_time = os.path.getmtime(cache_file)
         try:
-            with open(cache_file, 'rb') as f:
-                computed_set = pickle.load(f)
-            log(f"📦 命中全局缓存 | 规则: {curr_dim} 维 | 已加载 {len(computed_set):,} 个历史元组。")
+            table = pq.read_table(cache_file)
+            # 还原为 Set[Tuple[int]]
+            cols = [table.column(f'dim_{i}').to_pylist() for i in range(curr_dim)]
+            computed_set = set(zip(*cols))
+            log(f"📦 命中全局 Parquet 缓存 | 规则: {curr_dim} 维 | 已加载 {len(computed_set):,} 个历史元组。")
         except Exception as e:
-            log(f"⚠️ 缓存读取失败将重建: {e}")
+            log(f"⚠️ Parquet 缓存读取失败将重建: {e}")
             cache_time = 0
+
+    # 2. 嗅探并静默升级历史的老 PKL 文件
+    elif os.path.exists(old_pkl_file):
+        try:
+            with open(old_pkl_file, 'rb') as f:
+                old_set = pickle.load(f)
+            log(f"♻️ 发现历史 PKL 缓存，正在执行内存降维与 Parquet 转换升级...")
+            # 循环遍历，将历史字符串 Tuple 强制转换压缩为 Int Tuple
+            for combo in old_set:
+                computed_set.add(tuple(int(x) for x in combo))
+
+            # 立刻以全新 Parquet 格式落盘，并封存历史 pkl
+            _save_set_to_parquet(computed_set, curr_dim, cache_file)
+            os.rename(old_pkl_file, old_pkl_file + ".bak")
+            cache_time = os.path.getmtime(cache_file)
+            log(f"✅ PKL 缓存已成功升级为 Parquet | 规则: {curr_dim} 维 | 容量: {len(computed_set):,}。")
+        except Exception as e:
+            log(f"⚠️ 历史 PKL 缓存升级失败: {e}")
 
     log(f"🔍 扫描 Parquet 文件进行增量更新 | 规则: {curr_dim} 维 | 共发现 {len(parquet_files)} 个相关文件。")
     updated = False
@@ -124,11 +165,20 @@ def load_or_init_computed_set(curr_dim):
         if os.path.getmtime(pf) <= cache_time:
             continue
         try:
-            table = pq.read_table(pf, columns=['组合文件名'])
-            raw_combos = table.column('组合文件名').to_pylist()
-            new_tuples = {normalize_combo_tuple(c) for c in raw_combos if c}
-            added = len(new_tuples - computed_set)
-            computed_set.update(new_tuples)
+            parquet_file = pq.ParquetFile(pf)
+            file_temp_set = set()
+
+            for batch in parquet_file.iter_batches(batch_size=100000, columns=['组合文件名']):
+                raw_combos = batch.column('组合文件名').to_pylist()
+                file_temp_set.update(normalize_combo_tuple(c) for c in raw_combos if c)
+                del raw_combos, batch
+            del parquet_file
+
+            before_len = len(computed_set)
+            computed_set.update(file_temp_set)
+            added = len(computed_set) - before_len
+            del file_temp_set
+
             if added > 0:
                 updated = True
                 log(f"🔄 增量读取文件 | {os.path.basename(pf)} | 新增 {added:,} 个有效组合。")
@@ -136,12 +186,8 @@ def load_or_init_computed_set(curr_dim):
             log(f"❌ 读取文件异常跳过 | {os.path.basename(pf)} | 错误: {e}")
 
     if updated or (not os.path.exists(cache_file) and computed_set):
-        try:
-            with open(cache_file, 'wb') as f:
-                pickle.dump(computed_set, f)
-            log(f"✅ 缓存已持久化 | 规则: {curr_dim} 维 | 当前全局总库容量: {len(computed_set):,} 个。")
-        except Exception as e:
-            log(f"❌ 缓存持久化失败: {e}")
+        _save_set_to_parquet(computed_set, curr_dim, cache_file)
+        log(f"✅ 缓存已持久化 (Parquet) | 规则: {curr_dim} 维 | 当前全局总库容量: {len(computed_set):,} 个。")
     elif not parquet_files and not computed_set:
         log(f"ℹ️ 空白初始化 | 规则: {curr_dim} 维 | 暂无历史计算数据。")
 
@@ -149,7 +195,7 @@ def load_or_init_computed_set(curr_dim):
 
 
 def _update_cache_from_new_file(output_file, cache_file, computed_set):
-    """根据新生成的结果文件,动态追加更新组合缓存"""
+    """【重构】：根据新生成的结果文件,动态追加更新组合缓存 (写出为Parquet)"""
     if not output_file or not os.path.exists(output_file): return
     cache_time = os.path.getmtime(cache_file) if os.path.exists(cache_file) else 0
     if os.path.getmtime(output_file) <= cache_time: return
@@ -157,22 +203,28 @@ def _update_cache_from_new_file(output_file, cache_file, computed_set):
     log("🌟 嗅探到新生成的结果文件更新于缓存,正在动态追加至持久化系统...")
     try:
         if os.path.getsize(output_file) <= 100: return
-        table = pq.read_table(output_file, columns=['组合文件名'])
-        raw_combos = table.column('组合文件名').to_pylist()
+
+        parquet_file = pq.ParquetFile(output_file)
         added = 0
-        for c in raw_combos:
-            if c:
-                combo_tup = normalize_combo_tuple(c)
-                if combo_tup not in computed_set:
-                    computed_set.add(combo_tup)
-                    added += 1
+
+        for batch in parquet_file.iter_batches(batch_size=100000, columns=['组合文件名']):
+            raw_combos = batch.column('组合文件名').to_pylist()
+            for c in raw_combos:
+                if c:
+                    combo_tup = normalize_combo_tuple(c)
+                    if combo_tup not in computed_set:
+                        computed_set.add(combo_tup)
+                        added += 1
+            del raw_combos, batch
+        del parquet_file
+
         if added > 0:
-            with open(cache_file, 'wb') as f:
-                pickle.dump(computed_set, f)
+            dim = len(next(iter(computed_set))) if computed_set else 0
+            if dim > 0:
+                _save_set_to_parquet(computed_set, dim, cache_file)
             log(f"🔒 增量缓存注入完成,本次新增 {added} 个,库中最新包含 {len(computed_set):,} 个组合。")
     except Exception as e:
         log(f"❌ 动态更新缓存失败: {e}")
-
 
 # ====================================================================
 # Numba JIT 核心引擎 (严禁修改)
@@ -398,31 +450,34 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAY
     # 以下为你原有的外层扰动测试逻辑，完全未修改
     # ==========================
     final_metrics, score_base = _evaluate_single_path(rebalance_days, offset=0)
-    if score_base == 0.0:
-        final_metrics['Total_Score'] = 0.0
-        final_metrics['VETO_Perturbation_Death'] = False
-        return final_metrics
+    # if score_base == 0.0:
+    #     final_metrics['Total_Score'] = 0.0
+    #     final_metrics['VETO_Perturbation_Death'] = False
+    #     return final_metrics
+    #
+    # half_offset = rebalance_days // 2
+    # score_weight = float('inf')
+    # metrics_w = None
+    #
+    # for seed in PERTURBATION_SEEDS:
+    #     np.random.seed(seed)
+    #     shift = np.random.uniform(-0.05, 0.05, n_funds)
+    #     w_perturbed = np.clip(np.ones(n_funds) / n_funds + shift, 0.01, 1.0)
+    #     w_perturbed = w_perturbed / np.sum(w_perturbed)
+    #     m_w, s_w = _evaluate_single_path(rebalance_days, offset=half_offset, w_init=w_perturbed)
+    #     if s_w < score_weight: score_weight, metrics_w = s_w, m_w
+    #
+    # if score_weight == float('inf'): score_weight = 0.0
+    # final_metrics['Total_Score'] = min(score_base, score_weight)
+    # final_metrics['VETO_Perturbation_Death'] = (final_metrics['Total_Score'] == 0.0)
+    #
+    # if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None and score_weight == 0.0:
+    #     for k, v in metrics_w.items():
+    #         if k.startswith("VETO_") and v is True:
+    #             final_metrics[k + "_in_Perturb"] = True
 
-    half_offset = rebalance_days // 2
-    score_weight = float('inf')
-    metrics_w = None
+    final_metrics['Total_Score'] = score_base
 
-    for seed in PERTURBATION_SEEDS:
-        np.random.seed(seed)
-        shift = np.random.uniform(-0.05, 0.05, n_funds)
-        w_perturbed = np.clip(np.ones(n_funds) / n_funds + shift, 0.01, 1.0)
-        w_perturbed = w_perturbed / np.sum(w_perturbed)
-        m_w, s_w = _evaluate_single_path(rebalance_days, offset=half_offset, w_init=w_perturbed)
-        if s_w < score_weight: score_weight, metrics_w = s_w, m_w
-
-    if score_weight == float('inf'): score_weight = 0.0
-    final_metrics['Total_Score'] = min(score_base, score_weight)
-    final_metrics['VETO_Perturbation_Death'] = (final_metrics['Total_Score'] == 0.0)
-
-    if final_metrics['VETO_Perturbation_Death'] and metrics_w is not None and score_weight == 0.0:
-        for k, v in metrics_w.items():
-            if k.startswith("VETO_") and v is True:
-                final_metrics[k + "_in_Perturb"] = True
 
     return final_metrics
 
@@ -431,10 +486,12 @@ def evaluate_fof_portfolio_fast(merged_nav, rebalance_days=DEFAULT_REBALANCE_DAY
 # Worker 工作进程函数 (优化:消灭多进程内的 re 正则解析)
 # ====================================================================
 def _worker_process_combo(combo_codes):
-    """单组合处理:传入的已是纯粹的 6 位代码元组，极速执行"""
+    """单组合处理:传入的已是极简的 Tuple[int]，在最终结果呈现时还原为 6 位代码"""
     global WORKER_MASTER_DF
-    combo_name = "_".join(combo_codes)
+    # 【核心修改】：通过格式化补齐 0，将 (1, 2) 还原成 "000001_000002"
+    combo_name = "_".join([f"{c:06d}" for c in combo_codes])
     try:
+        # WORKER_MASTER_DF 的列名现已是 int，直接通过整数列表取列
         merged_nav = WORKER_MASTER_DF[list(combo_codes)]
         result = evaluate_fof_portfolio_fast(merged_nav)
         result['组合文件名'] = combo_name
@@ -645,22 +702,21 @@ def _warmup_numba():
 
 def _build_master_matrix(target_files, max_workers):
     """
-    重构：强制将 master_df 的列名在拼接后直接映射为 6 位基金代码，
-    后续 Worker 不再需要执行昂贵的正则解析操作。
+    重构：强制将 master_df 的列名直接映射为 Int 整型，
+    配合缓存层的纯整型升级，剥离所有字符串开销。
     """
     log("🚀 正在构建全局 Master Matrix...")
     nav_series_list = _parallel_load_navs(target_files, max_workers, "构建 Master 列数据")
     master_df = pd.concat(nav_series_list, axis=1, join='outer')
     del nav_series_list
 
-    # 将文件路径列名替换为 6 位代码
-    master_df.columns = [extract_fund_code(col) for col in master_df.columns]
+    # 【核心修改】：解析出的基金代码提取数字部分，作为整型列名
+    master_df.columns = [int(extract_fund_code(col)) for col in master_df.columns]
     sorted_codes = sorted(master_df.columns.tolist())
     master_df = master_df[sorted_codes]
 
     log(f"✅ 全局 Master Matrix 构建完毕,行数: {len(master_df)},列数: {len(sorted_codes)}")
     return master_df, sorted_codes
-
 
 def _print_final_report(final_fund_count, combo_size, total_combos, skipped, computed, output_parquet, has_output):
     skip_ratio = (skipped / total_combos * 100) if total_combos > 0 else 0.0
@@ -876,7 +932,8 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
 def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
     # 🌟 核心杀手锏：自带短路拦截的极速转换函数 (一次 Split，终身受用)
     def fast_filter_and_normalize(combo_str):
-        items = str(combo_str).split('_')
+        # 【核心修改】：因为外部的 base_pool_codes_set 已经全部是整数，这里需保持一致判断
+        items = [int(x.strip()) for x in str(combo_str).split('_')]
         if not base_pool_codes_set.issuperset(items):
             return None
         return tuple(sorted(items))
@@ -1106,7 +1163,7 @@ if __name__ == '__main__':
         log("启动双重相关性优胜劣汰过滤...")
         base_pool_files = _greedy_correlation_filter(
             df_filtered, global_corr_matrix, global_downside_corr_matrix,
-            0.95, 0.5)
+            0.85, 0.75)
 
 
     # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
