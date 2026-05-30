@@ -152,6 +152,7 @@ def filter_fund_universe(df, type_col='基金类型', name_col='基金简称', r
 
     return res_df.reset_index(drop=True)
 
+
 def get_active_fund_codes():
     """
     获取当前存续的活跃基金，并过滤掉无需查询重仓股的基金类型（如货币、理财、债券），
@@ -537,31 +538,134 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
     print(f"✅ 成功合并 {dimension} 维数据! 经过硬盘级过滤，最终留存: {len(df):,} 个优质组合。")
     return df
 
+
+import pandas as pd
+
+
+def get_blacklisted_fund_codes(df):
+    """
+    根据给定的主动基金黑名单检索 DataFrame。
+    返回【命中黑名单】的 6 位基金代码列表，并打印详细日志（包括未匹配的黑名单项）。
+    """
+    active_funds_to_exclude = [
+        "华夏鼎航债券", "兴业裕丰债券", "鹏华丰惠债券", "西部利得汇盈债券",
+        "广发景宁债券", "华安安业债券", "中信保诚景丰", "国金惠安利率债",
+        "南方交元债券", "华安鼎丰债券", "华宝宝泓债券", "兴全恒裕债券",
+        "德邦锐乾债券", "中信保诚稳达", "兴全稳泰债券", "德邦锐裕利率债债券",
+        "天弘信益债券", "中信保诚稳丰", "鹏华丰禄债券", "西部利得祥逸债券",
+        "永赢裕益债券", "南方旭元债券", "兴业福鑫债券", "永赢邦利债券",
+        "前海开源鼎欣债券",
+        "中信保诚稳泰债券",
+        "永赢昌利债券",
+        "诺德安鸿",
+        "鹏华金利债券",
+        "华夏鼎通债券",
+        "华夏鼎隆债券",
+        "鹏扬淳开债券",
+        "易方达中短期美元债",  # 主动型QDII债券基金，人为挑选海外债券
+        "中银汇享债券",
+        "永赢伟益债券",
+        "中信保诚稳益",
+        "建信利率债债券",  # 虽买利率债，但属于主动调控久期的纯债基金，非指数
+        "鹏华丰鑫债券",
+        "宏利永利债券",
+        "鹏华0-5年利率债券",  # 带有0-5年期限，但通常此类未标明“指数”的为主动纯债
+        "中信保诚稳鸿",
+        "华夏鼎康债券",
+        "南方泽元债券",
+        "永赢瑞益债券",
+        "永赢惠益债券",
+        "兴业裕恒债券",
+        "鹏华丰腾债券"
+
+    ]
+
+    original_size = len(df)
+    df_work = df.copy()
+
+    # 1. 补齐 6 位代码处理 (兼容浮点数读取的情况)
+    df_work['基金代码'] = df_work['基金代码'].astype(str).str.split('.').str[0].str.zfill(6)
+
+    # 2. 核心追踪与匹配逻辑
+    matched_names = set()  # 用来记录成功匹配到的黑名单名称
+    mask_is_blacklisted = pd.Series(False, index=df_work.index)  # 初始标记为全 False
+
+    for bad_name in active_funds_to_exclude:
+        # 使用纯字符串包含判断
+        current_match = df_work['基金简称'].astype(str).str.contains(bad_name, regex=False, na=False)
+
+        # 如果这个黑名单名字在数据中至少出现了一次
+        if current_match.any():
+            matched_names.add(bad_name)
+            # 记录命中的行 (这里是累加逻辑，命中任意一个就算)
+            mask_is_blacklisted = mask_is_blacklisted | current_match
+
+            # 3. 找出未匹配到的黑名单项
+    unmatched_names = [name for name in active_funds_to_exclude if name not in matched_names]
+
+    # 4. 获取命中黑名单的行，并提取 6 位代码 (注意这里没有使用 ~ 取反)
+    df_blacklisted = df_work[mask_is_blacklisted]
+    blacklisted_codes = df_blacklisted['基金代码'].unique().tolist()
+
+    # 5. 打印详细日志
+    print("====== 黑名单提取日志 ======")
+    print(f"黑名单检索词数量 : {len(active_funds_to_exclude)}")
+    print(f"输入数据总行数   : {original_size}")
+    print(f"命中黑名单行数   : {mask_is_blacklisted.sum()}")
+    print(f"返回黑名单Code数 : {len(blacklisted_codes)}")
+
+    print("-" * 24)
+    if unmatched_names:
+        print(f"⚠️ 以下 {len(unmatched_names)} 个黑名单词在数据中未匹配到:")
+        for name in unmatched_names:
+            print(f"  - {name}")
+    else:
+        print("✅ 所有黑名单词均已在数据中成功匹配。")
+    print("==========================")
+
+    return blacklisted_codes
+
+
 if __name__ == "__main__":
     # 1. 读取报告文件
     report_df = pd.read_csv('fund_data/base_pool_rejection_reasons.csv')
     active_code_df = pd.read_csv('temp/active_fund_codes_new.csv')
     # 获取 active_code_df 的 基金简称列表
     name_list = active_code_df['基金简称'].dropna().unique().tolist()
+    # 只保留 基金简称 包含 增强 的行
+    filter_active_code_df = active_code_df[active_code_df['基金简称'].str.contains('增强', na=False)]
 
     # 按照 基金代码 进行合并
     report_df = report_df.merge(active_code_df, left_on='基金代码', right_on='基金代码', how='right')
-
+    black_code_list = get_blacklisted_fund_codes(report_df)
     all_codes = report_df['文件'].str.extract(r'(\d{6})')[0].dropna().unique().tolist()
-    valid_code_list = [37, 71, 179, 322, 342, 369, 596, 606, 614, 826, 1092, 2188, 2423, 2510, 2659, 2868, 2915, 3081, 3195, 3209, 3226, 3277, 3280, 3287, 3290, 3315, 3318, 3520, 3527, 3547, 3583, 3614, 3640, 3648, 3671, 3672, 3674, 3728, 3741, 3767, 3793, 3824, 3847, 3880, 3929, 3949, 3983, 4001, 4052, 4061, 4089, 4102, 4104, 4106, 4108, 4140, 4238, 4246, 4388, 4498, 4597, 4614, 4728, 4767, 4854, 4954, 5362, 5448, 5467, 5531, 5690, 5705, 5853, 6011, 6034, 6043, 6070, 6071, 6098, 6134, 6145, 6149, 6151, 6165, 6177, 6183, 6191, 6206, 6300, 6337, 6341, 6421, 6443, 6473, 6481, 6488, 6635, 6645, 6665, 6742, 6748, 6758, 6761, 6767, 6776, 6789, 6809, 6812, 6853, 6869, 6913, 6915, 6932, 6934, 6953, 6959, 6961, 6985, 7023, 7094, 7107, 7116, 7167, 7252, 7279, 7295, 7300, 7321, 7347, 7360, 7361, 7390, 7408, 7417, 7431, 7433, 7440, 7464, 7492, 7510, 7540, 7564, 7584, 7593, 7605, 7640, 7644, 7670, 7706, 7714, 7740, 7754, 7765, 7788, 7809, 7859, 7910, 7987, 8030, 8040, 8056, 8067, 8081, 8114, 8189, 8256, 8266, 8279, 8326, 8340, 8399, 8482, 8558, 8574, 8582, 8583, 8626, 8707, 8713, 8746, 8761, 8771, 8783, 8798, 8857, 8868, 8875, 8928, 8956, 8995, 9033, 9067, 9219, 9225, 9271, 9284, 9396, 9421, 9495, 9534, 9560, 9615, 9625, 9721, 9742, 9792, 9947, 10083, 10309, 10440, 10459, 10497, 91023, 110003, 118002, 160222, 160626, 161628, 165519, 165520, 167301, 167506, 202021, 270042, 320013, 380010, 400030, 472007, 501050, 501059, 501310, 510080, 519220, 519226, 519622, 519981, 530014, 539001, 660016, 675091, 675161, 690012]
-
-
+    valid_code_list = [37, 71, 322, 342, 614, 656, 826, 835, 1092, 2188, 2868, 2915, 3195, 3209, 3280, 3287, 3290, 3527,
+                       3547, 3583, 3614, 3640, 3648, 3671, 3672, 3674, 3728, 3767, 3793, 3824, 3847, 3880, 3949, 3983,
+                       4001, 4052, 4061, 4106, 4108, 4140, 4238, 4246, 4388, 4498, 4532, 4614, 4728, 4767, 5448, 5467,
+                       5613, 5690, 5705, 6011, 6043, 6070, 6071, 6145, 6149, 6151, 6177, 6183, 6191, 6206, 6421, 6443,
+                       6473, 6635, 6665, 6742, 6758, 6761, 6767, 6776, 6789, 6812, 6853, 6913, 6915, 6953, 6959, 6961,
+                       6985, 7094, 7116, 7252, 7279, 7295, 7321, 7347, 7360, 7361, 7390, 7408, 7431, 7433, 7440, 7464,
+                       7510, 7564, 7584, 7640, 7644, 7706, 7714, 7740, 7754, 7765, 7788, 7809, 7910, 7946, 7987, 8030,
+                       8040, 8067, 8125, 8216, 8256, 8266, 8396, 8399, 8482, 8558, 8574, 8582, 8583, 8707, 8713, 8746,
+                       8761, 8771, 8783, 8798, 8857, 8868, 8875, 8916, 8956, 9033, 9219, 9284, 9396, 9421, 9534, 9560,
+                       9615, 9757, 9792, 9947, 10083, 10309, 10440, 10459, 10497, 110021, 160632, 160925, 161715,
+                       165522, 167506, 180003, 270042, 320013, 380010, 501021, 501307, 519226, 519622, 530014, 539001,
+                       675091, 675161, 690012]
 
     # 将valid_code_list 补充为6位字符串，并且前面补0
     valid_code_list = [str(code).zfill(6) for code in valid_code_list]
 
     invalid_code_list = list(set(all_codes) - set(valid_code_list))
+    invalid_code_list.extend(black_code_list)
 
     # 3. 加载并合并数据
     all_df_list = []
-    for i in range(2):
-        df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=1250, min_score=-0.5)
+    for i in range(3):
+        df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=1250, min_score=0)
         df_2d['Total_Score'] = df_2d['Total_Score'] * 10000
+        # 只保留CAGR大于0.1的组合
+        df_2d = df_2d[df_2d['CAGR'] > 0.1].reset_index(drop=True)
+
         # df_2d['score'] = df_2d['CAGR']  * df_2d['Total_Score'] * 10
         # # df_2d 按照score降序排序
         # df_2d = df_2d.sort_values(by='score', ascending=False).reset_index(drop=True)
@@ -663,11 +767,20 @@ if __name__ == "__main__":
     # 6. 将 "基金简称组合" 列挪动到第一列
     col_to_move = all_df_filter.pop('基金简称组合')
     all_df_filter.insert(0, '基金简称组合', col_to_move)
+    # 将 组合文件名 Start_Date End_Date Total_Days 放到最后几列
+    cols = list(all_df_filter.columns)
+    key_list = ['组合文件名', 'Start_Date', 'End_Date', 'Total_Days']
+    for key in key_list:
+        if key in cols:
+            cols.remove(key)
+            cols.append(key)
+    all_df_filter = all_df_filter[cols]
 
     df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=600, min_score=0)
-    df_d['score'] = df_d['CAGR'] *  df_d['Total_Score'] * 10
+    df_d['score'] = df_d['CAGR'] * df_d['Total_Score'] * 10
 
-    filtered_df1 = df_d[df_d['组合文件名'].str.contains('000390') & df_d['组合文件名'].str.contains('009033')& df_d['组合文件名'].str.contains('160323')& df_d['组合文件名'].str.contains('539001')]
+    filtered_df1 = df_d[df_d['组合文件名'].str.contains('000390') & df_d['组合文件名'].str.contains('009033') & df_d[
+        '组合文件名'].str.contains('160323') & df_d['组合文件名'].str.contains('539001')]
 
     # 打印出df_2d中组合文件名 包含006373 并且也包含006372
     # 获取df_2d中组合文件名不重复的列表
@@ -684,7 +797,6 @@ if __name__ == "__main__":
         if isinstance(x, str) else False
     )
 
-
     # 1. 后缀名修改为 .parquet
     df_file = r'fund_data/fof_evaluation_results_2d_pool1084_min_day_1260.parquet'
 
@@ -700,7 +812,6 @@ if __name__ == "__main__":
 
     # 4. 排序逻辑保持不变
     df = df.sort_values(by='Total_Score', ascending=False)
-
 
     judge_fund_df()
     #
