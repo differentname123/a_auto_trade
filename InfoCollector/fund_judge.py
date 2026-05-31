@@ -625,7 +625,7 @@ def _extract_target_codes(df_filtered):
         lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})', str(x)) else "000000")
 
 
-def filter_fund_pool(df_results, active_cache='temp/active_fund_codes_new.csv', min_annual_return=0.15, min_day=1000):
+def filter_fund_pool(df_results, active_cache='temp/active_fund_codes_1741_剔除增强指数_剔除主动债.csv', min_annual_return=0.15, min_day=1000):
     if df_results is None or df_results.empty: return pd.DataFrame()
     original_count = len(df_results)
     df_filtered = df_results.copy()
