@@ -626,6 +626,13 @@ def get_blacklisted_fund_codes(df):
     return blacklisted_codes
 
 
+import pandas as pd
+import re
+import time
+from datetime import datetime
+
+# 假设上面的环境初始化和外部函数 load_and_merge_parquet_by_dim 都已定义
+
 if __name__ == "__main__":
     # 1. 读取报告文件
     report_df = pd.read_csv('fund_data/base_pool_rejection_reasons.csv')
@@ -639,7 +646,10 @@ if __name__ == "__main__":
     report_df = report_df.merge(active_code_df, left_on='基金代码', right_on='基金代码', how='right')
     # black_code_list = get_blacklisted_fund_codes(report_df)
     all_codes = report_df['文件'].str.extract(r'(\d{6})')[0].dropna().unique().tolist()
-    valid_code_list = [71, 179, 614, 2659, 3520, 4532, 5561, 6286, 6341, 6473, 6481, 6486, 6748, 6932, 6959, 6961, 7094, 7252, 7390, 7505, 7593, 7664, 7751, 7765, 7910, 8040, 8163, 8189, 8256, 8279, 8482, 8574, 8583, 8707, 8956, 9033, 9051, 9219, 9421, 9560, 9615, 9625, 9721, 10497, 165520, 270042, 320013, 501310, 519671, 519981, 539001]
+    valid_code_list = [71, 179, 614, 2659, 3520, 4532, 5561, 6286, 6341, 6473, 6481, 6486, 6748, 6932, 6959, 6961, 7094,
+                       7252, 7390, 7505, 7593, 7664, 7751, 7765, 7910, 8040, 8163, 8189, 8256, 8279, 8482, 8574, 8583,
+                       8707, 8956, 9033, 9051, 9219, 9421, 9560, 9615, 9625, 9721, 10497, 165520, 270042, 320013,
+                       501310, 519671, 519981, 539001]
 
     # 将valid_code_list 补充为6位字符串，并且前面补0
     valid_code_list = [str(code).zfill(6) for code in valid_code_list]
@@ -649,23 +659,11 @@ if __name__ == "__main__":
 
     # 3. 加载并合并数据
     all_df_list = []
-    for i in range(4):
+    for i in range(5):
         df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=1250, min_score=0)
         df_2d['Total_Score'] = df_2d['Total_Score'] * 10000
         # 只保留CAGR大于0.1的组合
-        df_2d = df_2d[df_2d['CAGR'] > 0.01].reset_index(drop=True)
-
-        # df_2d['score'] = df_2d['CAGR']  * df_2d['Total_Score'] * 10
-        # # df_2d 按照score降序排序
-        # df_2d = df_2d.sort_values(by='score', ascending=False).reset_index(drop=True)
-
-        # df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=1250, min_score=1.1)
-        # df_d['score'] = df_d['CAGR'] * df_d['Total_Score'] * 10
-        # # df_d 按照score降序排序
-        # df_d = df_d.sort_values(by='score', ascending=False).reset_index(drop=True)
-        # filtered_df1 = df_d[
-        #     df_d['组合文件名'].str.contains('006961') & df_d['组合文件名'].str.contains('008326') & df_d[
-        #         '组合文件名'].str.contains('009033') & df_d['组合文件名'].str.contains('519212')]
+        df_2d = df_2d[df_2d['CAGR'] > 0.1].reset_index(drop=True)
 
         all_df_list.append(df_2d)
 
@@ -675,22 +673,22 @@ if __name__ == "__main__":
     print(
         f"合并完成，原始数据总量: {len(all_df):,} 条记录。正在进行代码过滤...当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     start_time = time.time()
+
     if invalid_code_list:
         # 1. 将无效列表转换为集合 (Set)，查找速度提升至 O(1)
         invalid_set = set(invalid_code_list)
 
+        # 【核心优化点 1】: 在循环外预编译正则表达式，避免几百万次的重复编译
+        pattern = re.compile(r'\d{6}')
 
-        def is_valid_row(filename):
-            if pd.isna(filename):
-                return False
-            # 提取该文件名里的所有6位代码
-            codes_in_file = re.findall(r'\d{6}', str(filename))
-            # 判断是否有重叠
-            return invalid_set.isdisjoint(codes_in_file)
+        # 【核心优化点 2】: 提前将 Series 转换为 Python 原生 list，提速极大
+        filenames = all_df['组合文件名'].tolist()
 
-
-        # 3. 使用 Python 原生的列表推导式生成掩码 (比 pandas 的 .apply 还要快)
-        mask = [is_valid_row(fname) for fname in all_df['组合文件名']]
+        # 【核心优化点 3】: 去除函数封装改为内联，并且用 type(fname) is str 替代极慢的 pd.isna()
+        mask = [
+            invalid_set.isdisjoint(pattern.findall(fname)) if type(fname) is str else False
+            for fname in filenames
+        ]
 
         # 4. 过滤数据
         all_df_filter = all_df[mask].reset_index(drop=True)
@@ -699,7 +697,8 @@ if __name__ == "__main__":
 
     print(
         f"过滤前数据量: {len(all_df)}, 过滤后数据量: {len(all_df_filter)} (共过滤掉 {len(all_df) - len(all_df_filter):,} 条记录)，耗时: {time.time() - start_time:.2f} 秒")
-    all_df_filter['score'] = all_df_filter['CAGR'] * 10 * all_df_filter['Total_Score']
+
+    all_df_filter['score'] = all_df_filter['CAGR'] * 10 * all_df_filter['CAGR'] * 10 * all_df_filter['CAGR'] * 10 * all_df_filter['Total_Score']
     # df_d 按照score降序排序
     all_df_filter = all_df_filter.sort_values(by='score', ascending=False).reset_index(drop=True)
 
@@ -737,25 +736,19 @@ if __name__ == "__main__":
     # 3. 构建 {基金代码: 简化后的基金简称} 的哈希字典映射
     code_to_name_dict = dict(zip(padded_active_codes, simplified_names))
 
-
-    # 4. 定义解析与替换函数
-    def map_code_combo_to_name_combo(combo_str):
-        if pd.isna(combo_str):
-            return combo_str
-        # 按下划线拆分代码组合
-        codes = str(combo_str).split('_')
-        # 查字典进行替换，如果字典中不存在对应简称，则保留原代码
-        names = [str(code_to_name_dict.get(code, code)) for code in codes]
-        # 将简称重新组合拼接
-        return '_'.join(names)
-
-
-    # 5. 应用函数，生成新增的 "基金简称组合" 列
-    all_df_filter['基金简称组合'] = all_df_filter['组合文件名'].apply(map_code_combo_to_name_combo)
+    # 【同步优化】：废弃原有的 apply() 与 pd.isna()，采用高速原生列表推导式
+    # 5. 生成新增的 "基金简称组合" 列
+    combo_filenames_filter = all_df_filter['组合文件名'].tolist()
+    all_df_filter['基金简称组合'] = [
+        '_'.join([str(code_to_name_dict.get(code, code)) for code in fname.split('_')])
+        if type(fname) is str else fname
+        for fname in combo_filenames_filter
+    ]
 
     # 6. 将 "基金简称组合" 列挪动到第一列
     col_to_move = all_df_filter.pop('基金简称组合')
     all_df_filter.insert(0, '基金简称组合', col_to_move)
+
     # 将 组合文件名 Start_Date End_Date Total_Days 放到最后几列
     cols = list(all_df_filter.columns)
     key_list = ['组合文件名', 'Start_Date', 'End_Date', 'Total_Days']
@@ -764,6 +757,8 @@ if __name__ == "__main__":
             cols.remove(key)
             cols.append(key)
     all_df_filter = all_df_filter[cols]
+    # 计算 组合的数量
+    all_df_filter['组合数量'] = all_df_filter['组合文件名'].apply(lambda x: len(str(x).split('_')) if type(x) is str else 0)
 
     df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=600, min_score=0)
     df_d['score'] = df_d['CAGR'] * df_d['Total_Score'] * 10
