@@ -499,7 +499,7 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
     :return: 过滤并合并后按分数排序的 DataFrame
     """
     # 1. 动态生成正则匹配模式，搜索指定维度的所有文件
-    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_pool3*.parquet')
+    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_*.parquet')
     file_list = glob.glob(search_pattern)
 
     if not file_list:
