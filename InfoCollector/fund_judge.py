@@ -585,7 +585,7 @@ def _build_downside_corr_matrix(downside_csv):
 
 def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_csv='fund_data/fund_correlations.csv',
                             downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv', max_workers=10,
-                            downside_corr_csv='fund_data/fund_downside_correlations.csv'):
+                            downside_corr_csv='fund_data/fund_downside_correlations_300.csv',df_filtered=None):
     print(f"\n[{now_str()}] ---------------- 开始准备全市场相关性双矩阵 ----------------")
     if os.path.exists(downside_corr_csv):
         log(f"已发现现有现行相关性文件 {downside_corr_csv},直接加载缓存...")
@@ -607,6 +607,9 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_cs
 
     if not os.path.exists(result_csv): return pd.DataFrame(), downside_corr_matrix
     df_results = pd.read_csv(result_csv)
+    if df_filtered is not None and not df_filtered.empty:
+        df_results = df_filtered
+        log(f"已应用最新的基础过滤结果，相关性计算将基于 {len(df_results)} 只基金。")
     files = df_results['adj_nav_file'].dropna().tolist()
     log(f"正在并行读取 {len(files)} 只基金...")
     nav_series_list = _parallel_load_navs(files, max_workers, "并行加载数据")
@@ -625,7 +628,7 @@ def _extract_target_codes(df_filtered):
         lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})', str(x)) else "000000")
 
 
-def filter_fund_pool(df_results, active_cache='temp/active_fund_codes_1741_剔除增强指数_剔除主动债_剔除细分行业_剔地方信用债.csv', min_annual_return=0.15, min_day=1000):
+def filter_fund_pool(df_results, active_cache='temp/active_fund_codes.csv', min_annual_return=0.15, min_day=1000):
     if df_results is None or df_results.empty: return pd.DataFrame()
     original_count = len(df_results)
     df_filtered = df_results.copy()
@@ -1257,11 +1260,11 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
 if __name__ == '__main__':
     GLOBAL_MAX_WORKERS = 30
     RESULT_CSV = 'fund_data/all_funds_result.csv'
-    CORR_CSV = 'fund_data/fund_correlations.csv'
+    CORR_CSV = 'fund_data/fund_correlations_300.csv'
     DOWNSIDE_CSV = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
 
     # 【配置参数】固定单次 Base Pool 筛选的 min_day 阈值，及最高计算维度
-    FIXED_MIN_DAY = DEFAULT_MAX_HISTORY
+    FIXED_MIN_DAY = 250
     MAX_DIMENSION = 10
 
     _warmup_numba()
@@ -1273,7 +1276,7 @@ if __name__ == '__main__':
         exit(0)
 
     df_results = pd.read_csv(RESULT_CSV)
-    df_filtered = filter_fund_pool(df_results, min_annual_return=0.02, min_day=FIXED_MIN_DAY)
+    df_filtered = filter_fund_pool(df_results, min_annual_return=0.5, min_day=FIXED_MIN_DAY)
     if df_filtered.empty:
         log("符合基础要求的基金数量为 0,退出流程。")
         exit(0)
@@ -1281,11 +1284,11 @@ if __name__ == '__main__':
     # 如果传入的 downside_csv 有统配符，获取第一个
     matched_downside = glob.glob(DOWNSIDE_CSV)
     ACTUAL_DOWNSIDE_CSV = matched_downside[
-        0] if matched_downside else 'fund_data/fof_evaluation_results_2d_downside.csv'
+        0] if matched_downside else 'fund_data/fof_evaluation_results_2d_downside_300.csv'
 
     global_corr_matrix, global_downside_corr_matrix = precompute_correlations(
         result_csv=RESULT_CSV, corr_csv=CORR_CSV, downside_csv=ACTUAL_DOWNSIDE_CSV,
-        max_workers=GLOBAL_MAX_WORKERS
+        max_workers=GLOBAL_MAX_WORKERS,df_filtered=df_filtered
     )
 
     if global_corr_matrix.empty:

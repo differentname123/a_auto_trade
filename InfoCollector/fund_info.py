@@ -357,7 +357,7 @@ def calculate_fund_stats(df, fund_name="Unknown", date_col='净值日期', nav_c
     return result
 
 
-def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期', nav_col='单位净值'):
+def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期', nav_col='单位净值',head_count=300):
     """
     基金数据处理流水线：提取统计指标 -> 提取前十大持仓 -> 无差别计算并保存复权净值
     """
@@ -368,6 +368,12 @@ def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期
         df = pd.read_csv(file_path)
     except Exception as e:
         df = pd.DataFrame()
+
+    # 最多只保留最近的300行数据
+    if not df.empty and date_col in df.columns:
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        df = df.sort_values(by=date_col, ascending=False).head(head_count).sort_values(by=date_col).reset_index(drop=True)
+
 
     # 2. 基础指标计算 (不再做死刑淘汰)
     result = calculate_fund_stats(df, fund_name=fund_name, date_col=date_col, nav_col=nav_col)
@@ -489,7 +495,7 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
     :return: 过滤并合并后按分数排序的 DataFrame
     """
     # 1. 动态生成正则匹配模式，搜索指定维度的所有文件
-    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_*.parquet')
+    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_pool385_*.parquet')
     file_list = glob.glob(search_pattern)
 
     if not file_list:
@@ -636,7 +642,7 @@ from datetime import datetime
 if __name__ == "__main__":
     # 1. 读取报告文件
     report_df = pd.read_csv('fund_data/base_pool_rejection_reasons.csv')
-    active_code_df = pd.read_csv('temp/active_fund_codes_new.csv')
+    active_code_df = pd.read_csv('temp/active_fund_codes.csv')
     # 获取 active_code_df 的 基金简称列表
     name_list = active_code_df['基金简称'].dropna().unique().tolist()
     # 只保留 基金简称 包含 增强 的行
@@ -646,10 +652,8 @@ if __name__ == "__main__":
     report_df = report_df.merge(active_code_df, left_on='基金代码', right_on='基金代码', how='right')
     # black_code_list = get_blacklisted_fund_codes(report_df)
     all_codes = report_df['文件'].str.extract(r'(\d{6})')[0].dropna().unique().tolist()
-    valid_code_list = [71, 179, 614, 2659, 3520, 4532, 5561, 6286, 6341, 6473, 6481, 6486, 6748, 6932, 6959, 6961, 7094,
-                       7252, 7390, 7505, 7593, 7664, 7751, 7765, 7910, 8040, 8163, 8189, 8256, 8279, 8482, 8574, 8583,
-                       8707, 8956, 9033, 9051, 9219, 9421, 9560, 9615, 9625, 9721, 10497, 165520, 270042, 320013,
-                       501310, 519671, 519981, 539001]
+    valid_code_list = [66, 73, 166, 173, 409, 457, 462, 522, 541, 586, 598, 612, 619, 646, 689, 698, 805, 927, 935, 1000, 1069, 1070, 1076, 1103, 1128, 1144, 1152, 1154, 1156, 1158, 1162, 1173, 1198, 1216, 1261, 1268, 1302, 1323, 1398, 1402, 1411, 1471, 1475, 1521, 1607, 1707, 1709, 1712, 1741, 1759, 1816, 1869, 1877, 1985, 2064, 2095, 2145, 2149, 2160, 2251, 2256, 2272, 2292, 2345, 2367, 2376, 2407, 2420, 2446, 2450, 2542, 2776, 2860, 2861, 2862, 2863, 2885, 2892, 2910, 2939, 3145, 3304, 3567, 3626, 3659, 3670, 3745, 3857, 4128, 4352, 4374, 4496, 4818, 4833, 4890, 5001, 5009, 5090, 5136, 5186, 5268, 5328, 5343, 5472, 5537, 5550, 5628, 5668, 5682, 5700, 5726, 5775, 5825, 5826, 5962, 6154, 6230, 6250, 6270, 6429, 6551, 6736, 6863, 6864, 6969, 6976, 7074, 7639, 7674, 8082, 8186, 8251, 8382, 8655, 8671, 8903, 8949, 8962, 8980, 8983, 9055, 9062, 9188, 9234, 9317, 9402, 9486, 9488, 9640, 9853, 9861, 9899, 9988, 9989, 9994, 10020, 10147, 10180, 10313, 10335, 10389, 10421, 10460, 10490, 10495, 10622, 10808, 10826, 10925, 11011, 11030, 11035, 11122, 11144, 11186, 11196, 11369, 11446, 11599, 11800, 11815, 11884, 12093, 12102, 12147, 12198, 12200, 12294, 12301, 12454, 12477, 12491, 12493, 12530, 12545, 12844, 12846, 12850, 12920, 12925, 13000, 13238, 13296, 13365, 13389, 13495, 13693, 13755, 13855, 13942, 14185, 14267, 14287, 14319, 14352, 14401, 14416, 14541, 14545, 14736, 15035, 15043, 15145, 15229, 15368, 15381, 15703, 15789, 16105, 16117, 16182, 16243, 16388, 16568, 16605, 16664, 16873, 17036, 17234, 17471, 17488, 17551, 17730, 17751, 17866, 17876, 17878, 17960, 17987, 18019, 18122, 18194, 18229, 18287, 18358, 18375, 18418, 18547, 18611, 18790, 18815, 18823, 18835, 18876, 18910, 18916, 18918, 18983, 18999, 19155, 19189, 19219, 19226, 19281, 19347, 19374, 19410, 19612, 19702, 19759, 19765, 19820, 19888, 19920, 20010, 20018, 20064, 20236, 20424, 20440, 20560, 20685, 20722, 20755, 21145, 21278, 21431, 21623, 21642, 21730, 21792, 21875, 22003, 22028, 22119, 22299, 22311, 22334, 22364, 22704, 22717, 22754, 23135, 23397, 23407, 23429, 23461, 23524, 23564, 23632, 23638, 23651, 23851, 23889, 24059, 40001, 40021, 50024, 100055, 100060, 110005, 110012, 112002, 160324, 160605, 160638, 160642, 160722, 161606, 161728, 161910, 163818, 164205, 164212, 166301, 167002, 168002, 169101, 169105, 180031, 200012, 213008, 240011, 290008, 320001, 320016, 340006, 377240, 410006, 410009, 457001, 481010, 501015, 501026, 501064, 501073, 501085, 501096, 501097, 501200, 501201, 519025, 519029, 519089, 519158, 519195, 519644, 519704, 519766, 539002, 570001, 630006, 630016, 673060, 673141]
+
 
     # 将valid_code_list 补充为6位字符串，并且前面补0
     valid_code_list = [str(code).zfill(6) for code in valid_code_list]
@@ -659,8 +663,8 @@ if __name__ == "__main__":
 
     # 3. 加载并合并数据
     all_df_list = []
-    for i in range(5):
-        df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=1250, min_score=0)
+    for i in range(1):
+        df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=250, min_score=0)
         df_2d['Total_Score'] = df_2d['Total_Score'] * 10000
         # 只保留CAGR大于0.1的组合
         df_2d = df_2d[df_2d['CAGR'] > 0.1].reset_index(drop=True)
@@ -759,6 +763,9 @@ if __name__ == "__main__":
     all_df_filter = all_df_filter[cols]
     # 计算 组合的数量
     all_df_filter['组合数量'] = all_df_filter['组合文件名'].apply(lambda x: len(str(x).split('_')) if type(x) is str else 0)
+    all_df_filter['score_corr_down'] = all_df_filter['Total_Score'] / (all_df_filter['Downside_Correlation'] + 2)
+    all_df_filter['score_corr_down1'] = all_df_filter['score'] / (all_df_filter['Downside_Correlation'] + 2)
+
 
     df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=600, min_score=0)
     df_d['score'] = df_d['CAGR'] * df_d['Total_Score'] * 10
