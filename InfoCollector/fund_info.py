@@ -159,18 +159,18 @@ def get_active_fund_codes():
     同时过滤掉当前处于【暂停申购】或【封闭期】的不可购买基金。
     """
     # 缓存检查：若有现成列表且包含名称，则直接读取
-    cache_file = 'temp/active_fund_codes_new.csv'
-    if os.path.exists(cache_file):
-        df_cache = pd.read_csv(cache_file, dtype=str)
-        filter_df = filter_fund_universe(df_cache)
-        filter_df.to_csv(cache_file, index=False, encoding='utf-8-sig')  # 更新缓存文件，剔除不合规基金
-        # 获取filter_df所有的 基金简称列表 并且去重
-        code_name_list = filter_df['基金简称'].dropna().unique().tolist()
-        if '基金简称' in df_cache.columns:
-            print(f"✅ 检测到本地缓存文件 {cache_file}，直接加载已有基金列表...")
-            return dict(zip(df_cache['基金代码'], df_cache['基金简称']))
-        else:
-            print("🔄 检测到旧版缓存文件缺失基金名称列，将重新获取并更新缓存...")
+    cache_file = 'temp/active_fund_codes.csv'
+    # if os.path.exists(cache_file):
+    #     df_cache = pd.read_csv(cache_file, dtype=str)
+    #     filter_df = filter_fund_universe(df_cache)
+    #     filter_df.to_csv(cache_file, index=False, encoding='utf-8-sig')  # 更新缓存文件，剔除不合规基金
+    #     # 获取filter_df所有的 基金简称列表 并且去重
+    #     code_name_list = filter_df['基金简称'].dropna().unique().tolist()
+    #     if '基金简称' in df_cache.columns:
+    #         print(f"✅ 检测到本地缓存文件 {cache_file}，直接加载已有基金列表...")
+    #         return dict(zip(df_cache['基金代码'], df_cache['基金简称']))
+    #     else:
+    #         print("🔄 检测到旧版缓存文件缺失基金名称列，将重新获取并更新缓存...")
 
     print("1. 正在获取全市场基金基础信息...")
     df_all = ak.fund_name_em()
@@ -423,6 +423,10 @@ def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期
 
 
 def judge_fund_df():
+    """
+    目前只会保留head_count最新的数据
+    :return:
+    """
     target_dir = 'fund_data/nav'
 
     print(f"🚀 开始扫描目录: {target_dir}")
@@ -495,7 +499,7 @@ def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
     :return: 过滤并合并后按分数排序的 DataFrame
     """
     # 1. 动态生成正则匹配模式，搜索指定维度的所有文件
-    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_pool385_*.parquet')
+    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_pool3*.parquet')
     file_list = glob.glob(search_pattern)
 
     if not file_list:
@@ -645,6 +649,16 @@ if __name__ == "__main__":
     active_code_df = pd.read_csv('temp/active_fund_codes.csv')
     # 获取 active_code_df 的 基金简称列表
     name_list = active_code_df['基金简称'].dropna().unique().tolist()
+    type_list = active_code_df['基金类型'].dropna().unique().tolist()
+    condition = active_code_df['基金类型'].str.contains('QDII|海外', na=False)
+
+    # 2. 过滤出海外资产的 DataFrame
+    overseas_df = active_code_df[condition]
+
+    # 3. 获取基金代码，转换为字符串，并使用 zfill(6) 在左侧补齐 0 到 6 位
+    overseas_codes = overseas_df['基金代码'].astype(str).str.zfill(6).tolist()
+
+
     # 只保留 基金简称 包含 增强 的行
     filter_active_code_df = active_code_df[active_code_df['基金简称'].str.contains('增强', na=False)]
 
@@ -663,11 +677,11 @@ if __name__ == "__main__":
 
     # 3. 加载并合并数据
     all_df_list = []
-    for i in range(1):
+    for i in range(2):
         df_2d = load_and_merge_parquet_by_dim(dimension=i + 2, min_days=250, min_score=0)
         df_2d['Total_Score'] = df_2d['Total_Score'] * 10000
         # 只保留CAGR大于0.1的组合
-        df_2d = df_2d[df_2d['CAGR'] > 0.1].reset_index(drop=True)
+        df_2d = df_2d[df_2d['CAGR'] > 1].reset_index(drop=True)
 
         all_df_list.append(df_2d)
 
@@ -765,7 +779,10 @@ if __name__ == "__main__":
     all_df_filter['组合数量'] = all_df_filter['组合文件名'].apply(lambda x: len(str(x).split('_')) if type(x) is str else 0)
     all_df_filter['score_corr_down'] = all_df_filter['Total_Score'] / (all_df_filter['Downside_Correlation'] + 2)
     all_df_filter['score_corr_down1'] = all_df_filter['score'] / (all_df_filter['Downside_Correlation'] + 2)
-
+    overseas_set = set(overseas_codes)
+    all_df_filter['包含海外基金'] = all_df_filter['组合文件名'].apply(
+        lambda x: any(code in overseas_set for code in str(x).split('_'))
+    )
 
     df_d = load_and_merge_parquet_by_dim(dimension=5, min_days=600, min_score=0)
     df_d['score'] = df_d['CAGR'] * df_d['Total_Score'] * 10

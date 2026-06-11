@@ -587,19 +587,19 @@ def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_cs
                             downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv', max_workers=10,
                             downside_corr_csv='fund_data/fund_downside_correlations_300.csv',df_filtered=None):
     print(f"\n[{now_str()}] ---------------- 开始准备全市场相关性双矩阵 ----------------")
-    if os.path.exists(downside_corr_csv):
-        log(f"已发现现有现行相关性文件 {downside_corr_csv},直接加载缓存...")
-        downside_corr_matrix = pd.read_csv(downside_corr_csv, index_col=0)
-    elif os.path.exists(downside_csv):
-        log(f"正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
-        downside_corr_matrix = _build_downside_corr_matrix(downside_csv)
-        if not downside_corr_matrix.empty:
-            log(f"成功构建下行相关性矩阵,涵盖 {len(downside_corr_matrix)} 只标的。")
-            ensure_dir(downside_corr_csv)
-            downside_corr_matrix.to_csv(downside_corr_csv)
-    else:
-        log(f"未发现 2 维组合文件 {downside_csv},跳过下行相关性提取。")
-        downside_corr_matrix = pd.DataFrame()
+    # if os.path.exists(downside_corr_csv):
+    #     log(f"已发现现有现行相关性文件 {downside_corr_csv},直接加载缓存...")
+    #     downside_corr_matrix = pd.read_csv(downside_corr_csv, index_col=0)
+    # elif os.path.exists(downside_csv):
+    #     log(f"正在从 2 维历史组合文件 {downside_csv} 提取 Downside_Correlation 矩阵...")
+    #     downside_corr_matrix = _build_downside_corr_matrix(downside_csv)
+    #     if not downside_corr_matrix.empty:
+    #         log(f"成功构建下行相关性矩阵,涵盖 {len(downside_corr_matrix)} 只标的。")
+    #         ensure_dir(downside_corr_csv)
+    #         downside_corr_matrix.to_csv(downside_corr_csv)
+    # else:
+    log(f"未发现 2 维组合文件 {downside_csv},跳过下行相关性提取。")
+    downside_corr_matrix = pd.DataFrame()
 
     if os.path.exists(corr_csv):
         log(f"已发现现有全天候相关性文件 {corr_csv},直接加载缓存...")
@@ -1297,7 +1297,7 @@ if __name__ == '__main__':
         log("启动双重相关性优胜劣汰过滤...")
         base_pool_files = _greedy_correlation_filter(
             df_filtered, global_corr_matrix, global_downside_corr_matrix,
-            0.9, 0.75)
+            0.95, 0.75)
 
 
     # 将固定的 Base Pool 常驻内存，返回值已优化为纯 6 位代码
