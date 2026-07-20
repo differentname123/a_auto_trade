@@ -1,86 +1,123 @@
 # =====================================================================================
 # 【功能摘要】
-#   全市场基金组合(FOF)多维度择优引擎。从单只基金净值出发,逐维(2维 → N维)裂变生成组合,
-#   经风险/收益指标评估与多重 VETO 否决后,沉淀出稳健的高分基金组合。
+#   公募基金一体化量化管线（单文件版）。三段式流水贯通:
+#     ① 采集段  : 全市场基金采集 → 只留可申购 → 逐只落盘净值/重仓股(断点续传)。
+#     ② 加工段  : 截近 N 日 → 复权净值累乘 → 年化/回撤/数据质量体检 → 多进程并行落盘。
+#     ③ 择优段  : 财务初筛 → 相关性去重 → Master 矩阵 → 逐维(2→N)Apriori 裂变评估 →
+#                 分层 VETO 否决 + 打分 → 复合排序输出可读候选组合。
 #
 # 【输入数据】
-#   1. fund_data/all_funds_result.csv : 全市场基金汇总表(含 adj_nav_file 路径/年化/天数/回撤等)。
-#   2. fund_data/nav/*.csv            : 单只基金净值明细(列: 净值日期 + 复权净值)。
-#   3. fund_data/*.parquet (历史)     : 各维度既往评估结果,用作断点缓存与升维种子。
-#
-# 【数据流转/交互】
-#   汇总表 ─filter_fund_pool→ 财务达标池
-#         ─precompute_correlations→ 全天候相关性矩阵
-#         ─_greedy_correlation_filter→ 低相关 Base Pool
-#         ─_build_master_matrix→ 常驻内存 Master 净值矩阵(整型列名,零字符串开销)
-#   随后进入【维度爬坡循环 N = 2..MAX】:
-#     上一维优秀种子(get_previous_good_combos) ─Apriori 前缀裂变→ 新维理论组合
-#         ─比对 computed_set 缓存去重→ 待评估组合
-#         ─ProcessPoolExecutor 并行→ evaluate_fof_portfolio_fast (Numba 模拟 + 分层VETO + 打分)
+#   1. akshare 在线接口             : 基金基础表/申购状态/净值走势/重仓股。
+#   2. fund_data/nav/*.csv          : 单只基金历史净值(单位净值 + 日增长率)。
+#   3. fund_data/all_funds_result.csv: 全市场基金汇总表(加工段产物)。
+#   4. fund_data/*.parquet          : 各维度既往评估结果(断点缓存与升维种子)。
 #
 # 【输出数据】
-#   1. fund_data/fof_evaluation_results_{N}d_pool*_min_day_*.parquet : 每维评估明细结果(副作用:落盘)。
-#   2. fund_data/computed_combos_{N}d_global_cache.parquet           : 全局已算组合缓存(断点续算)。
-#   3. fund_data/base_pool_rejection_reasons.csv                     : 全链路筛选审计记录(可追溯)。
+#   1. fund_data/all_funds_result.csv                            : 加工段汇总。
+#   2. fund_data/fof_evaluation_results_{N}d_*.parquet           : 每维评估明细。
+#   3. fund_data/computed_combos_{N}d_global_cache.parquet       : 全局已算缓存。
+#   4. fund_data/base_pool_rejection_reasons.csv                 : 全链路筛选审计。
+#   5. base_pool_codes.json                                      : 最终 Base Pool 代码。
+#   6. analyze_fof_combinations 返回按复合分排序的候选组合 DataFrame。
 # =====================================================================================
-import json
 import os
-import itertools
-import math
 import re
+import json
 import glob
-import pickle
+import math
+import time
 import shutil
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import pickle
+import itertools
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
-import pandas as pd
+
 import numpy as np
-from tqdm import tqdm
-from numba import njit
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from collections import defaultdict
+import akshare as ak
+from tqdm import tqdm
+from numba import njit
 
-from InfoCollector.fund_info import get_active_fund_codes, fetch_and_save_fund_data, judge_fund_df, \
-    analyze_fof_combinations
 
 # ====================================================================
-# 全局常量配置
+# 【全局统一关键配置区】(所有影响回测与模型结果的参数统一在此维护)
 # ====================================================================
-TRADING_DAYS_PER_YEAR = 252
-DEFAULT_REBALANCE_DAYS = 30
-DEFAULT_MAX_HISTORY = 5 * TRADING_DAYS_PER_YEAR
-ROLLING_WINDOW = TRADING_DAYS_PER_YEAR
-ROLLING_STEP = 21
-FIXED_MIN_DAY = 40  # Base Pool 初筛的最短运行天数
 
-# VETO 否决阈值
-VETO_MAX_MDD = 0.5
-VETO_HURDLE_RATE = 0.05
-VETO_AR1 = 0.55
-VETO_VOL = 0.03
-VETO_RECOVERY_DAYS = 350
-VETO_MISSING_RATIO = 0.05
-VETO_CONTINUOUS_ZEROS = 10
-VETO_CALMAR_MULTIPLIER = 1.01
-VETO_WORST_1Y = -0.15
-VETO_ZOMBIE_DAYS = 35
+# ----------------- 1. 核心回测时间与运行范围配置 -----------------
+CFG_MAX_DIMENSION = 3                # 回测的最高维度(例如3代表最高计算3只基金组合)
+CFG_RECENT_DAYS_LIMIT = 50           # 截取最近N天数据(决定了回测的时间窗口长度)
+CFG_HOLDINGS_YEAR = "2026"           # 重仓股穿透对应的披露年份
 
-# 打分参数
-TAIL_RISK_SENSITIVITY = 2.5
-TIME_SATURATION_DAYS = DEFAULT_MAX_HISTORY
-SCORE_DC_HIGH = 0.8
-SCORE_DC_MID = 0.5
+TRADING_DAYS_PER_YEAR = 252          # 每年平均交易日天数(基准常数)
+DEFAULT_REBALANCE_DAYS = 30          # FOF组合的默认调仓周期(天)
+DEFAULT_MAX_HISTORY = 5 * TRADING_DAYS_PER_YEAR  # 算法最多追溯的历史天数(防老数据过度影响)
+ROLLING_WINDOW = TRADING_DAYS_PER_YEAR # 滚动计算R2等指标的固定窗口长度
+ROLLING_STEP = 21                    # 滚动计算时窗口的滑动步进天数(约1个月)
 
-# 多进程与批处理
-BATCH_SIZE = 200000
-CHUNK_SIZE = 2000
-PERTURBATION_SEEDS = [1024, 2048, 4096]
+# ----------------- 2. 单只基金初筛与准入条件 (Base Pool 准入) -----------------
+FIXED_MIN_DAY = 40                   # 基金必须存活的最短有效交易天数
+CFG_BASE_POOL_MIN_CAGR = 0.5         # 单只基金初筛门槛: 年化收益率必须大于此绝对值(0.5即50%)
+CFG_FUND_MIN_MDD = -0.7              # 单只基金初筛门槛: 历史最大回撤底线(低于此值剔除)
 
-# 单只基金净值加载的脏数据拦截阈值
-JUMP_HARD_LIMIT = 0.315   # 绝对物理涨幅上限(覆盖各板块 30% + 缓冲)
-JUMP_SOFT_LIMIT = 0.06    # 固收类可疑涨幅阈值
-FIXED_INCOME_VOL = 0.006  # 固收类日波动率判定线
+# ----------------- 3. 相关性过滤配置 (去同质化) -----------------
+CFG_CORR_THRESHOLD = 0.95            # 全天候相关性剔除阈值(两只基金相关性高于此则视为高度冗余)
+CFG_DOWNSIDE_CORR_THRESHOLD = 0.75   # 下行相关性剔除阈值(暴跌时高度同步则不能有效分散风险)
+CFG_DOWNSIDE_TAIL_RATIO = 0.05       # 计算下行相关性时，取跌幅最大的百分之多少的数据进行计算
+CFG_DOWNSIDE_MIN_DAYS = 5            # 计算下行相关性时，最少需要的数据天数
+
+# ----------------- 4. 组合评估 VETO 一票否决机制 (核心避坑逻辑) -----------------
+VETO_MAX_MDD = 0.5                   # 组合一票否决: 组合复合最大回撤不能超过绝对值(0.5=50%)
+VETO_HURDLE_RATE = 0.05              # 组合一票否决: 组合复合年化必须跑赢此基准(0.05=5%)
+VETO_AR1 = 0.55                      # 组合一票否决: 收益率一阶自相关系数上限(防虚假平滑)
+VETO_VOL = 0.03                      # 组合一票否决: 年化波动率下限(低于此值视为固收类/造假)
+VETO_RECOVERY_DAYS = 350             # 组合一票否决: 最长未创新高天数(回撤修复期太长)
+VETO_MISSING_RATIO = 0.05            # 数据一票否决: 数据缺失率上限(0.05=5%)
+VETO_CONTINUOUS_ZEROS = 10           # 数据一票否决: 最大连续零收益天数(防停牌/死水基金)
+VETO_CALMAR_MULTIPLIER = 1.01        # 卡玛过滤: 组合卡玛比率必须大于(单只平均卡玛 * 1.01倍)
+VETO_WORST_1Y = -0.15                # 组合一票否决: 任意滚动1年的最差收益不能低于(-15%)
+VETO_ZOMBIE_DAYS = 35                # 僵尸基金判定: 距离当前断更天数超过此值则直接判死
+
+# ----------------- 5. 组合综合打分与最终择优输出参数 -----------------
+TAIL_RISK_SENSITIVITY = 2.5          # 尾部风险敏感度(对数得分惩罚系数,越大对极端下跌的惩罚越重)
+TIME_SATURATION_DAYS = DEFAULT_MAX_HISTORY # 时间分饱和天数(回测天数接近此值则不继续奖励加分)
+SCORE_DC_HIGH = 0.8                  # 下行相关性高位惩罚线(大于0.8扣分极重)
+SCORE_DC_MID = 0.5                   # 下行相关性中位惩罚线(0.5~0.8按线性平滑扣分)
+CFG_FINAL_FOF_MIN_CAGR = 1.0         # 最终结果输出门槛: 复合组合年化筛选底线
+
+# ----------------- 6. 数据质检与黑名单清洗界限 -----------------
+JUMP_HARD_LIMIT = 0.315              # 脏数据物理上限: 单日涨跌幅超31.5%无脑击杀(覆盖各板涨停并加缓冲)
+JUMP_SOFT_LIMIT = 0.06               # 固收异常上限: 疑似固收类单日涨跌超6%启动复查
+FIXED_INCOME_VOL = 0.006             # 固收判定波动率: 历史波动率小于0.6%则视为固收
+
+# 手工维护的主动债及问题基金黑名单(防久期与信用暴露，防止不适合做被动FOF的基金混入)
+CFG_ACTIVE_FUNDS_BLACKLIST = [
+    "华夏鼎航债券", "兴业裕丰债券", "鹏华丰惠债券", "西部利得汇盈债券",
+    "广发景宁债券", "华安安业债券", "中信保诚景丰", "国金惠安利率债",
+    "南方交元债券", "华安鼎丰债券", "华宝宝泓债券", "兴全恒裕债券",
+    "德邦锐乾债券", "中信保诚稳达", "兴全稳泰债券", "德邦锐裕利率债债券",
+    "天弘信益债券", "中信保诚稳丰", "鹏华丰禄债券", "西部利得祥逸债券",
+    "永赢裕益债券", "南方旭元债券", "兴业福鑫债券", "永赢邦利债券",
+    "前海开源鼎欣债券", "中信保诚稳泰债券", "永赢昌利债券", "诺德安鸿",
+    "鹏华金利债券", "华夏鼎通债券", "华夏鼎隆债券", "鹏扬淳开债券",
+    "易方达中短期美元债", "中银汇享债券", "永赢伟益债券", "中信保诚稳益",
+    "建信利率债债券", "鹏华丰鑫债券", "宏利永利债券", "鹏华0-5年利率债券",
+    "中信保诚稳鸿", "华夏鼎康债券", "南方泽元债券", "永赢瑞益债券",
+    "永赢惠益债券", "兴业裕恒债券", "鹏华丰腾债券",
+]
+
+# ----------------- 7. 算力保护与多进程系统级配置 -----------------
+CFG_GLOBAL_MAX_WORKERS = 30          # 并行进程池的最大可用进程数(依机器核心数调整)
+CFG_DIM_UPGRADE_TARGET_COMBOS = 50000000 # 升维阀门: 理论组合数膨胀超此值时动态截留精英种子(防内存撑爆)
+PERTURBATION_SEEDS = [1024, 2048, 4096]  # 权重扰动测试种子集(检查组合稳健性防过拟合)
+BATCH_SIZE = 200000                  # 每批次写入 Parquet 的缓冲池大小
+CHUNK_SIZE = 2000                    # 每个进程 worker 一次处理的组合切片大小
+# ====================================================================
+
+# 子进程全局容器(由 initializer 锚定,避免主进程大 DataFrame 反复序列化)
+WORKER_MASTER_DF = None
 
 # 输出列定义
 OUTPUT_COLUMNS = [
@@ -91,9 +128,6 @@ OUTPUT_COLUMNS = [
     'Avg_CAGR', 'Avg_Max_Drawdown', 'Calmar_Baseline', 'Worst_Rolling_1Y_Return',
     'error', 'Total_Score'
 ]
-
-# 子进程全局容器(由 initializer 锚定,避免主进程大 DataFrame 反复序列化)
-WORKER_MASTER_DF = None
 
 
 def _init_worker(master_df):
@@ -131,6 +165,376 @@ def normalize_combo_tuple(combo_str, sep='_'):
     """将组合字符串归一化为"升序整型元组"。整型化可极大降低缓存 Set 的内存占用。"""
     parts = [int(str(x).strip()) for x in str(combo_str).split(sep)]
     return tuple(sorted(parts))
+
+
+def read_json(json_path):
+    """读取 JSON 文件并返回内容, 文件缺失返回空字典。"""
+    if not os.path.exists(json_path):
+        return {}
+    with open(json_path, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"无法解析 JSON 文件 '{json_path}': {e}")
+
+
+def save_json(json_path, data):
+    """原子写入 JSON(先写临时文件再替换), 避免中断产生半截文件。"""
+    dir_path = os.path.dirname(json_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    tmp_path = json_path + ".tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4, default=str)
+    os.replace(tmp_path, json_path)
+
+
+def create_folders():
+    """确保所有落盘目录存在, 缺失即创建。"""
+    dirs = ['temp', 'fund_data/nav', 'fund_data/holdings']
+    created = [d for d in dirs if not os.path.exists(d)]
+    for d in created:
+        os.makedirs(d)
+    print(f"【目录初始化】完成 | 需创建: {created if created else '无(均已存在)'}")
+
+
+# ====================================================================
+# 数据采集段: 全市场基金拉取 → 可申购过滤 → 逐只落盘净值/重仓股
+# ====================================================================
+def _get_active_bond_mask(name_series):
+    """返回主动债剔除掩码。判据: 命中嫌疑词 且 未命中被动指数护身符 = 主动债。"""
+    suspect_words = ['纯债', '短债', '信用债', '收益债', '回报',
+                     '双季', '季季', '月月', '添利', '增利', '稳利']
+    shield_words = ['指数', '中债', '彭博', '上清所', '国开', '政金', '农发']
+    is_suspect = name_series.str.contains('|'.join(suspect_words), regex=True, na=False)
+    has_shield = name_series.str.contains('|'.join(shield_words), regex=True, na=False)
+    return is_suspect & (~has_shield)
+
+
+def filter_fund_universe(df, type_col='基金类型', name_col='基金简称', remove_c_class=True):
+    """
+    清洗基金底仓池: 大类剔除 → 主动债狙击 → A/C 冗余份额去重, 并输出归因报告。
+    目的是留下"仓位稳定、可复权、代表性单一份额"的干净候选池。
+    """
+    if df is None or df.empty:
+        print("【基金池清洗】跳过 | 原因: [传入数据为空]")
+        return df
+
+    res_df = df.copy()
+    total_before = len(res_df)
+    clean_stats = {}
+
+    # 模块一: 按【基金类型】剔除会污染相关性/收益的大类
+    type_filter_rules = {
+        "1. 混合型 (仓位飘忽污染相关性)": [
+            '混合型-灵活', '混合型-偏股', '混合型-偏债', '混合型-平衡', '混合型-绝对收益',
+            'QDII-混合偏股', 'QDII-混合债', 'QDII-混合灵活', 'QDII-混合平衡'],
+        "2. 假纯债 (含股票仓位易暴雷)": ['债券型-混合二级', '债券型-混合一级'],
+        "3. 纯主动股票型 (回测噪音太大)": ['股票型', 'QDII-普通股票'],
+        "4. 货币类 (拉低收益导致资金站岗)": ['货币型-普通货币', '货币型-浮动净值'],
+        "5. FOF类 (避免资产配置套娃)": ['FOF-稳健型', 'FOF-进取型', 'FOF-均衡型', 'QDII-FOF'],
+    }
+    if type_col in res_df.columns:
+        res_df[type_col] = res_df[type_col].fillna('').str.strip()
+        for reason, types in type_filter_rules.items():
+            mask = res_df[type_col].isin(types)
+            if mask.sum() > 0:
+                clean_stats[reason] = int(mask.sum())
+            res_df = res_df[~mask]
+
+    # 模块二: 按【基金名称】语义精准狙击主动债
+    if name_col in res_df.columns:
+        active_bond_mask = _get_active_bond_mask(res_df[name_col])
+        if active_bond_mask.sum() > 0:
+            clean_stats["6. 主动型债券 (防范信用/久期暴露)"] = int(active_bond_mask.sum())
+        res_df = res_df[~active_bond_mask]
+
+    # 模块三: 剔除同一只基金的冗余份额, 排序后仅保留 A 份额
+    if remove_c_class and name_col in res_df.columns:
+        before_ac = len(res_df)
+        res_df['base_name'] = res_df[name_col].str.replace(r'[ABCDEHIY]$', '', regex=True)
+        res_df = res_df.sort_values(by=name_col).drop_duplicates(subset=['base_name'], keep='first')
+        res_df = res_df.drop(columns=['base_name'])
+        ac_count = before_ac - len(res_df)
+        if ac_count > 0:
+            clean_stats["7. 冗余份额去重 (剔除C/E等)"] = ac_count
+
+    # 模块四: 归因报告
+    total_after = len(res_df)
+    total_cleaned = total_before - total_after
+    print("\n" + "=" * 55)
+    print("【基金池清洗报告】")
+    print(f"  清洗前: [{total_before:,}] 只 | 最终保留: [{total_after:,}] 只 | 剔除: [{total_cleaned:,}] 只")
+    if total_cleaned > 0:
+        print("-" * 55 + "\n  [剔除归因及占比]")
+        for reason, count in sorted(clean_stats.items(), key=lambda x: x[1], reverse=True):
+            print(f"    {reason:<26} : [{count:>5,}] 只 ({count / total_cleaned:>6.2%})")
+    print("=" * 55 + "\n")
+
+    return res_df.reset_index(drop=True)
+
+
+def get_active_fund_codes():
+    """
+    拉取全市场基金, 仅保留申购状态可买入的基金, 输出 {代码: 简称} 字典并落盘映射。
+    Why: 已清盘/封闭期的基金无法建仓, 提前剔除避免后续无效抓取。
+    """
+    create_folders()
+    cache_file = 'fund_data/active_fund_codes.csv'
+
+    print("【采集-基础信息】正在拉取全市场基金列表...")
+    df_all = ak.fund_name_em()
+
+    print("【采集-申购状态】正在剔除已清盘/当前无法申购的基金...")
+    try:
+        df_active = ak.fund_open_fund_daily_em()
+        buyable_status = ['开放申购', '限大额', '场内交易']  # 散户可买入状态
+        df_buyable = df_active[df_active['申购状态'].isin(buyable_status)]
+        active_codes = set(df_buyable['基金代码'].astype(str).str.zfill(6).tolist())
+        print(f"  今日更新净值: [{len(df_active)}] 只 | 可正常申购: [{len(df_buyable)}] 只")
+    except Exception as e:
+        print(f"【警告】拉取每日申购状态失败, 降级为使用全量列表 | 可能原因: [接口异常/字段变动] | 详情: {e}")
+        active_codes = set(df_all['基金代码'].astype(str).str.zfill(6).tolist())
+
+    df_filtered = df_all[df_all['基金代码'].isin(active_codes)].copy()
+    print(f"  全量: [{len(df_all)}] 只 → 剔除不可购买后候选: [{len(df_filtered)}] 只")
+
+    fund_dict = dict(zip(df_filtered['基金代码'], df_filtered['基金简称']))
+    print(f"【采集-完成】可申购候选基金共计: [{len(fund_dict)}] 只")
+
+    pd.DataFrame({
+        '基金代码': list(fund_dict.keys()),
+        '基金简称': list(fund_dict.values()),
+        '基金类型': df_filtered['基金类型'].tolist(),
+    }).to_csv(cache_file, index=False, encoding='utf-8-sig')
+    print(f"  已落盘代码映射 → [{cache_file}]")
+
+    return fund_dict
+
+
+def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False, fetch_holdings=False, max_workers=10):
+    """遍历基金字典 {code: name}, 抓取净值走势与重仓股并落盘。"""
+    all_codes_list = list(fund_codes.keys())
+    codes_to_process = all_codes_list[:5] if test_mode else all_codes_list
+    mode_tag = '测试模式(前5只)' if test_mode else '全量'
+    print(f"\n【采集-下载】启动 | 模式: [{mode_tag}] | 计划处理: [{len(codes_to_process)}] 只")
+
+    # 将原 for 循环内部逻辑提取为独立的单任务函数
+    # 借助闭包特性，直接使用外部的 fund_codes, year, fetch_holdings 等变量
+    def _process_single_fund(code):
+        fund_name = fund_codes[code]
+
+        # 净值走势: 仅当本地无文件，或文件大小为0（处理历史遗留的占位空文件）时才请求
+        nav_file = f"fund_data/nav/{code}_nav.csv"
+        if not os.path.exists(nav_file) or os.path.getsize(nav_file) == 0:
+            try:
+                nav_df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+                if not nav_df.empty:
+                    nav_df.to_csv(nav_file, index=False, encoding='utf-8-sig')
+                # 删除了 else 分支的占位文件生成逻辑
+            except Exception:
+                # 删除了异常时的占位文件生成逻辑
+                tqdm.write(f"【跳过-净值】抓取失败 | 基金: [{code} {fund_name}] | 可能原因: [无净值数据/接口解析异常]")
+
+        # 重仓股: 同样断点续传，并增加对空占位文件的重新拉取判定
+        if fetch_holdings:
+            holdings_file = f"fund_data/holdings/{code}_holdings_{year}.csv"
+            if not os.path.exists(holdings_file) or os.path.getsize(holdings_file) == 0:
+                try:
+                    holdings_df = ak.fund_portfolio_hold_em(symbol=code, date=year)
+                    if not holdings_df.empty:
+                        holdings_df.to_csv(holdings_file, index=False, encoding='utf-8-sig')
+                    # 删除了 else 分支的占位文件生成逻辑
+                except Exception:
+                    # 删除了异常时的占位文件生成逻辑
+                    tqdm.write(
+                        f"【跳过-重仓股】抓取失败 | 基金: [{code} {fund_name}] | 可能原因: [无持仓披露/接口解析异常]")
+
+    # 启用线程池进行 20 并发拉取
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 将所有基金的抓取任务提交到线程池
+        futures = [executor.submit(_process_single_fund, code) for code in codes_to_process]
+
+        # 使用 tqdm 包装 as_completed，保持原有的进度条视觉效果
+        for _ in tqdm(as_completed(futures), total=len(codes_to_process), desc="下载进度"):
+            pass
+
+# ====================================================================
+# 净值加工段: 复权净值 → 统计体检 → 单文件流水 → 批量并行汇总
+# ====================================================================
+def calculate_adj_nav(df):
+    """
+    由"单位净值 + 日增长率"累乘还原复权净值。
+    注意: 接口日增长率以百分数计(1.5 表示 1.5%), 故除以 100。
+    ⚠ 保留原口径: 复权因子从首行即计入当日涨幅(cumprod), 首日复权净值=真实净值×(1+r0/100)。
+    """
+    res_df = df.copy()
+    if res_df.empty:
+        return res_df
+    res_df['日增长率'] = pd.to_numeric(res_df['日增长率'], errors='coerce').fillna(0)
+    res_df['复权因子'] = (1 + res_df['日增长率'] / 100).cumprod()
+    first_day_nav = res_df['单位净值'].dropna().iloc[0]
+    res_df['复权净值'] = res_df['复权因子'] * first_day_nav
+    return res_df
+
+
+def calculate_fund_stats(df, fund_name="Unknown", date_col='净值日期', nav_col='单位净值'):
+    """
+    统计单只基金的生命周期与数据质量指标(不做淘汰判断, 仅体检记录)。
+    产出: 活跃天数、真实起止日、缺失率、最长连续零收益(死水)天数。
+    """
+    result = {
+        "fund_name": fund_name, "adj_nav_file": None, "total_active_days": 0,
+        "real_start": None, "real_end": None, "missing_ratio": 0.0, "max_zeros": 0,
+        "max_drawdown": 0.0, "annualized_return": 0.0, "top_10_holdings": "",
+    }
+    if df is None or df.empty or nav_col not in df.columns or date_col not in df.columns:
+        return result
+
+    temp_df = df.copy()
+    temp_df[date_col] = pd.to_datetime(temp_df[date_col])
+    temp_df = (temp_df.sort_values(by=date_col)
+                      .drop_duplicates(subset=[date_col], keep='last')
+                      .set_index(date_col))
+    nav_series = temp_df[nav_col]
+
+    valid_series = nav_series.dropna()
+    if valid_series.empty:
+        return result
+
+    real_start, real_end = valid_series.index[0], valid_series.index[-1]
+    active_series = nav_series.loc[real_start:real_end]
+    total_active_days = len(active_series)
+
+    result["total_active_days"] = total_active_days
+    result["real_start"] = real_start.strftime('%Y-%m-%d')
+    result["real_end"] = real_end.strftime('%Y-%m-%d')
+    if total_active_days > 0:
+        result["missing_ratio"] = float(active_series.isna().sum() / total_active_days)
+
+    # 最长连续零收益(死水)天数: 优先用日增长率, 无则由净值推算
+    if '日增长率' in temp_df.columns:
+        rets = pd.to_numeric(temp_df.loc[real_start:real_end, '日增长率'], errors='coerce').fillna(0)
+    else:
+        rets = active_series.ffill().pct_change().fillna(0.0)
+    is_zero = (rets.abs() < 1e-8).astype(int)
+    max_zeros = is_zero.groupby((is_zero == 0).cumsum()).sum().max()
+    result["max_zeros"] = int(max_zeros) if pd.notna(max_zeros) else 0
+
+    return result
+
+
+def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期',
+                          nav_col='单位净值', head_count=300):
+    """
+    单文件加工流水: 截近 N 行 → 统计指标 → 复权净值 → 年化/回撤 → 前十大持仓。
+    设计为进程池工作单元, 故所有异常在内部吞掉并以空结果兜底, 保证批处理不中断。
+    """
+    fund_name = os.path.basename(file_path).split('_')[0]
+
+    try:
+        df = pd.read_csv(file_path)
+    except Exception:
+        df = pd.DataFrame()
+
+    # 仅保留最近 head_count 行(倒序取头再正序还原)
+    if not df.empty and date_col in df.columns:
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        df = (df.sort_values(by=date_col, ascending=False)
+                .head(head_count).sort_values(by=date_col).reset_index(drop=True))
+
+    result = calculate_fund_stats(df, fund_name=fund_name, date_col=date_col, nav_col=nav_col)
+
+    if not df.empty and date_col in df.columns and nav_col in df.columns:
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.sort_values(by=date_col).reset_index(drop=True)
+        qualified_df = calculate_adj_nav(df)
+
+        # 基于复权净值算年化收益与最大回撤
+        if '复权净值' in qualified_df.columns:
+            adj_series = qualified_df.set_index(date_col)['复权净值'].dropna()
+            if not adj_series.empty and result["total_active_days"] > 0:
+                start_val, end_val = adj_series.iloc[0], adj_series.iloc[-1]
+                years = result["total_active_days"] / 252.0
+                if start_val > 0 and years > 0:
+                    result["annualized_return"] = round(float((end_val / start_val) ** (1 / years) - 1), 6)
+                roll_max = adj_series.cummax()
+                if not roll_max.empty and roll_max.max() > 0:
+                    drawdown = (adj_series - roll_max) / roll_max
+                    result["max_drawdown"] = round(float(drawdown.min()), 6)
+
+        if save_qualified:
+            saved_path = file_path.replace('.csv', '_adj.csv')
+            qualified_df.to_csv(saved_path, index=False, encoding='utf-8-sig')
+            result["adj_nav_file"] = saved_path
+
+    # 前十大持仓: 取最新年份的持仓文件
+    holdings_files = sorted(glob.glob(f"fund_data/holdings/{fund_name}_holdings_*.csv"), reverse=True)
+    if holdings_files:
+        try:
+            hdf = pd.read_csv(holdings_files[0])
+            if '股票名称' in hdf.columns:
+                result["top_10_holdings"] = ",".join(
+                    hdf.head(10)['股票名称'].dropna().astype(str).tolist())
+        except Exception:
+            pass
+
+    return result
+
+
+def judge_fund_df(head_count=CFG_RECENT_DAYS_LIMIT, max_workers=20, force_update=False):
+    """
+    批量加工 fund_data/nav 下所有原始净值 CSV(跳过已生成的 *_adj.csv), 多进程并行,
+    结果汇总落盘 all_funds_result.csv, 并输出统一体检报告。
+    """
+    target_dir = 'fund_data/nav'
+    print(f"【批量加工】扫描目录: [{target_dir}]")
+    if not os.path.exists(target_dir):
+        print("【批量加工】终止 | 原因: [目录不存在, 请先执行采集段]")
+        return
+
+    all_csv_files = glob.glob(os.path.join(target_dir, "*.csv"))
+    if not all_csv_files:
+        print("【批量加工】终止 | 原因: [目录下无任何 CSV 文件]")
+        return
+
+    all_csv_set = set(all_csv_files)
+    # 排除 _adj 文件自身; 非强制更新时跳过已有 _adj 的原始文件
+    files_to_process = [
+        f for f in all_csv_files
+        if not os.path.basename(f).endswith("_adj.csv")
+           and (force_update or (f[:-4] + "_adj.csv") not in all_csv_set)
+    ]
+
+    skipped_count = len(all_csv_files) - len(files_to_process)
+    print(f"  发现文件: [{len(all_csv_files)}] 个 | 待处理: [{len(files_to_process)}] 个 "
+          f"| 跳过(已复权): [{skipped_count}] 个")
+
+    stats = {"processed": 0, "skipped": skipped_count, "error": 0}
+    all_results = []
+
+    if files_to_process:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_fund_pipeline, fp, True, '净值日期', '单位净值', head_count)
+                       for fp in files_to_process]
+            for future in tqdm(as_completed(futures), total=len(futures), desc="处理进度"):
+                try:
+                    result = future.result()
+                    all_results.append(result)
+                    stats["processed" if result.get("adj_nav_file") else "error"] += 1
+                except Exception:
+                    stats["error"] += 1
+
+    if all_results:
+        output_csv = "fund_data/all_funds_result.csv"
+        pd.DataFrame(all_results).to_csv(output_csv, index=False, encoding='utf-8-sig')
+        print(f"【批量加工】汇总已落盘 → [{output_csv}]")
+
+    print("-" * 50)
+    print("【批量加工报告】")
+    print(f"  总文件: [{len(all_csv_files)}] | 成功: [{stats['processed']}] | "
+          f"跳过: [{stats['skipped']}] | 空数/报错: [{stats['error']}]")
+    print("-" * 50)
 
 
 # ====================================================================
@@ -333,7 +737,7 @@ def _compute_worst_rolling_1y_r2(synth_eq_arr, n_days):
 
 
 def _compute_downside_correlation(synth_ret, fund_rets):
-    n_worst = max(5, int(len(synth_ret) * 0.05))
+    n_worst = max(CFG_DOWNSIDE_MIN_DAYS, int(len(synth_ret) * CFG_DOWNSIDE_TAIL_RATIO))
     worst_dates = synth_ret.nsmallest(n_worst).index
     worst_fund_rets = fund_rets.loc[worst_dates]
     if len(worst_fund_rets) <= 3:
@@ -617,7 +1021,7 @@ def _build_downside_corr_matrix(downside_csv):
 
 
 def precompute_correlations(result_csv='fund_data/all_funds_result.csv', corr_csv='fund_data/fund_correlations.csv',
-                            downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv', max_workers=10,
+                            downside_csv='fund_data/fof_evaluation_results_2d_pool3917.csv', max_workers=CFG_GLOBAL_MAX_WORKERS,
                             downside_corr_csv='fund_data/fund_downside_correlations_300.csv', df_filtered=None):
     """
     构建全天候相关性矩阵(命中缓存则直接读取)。
@@ -663,7 +1067,12 @@ def _extract_target_codes(df_filtered):
         lambda x: re.search(r'(\d{6})', str(x)).group(1) if pd.notna(x) and re.search(r'(\d{6})', str(x)) else "000000")
 
 
-def filter_fund_pool(df_results, active_cache='fund_data/active_fund_codes.csv', min_annual_return=0.15, min_day=1000):
+def filter_fund_pool(df_results, active_cache='fund_data/active_fund_codes.csv',
+                     min_annual_return=CFG_BASE_POOL_MIN_CAGR,
+                     min_day=FIXED_MIN_DAY,
+                     missing_ratio_limit=VETO_MISSING_RATIO,
+                     max_zeros_limit=VETO_CONTINUOUS_ZEROS,
+                     min_mdd=CFG_FUND_MIN_MDD):
     """
     基金池初筛: 先过可申购状态白名单, 再过财务硬性指标(天数/年化/缺失率/连续零/回撤)。
     全程记录每只基金的剔除原因, 全新覆盖写入审计文件, 保证可追溯。
@@ -717,12 +1126,12 @@ def filter_fund_pool(df_results, active_cache='fund_data/active_fund_codes.csv',
             return f"运行天数不足, 当前{row['total_active_days']}天, 目标>{min_day}天。"
         if not (row['annualized_return'] > min_annual_return):
             return f"年化收益不达标, 当前{row['annualized_return'] * 100:.2f}%, 目标>{min_annual_return * 100:.2f}%。"
-        if not (row['missing_ratio'] <= 0.05):
-            return f"数据缺失率过高, 当前{row['missing_ratio'] * 100:.2f}%, 目标<=5.00%。"
-        if not (row['max_zeros'] < 10):
-            return f"连续零收益异常, 当前最大连续{row['max_zeros']}天, 目标<10天。"
-        if not (row['max_drawdown'] > -0.7):
-            return f"最大回撤击穿底线, 当前{row['max_drawdown'] * 100:.2f}%, 目标>-70.00%。"
+        if not (row['missing_ratio'] <= missing_ratio_limit):
+            return f"数据缺失率过高, 当前{row['missing_ratio'] * 100:.2f}%, 目标<={missing_ratio_limit * 100:.2f}%。"
+        if not (row['max_zeros'] < max_zeros_limit):
+            return f"连续零收益异常, 当前最大连续{row['max_zeros']}天, 目标<{max_zeros_limit}天。"
+        if not (row['max_drawdown'] > min_mdd):
+            return f"最大回撤已击穿底线, 当前{row['max_drawdown'] * 100:.2f}%, 目标>{min_mdd * 100:.2f}%。"
         return ""
 
     df_filtered['剔除原因'] = df_filtered.apply(_get_reject_reason, axis=1)
@@ -732,7 +1141,7 @@ def filter_fund_pool(df_results, active_cache='fund_data/active_fund_codes.csv',
         "年化收益不达标": df_filtered['剔除原因'].str.startswith("年化收益不达标").sum(),
         "数据缺失率过高": df_filtered['剔除原因'].str.startswith("数据缺失率过高").sum(),
         "连续零收益异常": df_filtered['剔除原因'].str.startswith("连续零收益异常").sum(),
-        "最大回撤已击穿底线": df_filtered['剔除原因'].str.startswith("最大回撤击穿底线").sum()
+        "最大回撤已击穿底线": df_filtered['剔除原因'].str.startswith("最大回撤已击穿底线").sum()
     }
 
     rejected_metrics = df_filtered[df_filtered['剔除原因'] != ""]
@@ -929,8 +1338,10 @@ def fast_estimate_combos(N, seeds_list, strict_mode=True):
     return total_count
 
 
-def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
-                                         target_max=55000000, strict_mode=True):
+def calculate_dynamic_k_by_binary_search(N, candidate_list,
+                                         target_min=int(CFG_DIM_UPGRADE_TARGET_COMBOS * 0.9),
+                                         target_max=int(CFG_DIM_UPGRADE_TARGET_COMBOS * 1.1),
+                                         strict_mode=True):
     """
     在候补种子队列上寻找最优截留数 K, 使升维后的理论生成量落入目标区间。
     采用"对数空间插值 + 自适应阻尼步进", 契合组合数非线性爆炸特性, 避免全量试算的算力黑洞。
@@ -1042,7 +1453,7 @@ def calculate_dynamic_k_by_binary_search(N, candidate_list, target_min=45000000,
     return best_k, best_count
 
 
-def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=1000000):
+def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_max_combos=CFG_DIM_UPGRADE_TARGET_COMBOS):
     """
     从上一维(prev_dim)历史结果中提炼优质种子供升维。
     漏斗: 卡玛门槛 → Base Pool 归属过滤+乱序归一化 → 全局去重 → Total_Score/CAGR 优先级排序
@@ -1068,11 +1479,8 @@ def get_previous_good_combos(prev_dim, base_pool_codes_set, target_dim, target_m
             total_read_rows += len(df)
 
             df = df[df['Calmar_Ratio'] > df['Calmar_Baseline']]  # 门槛1: 卡玛基准
-            # 输出通过的比例
             print(f"[升维/读取] 文件:[{os.path.basename(pf)}] | 读取行数:[{len(df):,}] | "
                   f"通过卡玛门槛:[{len(df) / total_read_rows * 100:.2f}%]")
-
-
 
             passed_calmar_count += len(df)
             if df.empty:
@@ -1185,53 +1593,208 @@ def generate_next_dimension_combos_apriori(N, good_prev_combos, computed_set, st
     return uncomputed_combos, total_combos, global_skipped
 
 
-def read_json(json_path):
+# ====================================================================
+# FOF 择优段: 多维加载 → 白名单过滤 → 复合打分 → 生成可读组合名
+# ====================================================================
+def load_and_merge_parquet_by_dim(dimension, data_dir='fund_data', min_days=600,
+                                  min_score=None, filter_code=None):
     """
-    读取 JSON 文件并返回内容。
-
-    Args:
-        json_path (str): JSON 文件的路径。
-
-    Returns:
-        dict: 解析后的 JSON 内容。
+    加载并合并某维度(如 2/3/5)的所有 FOF 组合评估 Parquet, 在硬盘读取阶段即过滤,
+    最终按 Total_Score 降序返回。异常时自动降级为逐文件安全加载。
     """
-    if not os.path.exists(json_path):
-        return {}
+    search_pattern = os.path.join(data_dir, f'fof_evaluation_results_{dimension}d_*.parquet')
+    file_list = glob.glob(search_pattern)
+    if not file_list:
+        print(f"【Parquet加载】跳过 | 维度: [{dimension}d] | 原因: [未找到匹配文件] | 路径: {search_pattern}")
+        return pd.DataFrame()
 
-    with open(json_path, 'r', encoding='utf-8') as f:
-        try:
-            data = json.load(f)
-            return data
-        except json.JSONDecodeError as e:
-            raise ValueError(f"无法解析 JSON 文件 '{json_path}': {e}")
+    print(f"【Parquet加载】维度: [{dimension}d] | 命中文件: [{len(file_list)}] 个 | 启动谓词下推加载...")
+
+    read_filters = [('Total_Days', '>', min_days)]
+    if min_score is not None:
+        read_filters.append(('Total_Score', '>', min_score))
+
+    try:
+        df = pd.read_parquet(file_list, engine='pyarrow', filters=read_filters)
+        if filter_code is not None:
+            df = df[df['组合文件名'].str.contains(filter_code, na=False)]
+    except Exception as e:
+        print(f"【Parquet加载】批量并发失败, 触发逐文件降级 | 可能原因: [个别文件损坏/字段不一致] | 详情: {e}")
+        dfs = []
+        for file in file_list:
+            try:
+                df_part = pd.read_parquet(file, engine='pyarrow', filters=read_filters)
+                if not df_part.empty:
+                    dfs.append(df_part)
+            except Exception as ex:
+                print(f"  【跳过】损坏文件: [{os.path.basename(file)}] | 详情: {ex}")
+        if not dfs:
+            print(f"【Parquet加载】维度: [{dimension}d] 全部读取失败或无符合条件数据。")
+            return pd.DataFrame()
+        df = pd.concat(dfs, ignore_index=True)
+
+    if df.empty:
+        print(f"【Parquet加载】维度: [{dimension}d] 加载完成, 但硬盘级过滤后无留存组合。")
+        return df
+
+    df = df.sort_values(by='Total_Score', ascending=False).reset_index(drop=True)
+    print(f"【Parquet加载】维度: [{dimension}d] 合并完成 | 过滤后留存: [{len(df):,}] 个组合")
+    return df
 
 
-def save_json(json_path, data):
-    dir_path = os.path.dirname(json_path)
-    if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
+def get_blacklisted_fund_codes(df):
+    """
+    按人工维护的"主动债黑名单"检索命中行, 返回其 6 位代码列表, 并报告未匹配到的黑名单词。
+    Why: 这些主动债 QDII/久期暴露基金不适合进入被动化 FOF 组合。
+    """
+    original_size = len(df)
+    df_work = df.copy()
+    df_work['基金代码'] = df_work['基金代码'].astype(str).str.split('.').str[0].str.zfill(6)
 
-    # 锁文件通常以 .lock 结尾
-    lock_path = json_path + ".lock"
-    tmp_path = json_path + ".tmp"
-    with open(tmp_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4, default=str)
-    os.replace(tmp_path, json_path)
+    matched_names = set()
+    mask_is_blacklisted = pd.Series(False, index=df_work.index)
+    for bad_name in CFG_ACTIVE_FUNDS_BLACKLIST:
+        current_match = df_work['基金简称'].astype(str).str.contains(bad_name, regex=False, na=False)
+        if current_match.any():
+            matched_names.add(bad_name)
+            mask_is_blacklisted = mask_is_blacklisted | current_match
+
+    unmatched_names = [n for n in CFG_ACTIVE_FUNDS_BLACKLIST if n not in matched_names]
+    blacklisted_codes = df_work[mask_is_blacklisted]['基金代码'].unique().tolist()
+
+    print("【黑名单提取报告】")
+    print(f"  检索词: [{len(CFG_ACTIVE_FUNDS_BLACKLIST)}] 个 | 输入行: [{original_size}] | "
+          f"命中行: [{int(mask_is_blacklisted.sum())}] | 返回代码: [{len(blacklisted_codes)}] 个")
+    if unmatched_names:
+        print(f"  【提示】未匹配到的黑名单词 [{len(unmatched_names)}] 个(可能已清盘或改名):")
+        for name in unmatched_names:
+            print(f"    - {name}")
+    else:
+        print("  ✅ 所有黑名单词均已成功匹配。")
+
+    return blacklisted_codes
+
+
+def _simplify_fund_name(name):
+    """把冗长的官方基金全称压缩为便于人眼识别的核心简称。"""
+    if not isinstance(name, str):
+        return name
+    name = re.sub(r'\(.*?\)|（.*?）', '', name)  # 去括号及内容
+    redundant_words = ['ETF联接', '联接', 'ETF', 'LOF', 'QDII', '灵活配置', '多策略',
+                       '混合型', '混合', '指数增强', '增强型', '指数', '发起式',
+                       '人民币份额', '人民币', '证券投资基金']
+    name = re.sub('|'.join(redundant_words), '', name)
+    name = re.sub(r'[A-Z]$', '', name)  # 去末尾份额字母
+    return name
+
+
+def analyze_fof_combinations(report_path='fund_data/base_pool_rejection_reasons.csv',
+                             active_code_path='fund_data/active_fund_codes.csv',
+                             dims=tuple(range(2, CFG_MAX_DIMENSION + 1)),
+                             min_days=CFG_RECENT_DAYS_LIMIT,
+                             min_cagr=CFG_FINAL_FOF_MIN_CAGR,
+                             VALID_FUND_CODES=[]):
+    """
+    输出按复合分排序、且包含海外配置的 FOF 组合候选表。
+    数据流: base_pool 提供全体代码域 → active_code 提供名称/海外标签 →
+            Parquet 提供组合评估指标 → 白名单交集过滤 → 打分排序 → 翻译成可读组合名。
+    """
+    print("\n" + "=" * 55)
+    print("【FOF择优】启动组合分析流程")
+    print("=" * 55)
+
+    report_df = pd.read_csv(report_path)
+    active_code_df = pd.read_csv(active_code_path)
+
+    # 海外基金代码集合(QDII/海外), 用于最终标记
+    overseas_mask = active_code_df['基金类型'].str.contains('QDII|海外', na=False)
+    overseas_set = set(active_code_df[overseas_mask]['基金代码'].astype(str).str.zfill(6).tolist())
+
+    # 以 active_code 为右表对齐, 从 report 的"文件"列抽取全体 6 位代码域
+    report_df = report_df.merge(active_code_df, on='基金代码', how='right')
+    all_codes = report_df['文件'].str.extract(r'(\d{6})')[0].dropna().unique().tolist()
+
+    valid_codes = set(str(c).zfill(6) for c in VALID_FUND_CODES)
+    invalid_set = set(all_codes) - valid_codes
+    print(f"【FOF择优】代码域: [{len(all_codes)}] | 白名单: [{len(valid_codes)}] | 判为无效: [{len(invalid_set)}]")
+
+    # 加载各维度组合, Total_Score 放大后合并, 仅留 CAGR>min_cagr 的组合
+    all_df_list = []
+    for dim in dims:
+        df_dim = load_and_merge_parquet_by_dim(dimension=dim, min_days=min_days, min_score=0)
+        if df_dim.empty:
+            continue
+        df_dim['Total_Score'] = df_dim['Total_Score'] * 10000
+        df_dim = df_dim[df_dim['CAGR'] > min_cagr].reset_index(drop=True)
+        all_df_list.append(df_dim)
+
+    if not all_df_list:
+        print("【FOF择优】终止 | 原因: [各维度均无符合 CAGR 条件的组合]")
+        return pd.DataFrame()
+
+    all_df = pd.concat(all_df_list, ignore_index=True)
+    all_df = all_df.sort_values(by='Total_Score', ascending=False).reset_index(drop=True)
+    print(f"【FOF择优】合并完成 | 原始组合: [{len(all_df):,}] 条 | 时间: {datetime.now():%Y-%m-%d %H:%M:%S}")
+
+    # 剔除任何包含无效代码的组合(内联高速过滤: 预编译正则 + set 无交集判定)
+    start_time = time.time()
+    if invalid_set:
+        pattern = re.compile(r'\d{6}')
+        mask = [invalid_set.isdisjoint(pattern.findall(fn)) if type(fn) is str else False
+                for fn in all_df['组合文件名'].tolist()]
+        all_df_filter = all_df[mask].reset_index(drop=True)
+    else:
+        all_df_filter = all_df.copy()
+    print(f"【FOF择优】白名单过滤 | 过滤前: [{len(all_df)}] → 过滤后: [{len(all_df_filter)}] "
+          f"(剔除 [{len(all_df) - len(all_df_filter):,}]) | 耗时: <{time.time() - start_time:.2f}s>")
+
+    # 复合打分: 强化 CAGR 权重((CAGR*10)^3 * Total_Score) 后排序, 附加辅助评分列
+    all_df_filter['score'] = (all_df_filter['CAGR'] * 10) ** 3 * all_df_filter['Total_Score']
+    all_df_filter = all_df_filter.sort_values(by='score', ascending=False).reset_index(drop=True)
+    all_df_filter['calmar_diff'] = all_df_filter['Calmar_Ratio'] - all_df_filter['Calmar_Baseline']
+
+    # 把组合代码翻译成"人类可读组合名"(简称拼接), 并提到首列
+    padded_active_codes = active_code_df['基金代码'].astype(str).str.zfill(6)
+    code_to_name = dict(zip(padded_active_codes, active_code_df['基金简称'].apply(_simplify_fund_name)))
+    all_df_filter['基金简称组合'] = [
+        '_'.join([str(code_to_name.get(c, c)) for c in fn.split('_')]) if type(fn) is str else fn
+        for fn in all_df_filter['组合文件名'].tolist()
+    ]
+    all_df_filter.insert(0, '基金简称组合', all_df_filter.pop('基金简称组合'))
+
+    # 定位类字段挪到末尾, 便于阅读
+    tail_cols = ['组合文件名', 'Start_Date', 'End_Date', 'Total_Days']
+    cols = [c for c in all_df_filter.columns if c not in tail_cols] + \
+           [c for c in tail_cols if c in all_df_filter.columns]
+    all_df_filter = all_df_filter[cols]
+
+    # 派生指标: 组合基金数量、下行相关性惩罚下的多套评分
+    all_df_filter['组合数量'] = all_df_filter['组合文件名'].apply(
+        lambda x: len(str(x).split('_')) if type(x) is str else 0)
+    dc = all_df_filter['Downside_Correlation']
+    all_df_filter['score_corr_down'] = all_df_filter['Total_Score'] / (dc + 1)
+    all_df_filter['score_corr_down1'] = all_df_filter['score'] / (dc + 1)
+    all_df_filter['score_corr_down2'] = all_df_filter['Total_Score'] / (dc + 2)
+    all_df_filter['score_corr_down3'] = all_df_filter['score'] / (dc + 2)
+
+    # 标记并仅保留含海外基金的组合(海外配置视角)
+    all_df_filter['包含海外基金'] = all_df_filter['组合文件名'].apply(
+        lambda x: any(c in overseas_set for c in str(x).split('_')))
+    result_df = all_df_filter[all_df_filter['包含海外基金']].reset_index(drop=True)
+
+    print(f"【FOF择优】完成 | 候选组合: [{len(all_df_filter)}] → 含海外组合: [{len(result_df)}]")
+    print("=" * 55 + "\n")
+    return all_df_filter
+
 
 # ====================================================================
-# 主流程: 初始化 Base Pool → 维度爬坡评估
+# 回测主流程: 初始化 Base Pool → 维度爬坡评估
 # ====================================================================
 def run_backest_process():
-    """
-    进行回测
-    :return: 
-    """
-    GLOBAL_MAX_WORKERS = 30
+    """进行回测: 生成唯一 Base Pool, 逐维(2→MAX)裂变评估并落盘结果。"""
     RESULT_CSV = 'fund_data/all_funds_result.csv'
     CORR_CSV = 'fund_data/fund_correlations_300.csv'
     DOWNSIDE_CSV = 'fund_data/fof_evaluation_results_2d_pool3917.csv'
-
-    MAX_DIMENSION = 3    # 最高评估维度
 
     _warmup_numba()
 
@@ -1242,7 +1805,7 @@ def run_backest_process():
         exit(0)
 
     df_results = pd.read_csv(RESULT_CSV)
-    df_filtered = filter_fund_pool(df_results, min_annual_return=0.5, min_day=FIXED_MIN_DAY)
+    df_filtered = filter_fund_pool(df_results, min_annual_return=CFG_BASE_POOL_MIN_CAGR, min_day=FIXED_MIN_DAY)
     if df_filtered.empty:
         log("[主流程/初始化] 符合基础要求的基金数量为 0, 流程退出。", level='WARN')
         exit(0)
@@ -1253,16 +1816,16 @@ def run_backest_process():
 
     global_corr_matrix, global_downside_corr_matrix = precompute_correlations(
         result_csv=RESULT_CSV, corr_csv=CORR_CSV, downside_csv=ACTUAL_DOWNSIDE_CSV,
-        max_workers=GLOBAL_MAX_WORKERS, df_filtered=df_filtered)
+        max_workers=CFG_GLOBAL_MAX_WORKERS, df_filtered=df_filtered)
 
     if global_corr_matrix.empty:
         base_pool_files = df_filtered['adj_nav_file'].dropna().tolist()
     else:
         log("[主流程/去相关] 启动相关性优胜劣汰过滤...")
         base_pool_files = _greedy_correlation_filter(
-            df_filtered, global_corr_matrix, global_downside_corr_matrix, 0.95, 0.75)
+            df_filtered, global_corr_matrix, global_downside_corr_matrix, CFG_CORR_THRESHOLD, CFG_DOWNSIDE_CORR_THRESHOLD)
 
-    master_df, base_pool_codes = _build_master_matrix(base_pool_files, GLOBAL_MAX_WORKERS)
+    master_df, base_pool_codes = _build_master_matrix(base_pool_files, CFG_GLOBAL_MAX_WORKERS)
     base_pool_codes_set = set(base_pool_codes)
     print(base_pool_codes)
     save_json("base_pool_codes.json", base_pool_codes)
@@ -1279,7 +1842,7 @@ def run_backest_process():
 
     # 步骤 2: 维度爬坡循环 (N = 2 起逐级向上)
     N = 2
-    while N <= MAX_DIMENSION:
+    while N <= CFG_MAX_DIMENSION:
         print(f"\n{'#' * 70}")
         log(f"[爬坡引擎] 🚀 开始生成与评估 | 维度:【{N}D】 FOF 组合")
         print(f"{'#' * 70}")
@@ -1295,7 +1858,7 @@ def run_backest_process():
         good_prev_combos = set()
         if N > 2:
             good_prev_combos = get_previous_good_combos(
-                N - 1, base_pool_codes_set, target_dim=N, target_max_combos=50000000)
+                N - 1, base_pool_codes_set, target_dim=N, target_max_combos=CFG_DIM_UPGRADE_TARGET_COMBOS)
             log(f"[爬坡/种子] 自【{N - 1}D】提取优秀种子:[{len(good_prev_combos):,}] 个")
             if not good_prev_combos:
                 log(f"[爬坡/终止] 无【{N - 1}D】优秀组合, 失去升维裂变能力, 算法自然终止。", level='WARN')
@@ -1320,7 +1883,7 @@ def run_backest_process():
             uncomputed_combos, total_combos, global_skipped = generate_next_dimension_combos_apriori(
                 N=N, good_prev_combos=good_prev_combos, computed_set=computed_set, strict_mode=True)
 
-        # 【Bug 修复】: 先判空再打印占比, 避免 total_combos=0 时的 ZeroDivisionError
+        # 先判空再打印占比, 避免 total_combos=0 时的 ZeroDivisionError
         if total_combos == 0:
             log(f"[爬坡/裂变] 生成的待评估组合数量为 0 | 维度:【{N}D】 (流程结束)", level='WARN')
             break
@@ -1339,7 +1902,7 @@ def run_backest_process():
         global_computed = 0
 
         # 2.4 并行批处理评估并流式落盘
-        with ProcessPoolExecutor(max_workers=GLOBAL_MAX_WORKERS,
+        with ProcessPoolExecutor(max_workers=CFG_GLOBAL_MAX_WORKERS,
                                  initializer=_init_worker,
                                  initargs=(master_df,)) as executor:
             with tqdm(total=total_combos, desc=f"计算 {N} 维", unit="组") as pbar:
@@ -1380,22 +1943,20 @@ def run_backest_process():
         N += 1  # 向更高维度发起挑战
 
 
+# ====================================================================
+# 主入口: 采集 → 加工 → 回测 → 择优统计
+# ====================================================================
 if __name__ == '__main__':
-    
-    # 原始数据的获取
-    head_count = 50 # 只保留50天交易信息
-    # 删除fund_data目录下面的所有文件
+    # ---- 步骤 1: 清空历史数据, 重新采集原始净值 ----
     if os.path.exists('fund_data'):
         shutil.rmtree('fund_data')
     active_codes = get_active_fund_codes()
-    fetch_and_save_fund_data(active_codes, year="2026", test_mode=False)
-    judge_fund_df(head_count=50, max_workers=20, force_update=True)
+    fetch_and_save_fund_data(active_codes, year=CFG_HOLDINGS_YEAR, test_mode=False, max_workers=1)
+    judge_fund_df(head_count=CFG_RECENT_DAYS_LIMIT, max_workers=CFG_GLOBAL_MAX_WORKERS, force_update=True)
 
-
-    # 进行回测
+    # ---- 步骤 2: 维度爬坡回测 ----
     run_backest_process()
 
-    # 查看统计数据
-    VALID_FUND_CODES = read_json("base_pool_codes.json")
-    fof_candidates = analyze_fof_combinations(dims=(2, 3), min_days=head_count, min_cagr=1.0, VALID_FUND_CODES=VALID_FUND_CODES)
-    
+    # ---- 步骤 3: FOF 择优统计 ----
+    valid_fund_codes = read_json("base_pool_codes.json")
+    fof_candidates = analyze_fof_combinations(VALID_FUND_CODES=valid_fund_codes)

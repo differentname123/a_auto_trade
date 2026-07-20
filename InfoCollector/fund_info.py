@@ -9,7 +9,7 @@
 #      - fund_data/nav/*.csv               单只基金历史净值(含单位净值/日增长率)
 #      - fund_data/holdings/*_holdings_*.csv 单只基金分季重仓股
 #      - fund_data/*.parquet               各维度(2d/3d/5d)FOF组合评估结果
-#      - temp/active_fund_codes.csv         基金代码/简称/类型映射(采集段产物)
+#      - fund_data/active_fund_codes.csv         基金代码/简称/类型映射(采集段产物)
 #      - fund_data/base_pool_rejection_reasons.csv 基础池剔除归因(含"文件"列)
 #
 # 【数据流转/交互】
@@ -35,77 +35,12 @@ from datetime import datetime
 import pandas as pd
 import akshare as ak
 from tqdm import tqdm
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # -----------------------------------------------------------------------------
 # 业务白名单：经人工回测验证、允许进入 FOF 组合的基金代码(纯数字, 后续统一补零到6位)。
 # 属于业务数据资产, 原样保留。
 # -----------------------------------------------------------------------------
-VALID_FUND_CODES = [
-    20, 61, 66, 73, 166, 173, 209, 263, 354, 409, 411, 457, 458, 462, 496, 513,
-    522, 524, 586, 592, 598, 601, 609, 612, 619, 646, 688, 689, 697, 714, 717,
-    800, 805, 823, 828, 845, 927, 935, 979, 1000, 1009, 1039, 1053, 1069, 1070,
-    1072, 1075, 1076, 1103, 1105, 1128, 1144, 1152, 1154, 1156, 1158, 1162, 1173,
-    1184, 1188, 1194, 1198, 1210, 1216, 1227, 1239, 1245, 1261, 1268, 1297, 1302,
-    1313, 1365, 1370, 1387, 1396, 1398, 1402, 1404, 1411, 1416, 1437, 1471, 1475,
-    1476, 1496, 1521, 1532, 1534, 1538, 1607, 1613, 1672, 1678, 1702, 1707, 1709,
-    1712, 1731, 1741, 1744, 1749, 1753, 1759, 1808, 1816, 1856, 1869, 1877, 1892,
-    1933, 1959, 1985, 2064, 2083, 2095, 2125, 2145, 2149, 2160, 2244, 2251, 2256,
-    2272, 2281, 2289, 2292, 2345, 2367, 2376, 2407, 2420, 2446, 2450, 2482, 2563,
-    2577, 2692, 2707, 2770, 2776, 2860, 2861, 2862, 2863, 2885, 2893, 2900, 2910,
-    2939, 3025, 3131, 3145, 3304, 3567, 3586, 3626, 3659, 3670, 3745, 3853, 3857,
-    3961, 4128, 4148, 4183, 4332, 4352, 4374, 4390, 4434, 4497, 4616, 4641, 4666,
-    4671, 4677, 4784, 4833, 4890, 5001, 5009, 5028, 5037, 5041, 5090, 5136, 5161,
-    5186, 5251, 5268, 5299, 5310, 5328, 5343, 5472, 5482, 5537, 5544, 5550, 5571,
-    5628, 5660, 5668, 5682, 5700, 5711, 5726, 5729, 5774, 5775, 5777, 5819, 5825,
-    5826, 5844, 5939, 5962, 5977, 5983, 6025, 6154, 6195, 6230, 6250, 6270, 6374,
-    6429, 6430, 6502, 6522, 6551, 6615, 6736, 6769, 6813, 6863, 6864, 6868, 6887,
-    6969, 6976, 7074, 7113, 7119, 7133, 7146, 7203, 7277, 7449, 7497, 7527, 7639,
-    7674, 7775, 8009, 8020, 8065, 8072, 8082, 8085, 8185, 8186, 8251, 8264, 8381,
-    8382, 8555, 8633, 8635, 8638, 8655, 8671, 8903, 8949, 8962, 8980, 8983, 8988,
-    9008, 9023, 9025, 9048, 9055, 9062, 9188, 9234, 9318, 9394, 9402, 9486, 9488,
-    9640, 9644, 9651, 9715, 9808, 9847, 9853, 9855, 9857, 9861, 9899, 9913, 9929,
-    9988, 9989, 9993, 9994, 10020, 10088, 10114, 10147, 10166, 10180, 10202, 10303,
-    10313, 10335, 10371, 10389, 10415, 10421, 10495, 10622, 10662, 10730, 10761,
-    10792, 10807, 10808, 10826, 10925, 10936, 11011, 11030, 11035, 11056, 11122,
-    11144, 11186, 11196, 11264, 11269, 11369, 11377, 11446, 11488, 11599, 11603,
-    11637, 11800, 11815, 11828, 11884, 11888, 11956, 12093, 12098, 12102, 12147,
-    12188, 12198, 12200, 12223, 12243, 12294, 12301, 12319, 12445, 12454, 12477,
-    12491, 12493, 12500, 12530, 12545, 12696, 12844, 12846, 12850, 12920, 12925,
-    13000, 13085, 13103, 13107, 13175, 13238, 13242, 13250, 13296, 13341, 13365,
-    13383, 13389, 13469, 13495, 13674, 13693, 13755, 13842, 13855, 13886, 13910,
-    13942, 13958, 14144, 14175, 14185, 14189, 14191, 14254, 14267, 14287, 14292,
-    14299, 14319, 14352, 14401, 14416, 14478, 14488, 14526, 14541, 14545, 14558,
-    14600, 14647, 14736, 14807, 14818, 14825, 14854, 15035, 15079, 15145, 15192,
-    15229, 15368, 15381, 15527, 15699, 15703, 15724, 15749, 15789, 15842, 15904,
-    15967, 15970, 16045, 16097, 16105, 16117, 16122, 16165, 16182, 16183, 16237,
-    16243, 16250, 16305, 16340, 16388, 16485, 16568, 16605, 16623, 16664, 16703,
-    16772, 16873, 17036, 17073, 17075, 17192, 17234, 17471, 17483, 17488, 17547,
-    17549, 17551, 17602, 17639, 17667, 17730, 17737, 17744, 17746, 17751, 17794,
-    17824, 17835, 17876, 17878, 17960, 17987, 18000, 18019, 18122, 18194, 18229,
-    18244, 18287, 18358, 18375, 18418, 18430, 18442, 18504, 18547, 18554, 18611,
-    18730, 18790, 18796, 18815, 18835, 18865, 18868, 18876, 18910, 18916, 18918,
-    18926, 18956, 18983, 18993, 18999, 19006, 19119, 19155, 19219, 19226, 19281,
-    19293, 19336, 19347, 19367, 19374, 19410, 19426, 19431, 19447, 19612, 19702,
-    19759, 19765, 19767, 19820, 19829, 19888, 20010, 20018, 20064, 20416, 20424,
-    20433, 20440, 20469, 20553, 20560, 20661, 20685, 20722, 20755, 20821, 20975,
-    21033, 21145, 21278, 21382, 21431, 21510, 21593, 21623, 21626, 21642, 21647,
-    21730, 21792, 21875, 21967, 22003, 22028, 22299, 22311, 22334, 22364, 22490,
-    22704, 22717, 22754, 23044, 23135, 23298, 23397, 23407, 23451, 23461, 23518,
-    23524, 23532, 23632, 23638, 23651, 23765, 23782, 23851, 23859, 23875, 23889,
-    23907, 23954, 23989, 23990, 24020, 24059, 40001, 40021, 40025, 50004, 50014,
-    90012, 100055, 100060, 110005, 110009, 110010, 110012, 110015, 160220, 160324,
-    160605, 160638, 160642, 160722, 161133, 161217, 161606, 161610, 161728, 161910,
-    162201, 162703, 163116, 163411, 163818, 164205, 164212, 166301, 167002, 168002,
-    169101, 169105, 180031, 200001, 200012, 202023, 202027, 210004, 217020, 240011,
-    257070, 270028, 290008, 320001, 320006, 320016, 340006, 350007, 377240, 410001,
-    410006, 410009, 457001, 460007, 470009, 481001, 481010, 481015, 501015, 501026,
-    501064, 501073, 501085, 501096, 501097, 501200, 501201, 501205, 501210, 501226,
-    519025, 519026, 519029, 519089, 519095, 519158, 519172, 519183, 519195, 519644,
-    519674, 519679, 519688, 519704, 519766, 519770, 519773, 519929, 519935, 530019,
-    539002, 540010, 570001, 570008, 580006, 582003, 610006, 630006, 630010, 630011,
-    630016, 660015, 673060, 673141, 740001, 952099, 959991,
-]
 
 
 # -----------------------------------------------------------------------------
@@ -207,7 +142,8 @@ def get_active_fund_codes():
     拉取全市场基金, 仅保留申购状态可买入的基金, 输出 {代码: 简称} 字典。
     Why: 已清盘/封闭期的基金无法建仓, 提前剔除避免后续无效抓取。
     """
-    cache_file = 'temp/active_fund_codes.csv'
+    create_folders()
+    cache_file = 'fund_data/active_fund_codes.csv'
 
     print("【采集-基础信息】正在拉取全市场基金列表...")
     df_all = ak.fund_name_em()
@@ -244,14 +180,16 @@ def get_active_fund_codes():
 # -----------------------------------------------------------------------------
 # 采集段-2: 逐只下载历史净值与重仓股。断点续传, 空/异常数据建空文件占位防重复请求。
 # -----------------------------------------------------------------------------
-def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
+def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False, fetch_holdings=False):
     """遍历基金字典 {code: name}, 抓取净值走势与重仓股并落盘。"""
     all_codes_list = list(fund_codes.keys())
     codes_to_process = all_codes_list[:5] if test_mode else all_codes_list
     mode_tag = '测试模式(前5只)' if test_mode else '全量'
     print(f"\n【采集-下载】启动 | 模式: [{mode_tag}] | 计划处理: [{len(codes_to_process)}] 只")
 
-    for code in tqdm(codes_to_process, desc="下载进度"):
+    # 将原 for 循环内部逻辑提取为独立的单任务函数
+    # 借助闭包特性，直接使用外部的 fund_codes, year, fetch_holdings 等变量
+    def _process_single_fund(code):
         fund_name = fund_codes[code]
 
         # 净值走势: 仅当本地无文件时才请求
@@ -268,18 +206,28 @@ def fetch_and_save_fund_data(fund_codes, year="2024", test_mode=False):
                 tqdm.write(f"【跳过-净值】抓取失败 | 基金: [{code} {fund_name}] | 可能原因: [无净值数据/接口解析异常]")
 
         # 重仓股: 同样断点续传
-        holdings_file = f"fund_data/holdings/{code}_holdings_{year}.csv"
-        if not os.path.exists(holdings_file):
-            try:
-                holdings_df = ak.fund_portfolio_hold_em(symbol=code, date=year)
-                if not holdings_df.empty:
-                    holdings_df.to_csv(holdings_file, index=False, encoding='utf-8-sig')
-                else:
+        if fetch_holdings:
+            holdings_file = f"fund_data/holdings/{code}_holdings_{year}.csv"
+            if not os.path.exists(holdings_file):
+                try:
+                    holdings_df = ak.fund_portfolio_hold_em(symbol=code, date=year)
+                    if not holdings_df.empty:
+                        holdings_df.to_csv(holdings_file, index=False, encoding='utf-8-sig')
+                    else:
+                        open(holdings_file, 'w').close()
+                except Exception:
                     open(holdings_file, 'w').close()
-            except Exception:
-                open(holdings_file, 'w').close()
-                tqdm.write(f"【跳过-重仓股】抓取失败 | 基金: [{code} {fund_name}] | 可能原因: [无持仓披露/接口解析异常]")
+                    tqdm.write(
+                        f"【跳过-重仓股】抓取失败 | 基金: [{code} {fund_name}] | 可能原因: [无持仓披露/接口解析异常]")
 
+    # 启用线程池进行 20 并发拉取
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        # 将所有基金的抓取任务提交到线程池
+        futures = [executor.submit(_process_single_fund, code) for code in codes_to_process]
+
+        # 使用 tqdm 包装 as_completed，保持原有的进度条视觉效果
+        for _ in tqdm(as_completed(futures), total=len(codes_to_process), desc="下载进度"):
+            pass
 
 # -----------------------------------------------------------------------------
 # 加工段: 复权净值计算
@@ -407,7 +355,7 @@ def process_fund_pipeline(file_path, save_qualified=True, date_col='净值日期
     return result
 
 
-def judge_fund_df(head_count=300, max_workers=20):
+def judge_fund_df(head_count=300, max_workers=20, force_update=False):
     """
     批量加工 fund_data/nav 下所有原始净值 CSV(跳过已生成的 *_adj.csv), 多进程并行,
     结果汇总落盘 all_funds_result.csv, 并输出统一体检报告。
@@ -423,9 +371,19 @@ def judge_fund_df(head_count=300, max_workers=20):
         print("【批量加工】终止 | 原因: [目录下无任何 CSV 文件]")
         return
 
-    files_to_process = [f for f in all_csv_files if not os.path.basename(f).endswith("_adj.csv")]
+    # 为了提高校验效率，将所有文件路径转为集合
+    all_csv_set = set(all_csv_files)
+
+    # 修改后的筛选逻辑：排除 _adj 文件自身，并且在不强制更新时跳过已有 _adj 的原始文件
+    files_to_process = [
+        f for f in all_csv_files
+        if not os.path.basename(f).endswith("_adj.csv")
+           and (force_update or (f[:-4] + "_adj.csv") not in all_csv_set)
+    ]
+
     skipped_count = len(all_csv_files) - len(files_to_process)
-    print(f"  发现文件: [{len(all_csv_files)}] 个 | 待处理: [{len(files_to_process)}] 个 | 跳过(已复权): [{skipped_count}] 个")
+    print(
+        f"  发现文件: [{len(all_csv_files)}] 个 | 待处理: [{len(files_to_process)}] 个 | 跳过(已复权): [{skipped_count}] 个")
 
     stats = {"processed": 0, "skipped": skipped_count, "error": 0}
     all_results = []
@@ -453,7 +411,6 @@ def judge_fund_df(head_count=300, max_workers=20):
     print(f"  总文件: [{len(all_csv_files)}] | 成功: [{stats['processed']}] | "
           f"跳过: [{stats['skipped']}] | 空数/报错: [{stats['error']}]")
     print("-" * 50)
-
 
 # -----------------------------------------------------------------------------
 # 择优段-辅助: 按维度并发加载 Parquet(pyarrow 谓词下推硬盘级过滤), 合并排序。
@@ -570,8 +527,8 @@ def _simplify_fund_name(name):
 
 
 def analyze_fof_combinations(report_path='fund_data/base_pool_rejection_reasons.csv',
-                             active_code_path='temp/active_fund_codes.csv',
-                             dims=(2, 3), min_days=250, min_cagr=1.0):
+                             active_code_path='fund_data/active_fund_codes.csv',
+                             dims=(2, 3), min_days=50, min_cagr=1.0, VALID_FUND_CODES=[]):
     """
     输出按复合分排序、且包含海外配置的 FOF 组合候选表。
     数据流: base_pool 提供全体代码域 → active_code 提供名称/海外标签 →
@@ -629,7 +586,7 @@ def analyze_fof_combinations(report_path='fund_data/base_pool_rejection_reasons.
     # 复合打分: 强化 CAGR 权重((CAGR*10)^3 * Total_Score) 后排序, 附加辅助评分列
     all_df_filter['score'] = (all_df_filter['CAGR'] * 10) ** 3 * all_df_filter['Total_Score']
     all_df_filter = all_df_filter.sort_values(by='score', ascending=False).reset_index(drop=True)
-    all_df_filter['score1'] = all_df_filter['Calmar_Ratio'] - all_df_filter['Calmar_Baseline']
+    all_df_filter['calmar_diff'] = all_df_filter['Calmar_Ratio'] - all_df_filter['Calmar_Baseline']
 
     # 把组合代码翻译成"人类可读组合名"(简称拼接), 并提到首列
     padded_active_codes = active_code_df['基金代码'].astype(str).str.zfill(6)
@@ -662,22 +619,21 @@ def analyze_fof_combinations(report_path='fund_data/base_pool_rejection_reasons.
 
     print(f"【FOF择优】完成 | 候选组合: [{len(all_df_filter)}] → 含海外组合: [{len(result_df)}]")
     print("=" * 55 + "\n")
-    return result_df
+    return all_df_filter
 
 
 # -----------------------------------------------------------------------------
 # 主入口: 择优分析 + 批量净值加工。采集段默认关闭, 需要时解注释即可跑全链路。
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    # ---- 采集段(可选): 首次运行请开启, 建议先 test_mode=True 跑通再切全量 ----
-    create_folders()
+    # # ---- 采集段(可选): 首次运行请开启, 建议先 test_mode=True 跑通再切全量 ----
+    # # 如果要重新跑可以将W:\project\python_project\a_auto_trade\InfoCollector\fund_data 下面全部删除 ，然后直接运行下面三个函数，再运行fund_judge.py就行了
     active_codes = get_active_fund_codes()
-    fetch_and_save_fund_data(active_codes, year="2026", test_mode=True)
+    fetch_and_save_fund_data(active_codes, year="2026", test_mode=False)
+    judge_fund_df(head_count=50, max_workers=20, force_update=True)
 
-    # ---- 择优段: 输出含海外配置的 FOF 候选组合 ----
-    fof_candidates = analyze_fof_combinations(dims=(2, 3), min_days=250, min_cagr=1.0)
-
-    # ---- 加工段: 批量生成复权净值与统计汇总 ----
-    judge_fund_df(head_count=300, max_workers=20)
-
-    print("\n🎉 全部任务执行完毕, 请查看 fund_data 目录。")
+    #
+    # # ---- 择优段: 输出含海外配置的 FOF 候选组合 ----
+    # fof_candidates = analyze_fof_combinations(dims=(2, 3), min_days=50, min_cagr=1.0)
+    #
+    # print("\n🎉 全部任务执行完毕, 请查看 fund_data 目录。")
