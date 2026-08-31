@@ -1564,15 +1564,15 @@ def run_backest_process():
 if __name__ == '__main__':
     log("\n=== 【STAGE 1: 本地资产库清洗重建】 ===")
 
-    # # 放开注释就会删除之前所有的数据，重新拉取最新的数据进行分析，谨慎操作
-    # # if os.path.exists('fund_data'):
-    # #     shutil.rmtree('fund_data')
-    active_codes = get_active_fund_codes()
-    fetch_and_save_fund_data(active_codes, year=CFG_HOLDINGS_YEAR, test_mode=False, max_workers=2)
-    judge_fund_df(head_count=CFG_RECENT_DAYS_LIMIT, max_workers=CFG_GLOBAL_MAX_WORKERS, force_update=True)
-
-    log("\n=== 【STAGE 2: 高维组合推演及记忆挂载】 ===")
-    run_backest_process()
+    # # # 放开注释就会删除之前所有的数据，重新拉取最新的数据进行分析，谨慎操作
+    # if os.path.exists('fund_data'):
+    #     shutil.rmtree('fund_data')
+    # active_codes = get_active_fund_codes()
+    # fetch_and_save_fund_data(active_codes, year=CFG_HOLDINGS_YEAR, test_mode=False, max_workers=1)
+    # judge_fund_df(head_count=CFG_RECENT_DAYS_LIMIT, max_workers=CFG_GLOBAL_MAX_WORKERS, force_update=True)
+    #
+    # log("\n=== 【STAGE 2: 高维组合推演及记忆挂载】 ===")
+    # run_backest_process()
 
     log("\n=== 【STAGE 3: 择优决断与输出排期】 ===")
     valid_fund_codes = read_json("fund_data/base_pool_codes.json")
